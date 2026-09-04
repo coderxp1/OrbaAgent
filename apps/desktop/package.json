@@ -1,0 +1,18 @@
+{
+  "name": "@orbaagent/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "echo 'Tauri desktop dev placeholder'",
+    "build": "echo 'Tauri desktop build placeholder'",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@orbaagent/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.5",
+    "typescript": "^5.7.3"
+  }
+}
