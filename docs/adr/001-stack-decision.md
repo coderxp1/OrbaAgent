@@ -24,20 +24,20 @@ OrbaAgent requires a robust, modular, and high-performance foundation capable of
 ## Considered Options
 
 ### 1. Monorepo & Build Tooling
-- **Chosen: pnpm + Turborepo.** pnpm provides content-addressable storage, strict non-flat `node_modules` preventing phantom dependencies, and first-class workspace support. Turborepo provides pipeline orchestration and intelligent task caching.
-- *Rejected: npm/yarn workspaces, Nx.* npm/yarn allow phantom dependency leaks; Nx introduces extensive framework-level lock-in and configuration overhead.
+- **Chosen: pnpm workspaces.** pnpm provides content-addressable storage, strict non-flat `node_modules` preventing phantom dependencies, and first-class workspace support without external daemon overhead.
+- *Rejected: npm/yarn workspaces, Nx, Turborepo.* npm/yarn allow phantom dependency leaks; Nx and Turborepo add native binary dependencies that complicate multi-platform builds.
 
 ### 2. Code Quality & Formatting
 - **Chosen: Biome.** Single Rust binary providing sub-second linting, formatting, and import sorting.
 - *Rejected: ESLint + Prettier.* Heavy plugin sprawl, version conflicts, high CI execution latency.
 
 ### 3. Web & Desktop Applications
-- **Web App: Next.js (App Router, React, TypeScript).** Modern web foundation, server and client component flexibility, rich ecosystem.
+- **Web App: Next.js 15.5+ (App Router, React 19, TypeScript).** Modern web foundation, server and client component flexibility, rich ecosystem. Next.js 15 is the active production major release (Next.js 16 is not yet stable/released).
 - **Desktop App: Tauri.** Compiles to native binary utilizing the host OS webview; drastically lower RAM/disk footprint (~30MB vs ~150MB+).
 - *Rejected: Electron.* High memory consumption and bundled Chromium overhead. Will only be revisited if webview rendering parity becomes a proven blocker across Linux distributions.
 
 ### 4. Core Backend API
-- **Chosen: Fastify + Zod Type Provider.** Extremely fast HTTP throughput, built-in schema-based serialization, native async/await, thin HTTP layer where validation is derived directly from shared Zod schemas.
+- **Chosen: Fastify 5.x + Zod Type Provider.** Extremely fast HTTP throughput, built-in schema-based serialization, native async/await, thin HTTP layer where validation is derived directly from shared Zod schemas.
 - *Rejected: NestJS.* NestJS introduces an enterprise OOP dependency-injection architecture and decorator-heavy boilerplate that obscures domain logic. Business logic belongs in decoupled packages, not DI controller trees.
 
 ### 5. Database & ORM
@@ -52,8 +52,8 @@ OrbaAgent requires a robust, modular, and high-performance foundation capable of
 - **Chosen: MinIO.** High-performance S3-compatible object storage. Completely identical API in local development and production. Allows frictionless artifact storage and retrieval.
 
 ### 8. Reverse Proxy & Ingress
-- **Chosen: Traefik v3.** Native Docker provider integration, automatic TLS certificate lifecycle management via ACME DNS-01, zero-downtime routing updates.
-- *Security Guarantee:* Bound to a read-only Docker socket proxy (`tecnativa/docker-socket-proxy`), never directly accessing `/var/run/docker.sock`.
+- **Chosen: Traefik v3.3.4.** Native Docker provider integration, automatic TLS certificate lifecycle management via ACME DNS-01, zero-downtime routing updates.
+- *Security Guarantee:* Traefik reaches the Docker API only via `docker-socket-proxy` with `CONTAINERS=1`; all other endpoints (POST, EXEC, VOLUMES, NETWORKS, SECRETS, BUILD, IMAGES, INFO) are denied. Port 2375 is never published to the host.
 
 ### 9. Transactional Email
 - **Chosen: Resend.** EU region availability (`eu-central-1` / Frankfurt), modern REST API, first-class React Email support, high deliverability.
@@ -65,19 +65,22 @@ OrbaAgent requires a robust, modular, and high-performance foundation capable of
 
 ---
 
-## Decision Outcome
+## Pinned Core Dependencies & Versions
 
-The OrbaAgent core stack is standardized on TypeScript end-to-end:
-- **Language:** TypeScript 5.5+ (strict mode)
-- **Monorepo:** `pnpm` workspaces + `Turborepo`
-- **Linter/Formatter:** `Biome`
-- **Web:** `Next.js`
-- **Desktop:** `Tauri`
-- **API:** `Fastify` + `Zod`
-- **Database:** `PostgreSQL` + `Drizzle ORM`
-- **Cache/Queue:** `Redis`
-- **Storage:** `MinIO` (S3)
-- **Ingress:** `Traefik v3` (behind `docker-socket-proxy`)
-- **Email:** `Resend`
-- **Test:** `Vitest`
-- **Agent Sandbox Runtime:** Python/Bash confined strictly inside isolated Docker containers.
+| Component | Technology | Version | Purpose |
+| :--- | :--- | :--- | :--- |
+| **Runtime** | Node.js | `22.x LTS` / `24.x` | Base JavaScript/TypeScript runtime |
+| **Package Manager**| `pnpm` | `10.34.5` | Strict workspace dependency management |
+| **Type Checker** | TypeScript | `5.9.3` | Strict type validation |
+| **Linter / Formatter**| Biome | `1.9.4` | Unified code formatting and linting |
+| **Unit Testing** | Vitest | `3.2.7` | Fast ESM unit testing |
+| **Web Frontend** | Next.js | `15.5.25` | Production web application (React 19) |
+| **Backend API** | Fastify | `5.12.3` | High-throughput core backend API |
+| **Reverse Proxy** | Traefik | `v3.3.4` | Edge ingress and TLS certificate lifecycle |
+| **Socket Proxy** | docker-socket-proxy | `0.1.3` | Least-privilege Docker socket filter (`CONTAINERS=1`) |
+| **Agent Sandbox** | Docker Engine | `27.x` / `28.x` | Isolated agent computer containers |
+| **Database** | PostgreSQL | `16.x` | Relational data persistence and audit log |
+| **ORM** | Drizzle ORM | `0.38.x` | SQL-transparent type-safe data access |
+| **Cache / Queue** | Redis | `7.x` | In-memory cache, pub/sub, task queues |
+| **Object Store** | MinIO | `RELEASE.2024+` | S3-compatible artifact storage |
+| **Transactional Mail**| Resend | `v4.x` | Transactional email delivery |

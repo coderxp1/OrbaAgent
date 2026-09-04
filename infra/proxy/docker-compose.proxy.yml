@@ -7,11 +7,24 @@ services:
     restart: unless-stopped
     environment:
       - CONTAINERS=1
-      - SERVICES=0
-      - TASKS=0
+      - POST=0
+      - BUILD=0
+      - COMMIT=0
+      - CONFIGS=0
+      - DISTRIBUTION=0
+      - EXEC=0
+      - IMAGES=0
+      - INFO=0
       - NETWORKS=0
       - NODES=0
-      - INFO=0
+      - PLUGINS=0
+      - SERVICES=0
+      - SESSION=0
+      - SWARM=0
+      - SYSTEM=0
+      - TASKS=0
+      - VOLUMES=0
+      - SECRETS=0
       - VERSION=1
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -24,7 +37,7 @@ services:
       - /run
 
   traefik:
-    image: traefik:v3.1.2
+    image: traefik:v3.3.4
     container_name: orba-traefik
     restart: unless-stopped
     depends_on:

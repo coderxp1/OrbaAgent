@@ -12,7 +12,7 @@ This document defines the permanent access model, credential lifecycle, and sepa
 1. **Zero Shared Credentials:** No shared passwords, no generic shared keys. Every human developer and automated process uses an independent ed25519 keypair.
 2. **Root Login Prohibited:** The `root` user account is locked for direct remote SSH access. Post-cleanup sshd configuration strictly enforces `PermitRootLogin no`.
 3. **Dedicated Deploy User:** All operational work and deployments run under a dedicated `deploy` system user with UID >= 1000.
-4. **Separation of Human & CI Access:** Human developer keys and automated CI/CD keys are strictly segregated. CI keys are cryptographically constrained to specific deployment scripts.
+4. **Separation of Human & CI Access:** Human developer keys and automated CI/CD keys are strictly segregated. CI keys are restricted in authorized_keys via forced commands (`command=...`) to specific deployment scripts.
 
 ---
 

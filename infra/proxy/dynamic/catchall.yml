@@ -1,0 +1,15 @@
+http:
+  routers:
+    catchall:
+      rule: "HostRegexp(`^.+$`)"
+      entryPoints:
+        - websecure
+      priority: 1
+      service: catchall-service
+      tls: {}
+
+  services:
+    catchall-service:
+      loadBalancer:
+        servers:
+          - url: "http://127.0.0.1:8080" # Unreachable local endpoint resulting in 404/502 or handled by error middleware
