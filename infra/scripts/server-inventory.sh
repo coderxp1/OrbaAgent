@@ -3,7 +3,7 @@
 # OrbaAgent Pre-Cleanup Server Inventory Script
 # Target Host: 85.215.156.241
 # Purpose: Inventory existing workloads, containers, networks, storage,
-#          services, and users prior to any Phase 0 cleanup.
+#          services, users, sudoers, and cron prior to Phase 0 cleanup.
 # ==============================================================================
 
 set -euo pipefail
@@ -23,6 +23,31 @@ uname -r
 
 log_section "LOCAL NON-SYSTEM USERS (UID >= 1000)"
 getent passwd | awk -F: '$3>=1000 {print $1 " (UID: "$3", GID: "$4", Home: "$6", Shell: "$7")"}'
+
+log_section "SUDOERS CONFIGURATION & /etc/sudoers.d"
+ls -la /etc/sudoers.d/ 2>/dev/null || true
+for f in /etc/sudoers.d/*; do
+  if [ -f "$f" ]; then
+    echo "--- Sudoers file: $f ---"
+    cat "$f"
+  fi
+done
+
+log_section "RECENT LOGINS (last -a -n 30)"
+last -a -n 30 2>/dev/null || true
+
+log_section "HOME DIRECTORIES (/home/*)"
+ls -la /home 2>/dev/null || true
+for user_home in /home/*; do
+  if [ -d "$user_home" ]; then
+    echo "--- Contents of $user_home ---"
+    ls -la "$user_home" 2>/dev/null || true
+    if [ -d "$user_home/.ssh" ]; then
+      echo "--- .ssh in $user_home ---"
+      ls -la "$user_home/.ssh" 2>/dev/null || true
+    fi
+  fi
+done
 
 log_section "DOCKER CONTAINERS (ALL)"
 if command -v docker >/dev/null 2>&1; then
@@ -55,14 +80,28 @@ ls -la /etc/nginx/conf.d /etc/nginx/sites-enabled /etc/letsencrypt/live 2>/dev/n
 log_section "RUNNING SYSTEMD SERVICES (TOP 30)"
 systemctl list-units --type=service --state=running --no-pager 2>/dev/null | head -n 30 || true
 
-log_section "ACTIVE SYSTEMD TIMERS"
-systemctl list-timers --no-pager 2>/dev/null || true
+log_section "ALL SYSTEMD TIMERS (systemctl list-timers --all)"
+systemctl list-timers --all --no-pager 2>/dev/null || true
 
-log_section "CRON JOBS"
+log_section "CRON AUDIT & SCHEDULED TASKS"
+echo "--- User Crontabs in /var/spool/cron/crontabs ---"
+ls -la /var/spool/cron/crontabs 2>/dev/null || true
+for crf in /var/spool/cron/crontabs/*; do
+  if [ -f "$crf" ]; then
+    echo "--- Crontab: $crf ---"
+    cat "$crf" 2>/dev/null || true
+  fi
+done
+
 echo "--- Root Crontab ---"
 crontab -l 2>/dev/null || echo "No crontab for current user"
-echo "--- System Cron Directories ---"
+
+echo "--- /etc/crontab & /etc/cron.* ---"
+cat /etc/crontab 2>/dev/null || true
 ls -la /etc/cron* 2>/dev/null || true
+
+echo "--- Grep for ssh / rsa / hourly tasks in cron ---"
+grep -rnE "ssh|rsa|curl|wget|bash|python" /etc/cron* /var/spool/cron/crontabs 2>/dev/null || echo "No matches in cron"
 
 log_section "DATABASE DATA DIRECTORIES"
 ls -la /var/lib/mysql /var/lib/postgresql 2>/dev/null || echo "No mysql or postgresql data dirs in /var/lib"
@@ -83,7 +122,7 @@ df -h
 log_section "LARGEST DIRECTORIES (du top 30 depth 2)"
 du -xh --max-depth=2 / 2>/dev/null | sort -rh | head -n 30 || true
 
-log_section "APPLICATION ROOTS (/var/www, /opt, /home)"
-ls -la /var/www /opt /home 2>/dev/null || true
+log_section "APPLICATION ROOTS (/var/www, /opt)"
+ls -la /var/www /opt 2>/dev/null || true
 
 log_section "INVENTORY COMPLETE"

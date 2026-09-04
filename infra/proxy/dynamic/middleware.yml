@@ -9,6 +9,6 @@ http:
         referrerPolicy: "strict-origin-when-cross-origin"
         customResponseHeaders:
           Content-Security-Policy: "frame-ancestors 'self';"
-          X-XSS-Protection: "1; mode=block"
+          Permissions-Policy: "camera=(), microphone=(), geolocation=()"
           Server: ""
           X-Powered-By: ""
