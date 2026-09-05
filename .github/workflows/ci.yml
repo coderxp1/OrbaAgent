@@ -50,6 +50,9 @@ jobs:
   secret-scan:
     name: Gitleaks Secret Scan
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -106,6 +109,9 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile || pnpm install
+
+      - name: Build shared package
+        run: pnpm --filter=@orbaagent/shared run build
 
       - name: Run typecheck
         run: pnpm run typecheck
