@@ -1,0 +1,2 @@
+# ACME storage directory for Traefik certificates.
+# acme.json will be created dynamically by Traefik and must be chmod 600.

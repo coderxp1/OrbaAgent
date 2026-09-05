@@ -1,0 +1,87 @@
+name: orba-proxy
+
+services:
+  docker-socket-proxy:
+    image: tecnativa/docker-socket-proxy:v0.5.0
+    container_name: orba-docker-socket-proxy
+    restart: unless-stopped
+    environment:
+      - CONTAINERS=1
+      - POST=0
+      - BUILD=0
+      - COMMIT=0
+      - CONFIGS=0
+      - DISTRIBUTION=0
+      - EXEC=0
+      - IMAGES=0
+      - INFO=0
+      - NETWORKS=0
+      - NODES=0
+      - PLUGINS=0
+      - SERVICES=0
+      - SESSION=0
+      - SWARM=0
+      - SYSTEM=0
+      - TASKS=0
+      - VOLUMES=0
+      - SECRETS=0
+      - VERSION=1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - socket-net
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /run
+
+  catchall-404:
+    image: nginx:alpine
+    container_name: orba-catchall-404
+    restart: unless-stopped
+    command:
+      - sh
+      - -c
+      - |
+        printf 'server { listen 80 default_server; return 404 "404 Not Found\n"; }' > /etc/nginx/conf.d/default.conf
+        exec nginx -g "daemon off;"
+    networks:
+      - traefik-net
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /run
+      - /var/cache/nginx
+
+  traefik:
+    image: traefik:v3.7.12
+    container_name: orba-traefik
+    restart: unless-stopped
+    depends_on:
+      - docker-socket-proxy
+      - catchall-404
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - ACME_EMAIL=${ACME_EMAIL:-ph@klaw.at}
+      - IONOS_API_KEY=${IONOS_API_KEY:-}
+      - CERT_RESOLVER=${CERT_RESOLVER:-le-staging}
+    volumes:
+      - ./traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./dynamic:/etc/traefik/dynamic:ro
+      - ./acme:/etc/traefik/acme
+    networks:
+      - socket-net
+      - traefik-net
+    security_opt:
+      - no-new-privileges:true
+
+networks:
+  socket-net:
+    internal: true
+  traefik-net:
+    name: traefik-net
+    driver: bridge
