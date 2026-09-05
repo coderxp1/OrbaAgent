@@ -1,0 +1,17 @@
+http:
+  routers:
+    catchall:
+      rule: "HostRegexp(`^.+$`)"
+      entryPoints:
+        - websecure
+      priority: 1
+      service: catchall-service
+      middlewares:
+        - security-headers
+      tls: {}
+
+  services:
+    catchall-service:
+      loadBalancer:
+        servers:
+          - url: "http://catchall-404:80"

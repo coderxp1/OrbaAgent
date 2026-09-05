@@ -1,0 +1,12 @@
+title = "OrbaAgent Gitleaks Configuration"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Global allowlist for example environment templates"
+paths = [
+  '''^\.env\.example$''',
+  '''^infra/proxy/\.env\.example$''',
+  '''pnpm-lock\.yaml$'''
+]
