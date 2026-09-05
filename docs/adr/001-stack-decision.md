@@ -81,6 +81,7 @@ Every pinned dependency version has been verified with live registry inspections
 | **Web Frontend** | Next.js | `16.3.4` | `npm view next time['16.3.4']` -> `2026-08-31T20:00:51Z` (Security release) | Production web application (React 19) |
 | **Backend API** | Fastify | `5.12.3` | `npm view fastify time['5.12.3']` -> `2026-09-04T08:21:57Z` | High-throughput core backend API |
 | **Reverse Proxy** | Traefik | `v3.7.12` | `Docker Hub API /library/traefik/tags/v3.7.12` -> `2026-08-26T20:10:14Z` | Edge ingress and TLS certificate lifecycle |
+| **Catch-All 404** | nginx | `1.27.4-alpine` | `Docker Hub /library/nginx:1.27.4-alpine` -> `2026-02-12` (`sha256:4ff102c...`) | Minimal static 404 responder container |
 | **Socket Proxy** | docker-socket-proxy | `v0.5.0` | `Docker Hub API /tecnativa/docker-socket-proxy/tags/v0.5.0` -> `2026-07-27T09:32:14Z` | Least-privilege Docker socket filter (`CONTAINERS=1`, `:ro`) |
 | **Agent Sandbox** | Docker Engine | `27.x` / `28.x` | `docker version` -> Server Engine `29.5.3` | Isolated agent computer containers |
 | **Database** | PostgreSQL | `16.x` | `Docker Hub /library/postgres:16-alpine` | Relational data persistence and audit log |
