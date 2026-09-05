@@ -80,3 +80,13 @@ AllowUsers deploy
 
 - **Bootstrap Window:** During initial Phase 0 cleanup and server configuration, `deploy` has full sudo (`NOPASSWD:ALL`) in `/etc/sudoers.d/deploy`.
 - **Hardened State:** Post-bootstrap, `/etc/sudoers.d/deploy` is narrowed strictly to Docker service commands, systemd unit reloads, and deployment directory permissions.
+
+---
+
+## 6. Open Infrastructure Items & Break-Glass Access
+
+1. **Root Direct Access Sunsetting:**
+   - Current baseline: `/etc/ssh/sshd_config.d/10-orbaagent.conf` permits root pubkey login (`PermitRootLogin prohibit-password`, `AllowUsers deploy root`) while the bootstrap, hardening, and initial edge proxy services are provisioned.
+   - Target state: `root` will be removed from `AllowUsers` and `PermitRootLogin` set to `no` once a verified emergency break-glass procedure (IONOS Cloud Console / VNC access tested and confirmed by Paul) is operational.
+2. **Unattended Upgrades Reboot Policy:**
+   - `Unattended-Upgrade::Automatic-Reboot` is explicitly left unset / disabled (`false`). All host reboots must be manually scheduled, verified, and announced.
