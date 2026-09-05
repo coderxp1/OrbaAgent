@@ -91,7 +91,6 @@ echo "Docker daemon reloaded."
 
 # 6. Firewall Configuration (UFW)
 echo ">>> Updating UFW firewall rules..."
-ufw --force reset
 ufw default deny incoming
 ufw default allow outgoing
 ufw default deny routed

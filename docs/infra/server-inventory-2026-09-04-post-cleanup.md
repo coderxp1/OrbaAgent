@@ -5,9 +5,24 @@
 **Execution Mode:** Post-Decommission & Hardening Audit (infra/scripts/server-inventory.sh)  
 **Audit Purpose:** Audit record of clean server state following AtlasLM decommissioning and server hardening. All containers, volumes, atlasdeploy user, and atlaslm directories removed.
 
+## Pre-Cleanup vs. Post-Cleanup Comparison
+
+| Attribute | Baseline Audit (`2026-09-04`) | Post-Cleanup Audit (`2026-09-05`) |
+| :--- | :--- | :--- |
+| **Docker Containers** | 7 running (AtlasLM staging) | **0 running / stopped** |
+| **Docker Volumes** | 6 `atlaslm-staging_*` | **0 volumes** |
+| **Non-System Users** | `atlasdeploy` (UID 1000), `deploy` (UID 1001) | **`deploy` (UID 1001) only** |
+| **Sudoers Drop-ins** | `90-cloud-init-users`, `atlaslm-staging`, `deploy` | **`90-cloud-init-users`, `deploy` only** |
+| **Host Listening Ports** | `22` (SSH), `80` (HTTP), `443` (HTTPS) | **`22` (SSH) only** |
+| **Root Disk Used** | 19 GB | **2.8 GB** (694 GB free) |
+| **Filesystem Remnants** | Present under `/srv`, `/etc`, `/usr/local/sbin` | **0 matching `*atlaslm*`** |
+
+> [!NOTE]
+> In the baseline audit, services (FastAPI on 8000, Web on 3000, Postgres on 5432, Redis on 6379) ran inside the Docker bridge network; only Traefik (80, 443) and sshd (22) were listening on host network interfaces (`0.0.0.0` / `[::]`). Post-cleanup, only sshd (22) is listening.
+
 ---
 
-\	ext
+```text
 ==============================================================================
 >>> OS RELEASE & KERNEL
 ==============================================================================
@@ -396,4 +411,4 @@ drwx--x--x  4 root root 4096 Sep  1 13:50 containerd
 ==============================================================================
 >>> INVENTORY COMPLETE
 ==============================================================================
-\\n
+```

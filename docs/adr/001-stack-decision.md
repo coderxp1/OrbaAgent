@@ -81,9 +81,9 @@ Every pinned dependency version has been verified with live registry inspections
 | **Web Frontend** | Next.js | `16.3.4` | `npm view next time['16.3.4']` -> `2026-08-31T20:00:51Z` (Security release) | Production web application (React 19) |
 | **Backend API** | Fastify | `5.12.3` | `npm view fastify time['5.12.3']` -> `2026-09-04T08:21:57Z` | High-throughput core backend API |
 | **Reverse Proxy** | Traefik | `v3.7.12` | `Docker Hub API /library/traefik/tags/v3.7.12` -> `2026-08-26T20:10:14Z` | Edge ingress and TLS certificate lifecycle |
-| **Catch-All 404** | nginx | `1.27.4-alpine` | `Docker Hub /library/nginx:1.27.4-alpine` -> `2026-02-12` (`sha256:4ff102c...`) | Minimal static 404 responder container |
+| **Catch-All 404** | nginx | `1.30.4-alpine` | `Docker Hub API /library/nginx/tags` -> `2026-09-03T22:50:53Z` (`sha256:dc5069ad...`) | Minimal static 404 responder container |
 | **Socket Proxy** | docker-socket-proxy | `v0.5.0` | `Docker Hub API /tecnativa/docker-socket-proxy/tags/v0.5.0` -> `2026-07-27T09:32:14Z` | Least-privilege Docker socket filter (`CONTAINERS=1`, `:ro`) |
-| **Agent Sandbox** | Docker Engine | `27.x` / `28.x` | `docker version` -> Server Engine `29.5.3` | Isolated agent computer containers |
+| **Agent Sandbox** | Docker Engine | `27.x` / `28.x` / `29.x` | `docker version` -> Server Engine `29.8.0` | Isolated agent computer containers |
 | **Database** | PostgreSQL | `16.x` | `Docker Hub /library/postgres:16-alpine` | Relational data persistence and audit log |
 | **ORM** | Drizzle ORM | `0.45.2` | `npm view drizzle-orm time['0.45.2']` -> `2026-03-27T17:06:27Z` | SQL-transparent type-safe data access |
 | **Cache / Queue** | Redis | `7.x` | `Docker Hub /library/redis:7-alpine` | In-memory cache, pub/sub, task queues |
