@@ -1,6 +1,7 @@
 # Server Access Architecture & Security Policy
 
 **Target Server:** `85.215.156.241`  
+**Hosting Provider:** Strato (strato.de)  
 **OS Target:** Ubuntu 24.04 LTS (x86_64)
 
 This document defines the permanent access model, credential lifecycle, and separation of duties for OrbaAgent infrastructure.
@@ -87,6 +88,6 @@ AllowUsers deploy
 
 1. **Root Direct Access Sunsetting:**
    - Current baseline: `/etc/ssh/sshd_config.d/10-orbaagent.conf` permits root pubkey login (`PermitRootLogin prohibit-password`, `AllowUsers deploy root`) while the bootstrap, hardening, and initial edge proxy services are provisioned.
-   - Target state: `root` will be removed from `AllowUsers` and `PermitRootLogin` set to `no` once a verified emergency break-glass procedure (IONOS Cloud Console / VNC access tested and confirmed by Paul) is operational.
+   - Target state: `root` will be removed from `AllowUsers` and `PermitRootLogin` set to `no` once a verified emergency break-glass procedure (Strato customer panel: serial/KVM console, rescue system access tested and confirmed by Paul) is operational.
 2. **Unattended Upgrades Reboot Policy:**
    - `Unattended-Upgrade::Automatic-Reboot` is explicitly left unset / disabled (`false`). All host reboots must be manually scheduled, verified, and announced.

@@ -1,6 +1,7 @@
 # Pre-Cleanup Server Inventory (Baseline: 2026-09-04)
 
 **Target Host:** `85.215.156.241`  
+**Hosting Provider:** Strato (strato.de)  
 **Execution Timestamp:** 2026-09-04 20:39:00 UTC  
 **Execution Mode:** Read-Only Audit (`infra/scripts/server-inventory.sh`)  
 **Audit Purpose:** Pre-decommission baseline record of all running workloads, storage, services, users, and crontabs prior to Phase 0 cleanup.

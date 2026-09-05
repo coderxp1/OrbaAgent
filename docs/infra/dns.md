@@ -1,7 +1,7 @@
 # DNS Configuration & Verification Architecture
 
-**Domain:** `orbaagent.dev`  
-**Authoritative DNS Provider:** IONOS / 1&1 (`ns1111.ui-dns.biz`, `ns1049.ui-dns.com`, `ns1024.ui-dns.de`, `ns1100.ui-dns.org`)  
+**Domain/DNS:** IONOS / 1&1 (`ns1111.ui-dns.biz`, `ns1049.ui-dns.com`, `ns1024.ui-dns.de`, `ns1100.ui-dns.org`)  
+**Hosting Provider:** Strato (strato.de)  
 **Production Server IPv4:** `85.215.156.241`  
 
 Because `.dev` is on the Chrome HSTS preload list, browsers force HTTPS on all connections. All services must have valid TLS certificates before web traffic can be served.

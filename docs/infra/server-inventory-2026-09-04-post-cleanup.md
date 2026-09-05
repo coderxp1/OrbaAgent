@@ -1,6 +1,7 @@
 # Post-Cleanup Server Inventory (2026-09-04)
 
-**Target Host:** 85.215.156.241  
+**Target Host:** `85.215.156.241`  
+**Hosting Provider:** Strato (strato.de)  
 **Execution Timestamp:** 2026-09-05 01:28:00 UTC  
 **Execution Mode:** Post-Decommission & Hardening Audit (infra/scripts/server-inventory.sh)  
 **Audit Purpose:** Audit record of clean server state following AtlasLM decommissioning and server hardening. All containers, volumes, atlasdeploy user, and atlaslm directories removed.
