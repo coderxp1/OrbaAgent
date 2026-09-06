@@ -28,44 +28,48 @@ Because `.dev` is on the Chrome HSTS preload list, browsers force HTTPS on all c
 
 ---
 
-## Verification Commands & Baseline Table
+## Verification & Self-Check Guide
 
-Run these commands from any external machine to verify DNS propagation:
+After entering the DNS records in the IONOS DNS panel, Paul can run these exact commands from any terminal to self-check propagation and record correctness.
+
+### Step-by-Step Self-Check Commands
+
+| Record Description | Exact Command | Expected Output |
+| :--- | :--- | :--- |
+| **Apex domain** | `dig +short orbaagent.dev A` | `85.215.156.241` |
+| **Web alias** | `dig +short www.orbaagent.dev A` | `85.215.156.241` |
+| **API backend** | `dig +short api.orbaagent.dev A` | `85.215.156.241` |
+| **Web app UI** | `dig +short app.orbaagent.dev A` | `85.215.156.241` |
+| **Auth endpoints** | `dig +short auth.orbaagent.dev A` | `85.215.156.241` |
+| **Artifact storage** | `dig +short files.orbaagent.dev A` | `85.215.156.241` |
+| **Computer gateway** | `dig +short computers.orbaagent.dev A` | `85.215.156.241` |
+| **Wildcard sandboxes** | `dig +short test.computers.orbaagent.dev A` | `85.215.156.241` |
+| **CAA certificate authority** | `dig +short orbaagent.dev CAA` | `0 issue "letsencrypt.org"` |
+| **SPF email protection** | `dig +short orbaagent.dev TXT` | `"v=spf1 -all"` |
+| **DMARC policy** | `dig +short _dmarc.orbaagent.dev TXT` | `"v=DMARC1; p=reject; rua=mailto:ph@klaw.at"` |
+
+### Copy-Paste All-in-One Self-Check Script
+
+Run this single block in bash / zsh to verify all records in one shot:
 
 ```bash
-# Apex and Web
-dig +short orbaagent.dev A
-dig +short www.orbaagent.dev A
+echo "=== ORBAAGENT DNS SELF-CHECK ==="
+for sub in "" "www." "api." "app." "auth." "files." "computers." "test.computers."; do
+  target="${sub}orbaagent.dev"
+  res=$(dig +short "${target}" A)
+  if [ "${res}" = "85.215.156.241" ]; then
+    echo " [OK] A -> ${target}: ${res}"
+  else
+    echo " [FAIL] A -> ${target}: got '${res}', expected '85.215.156.241'"
+  fi
+done
 
-# Application Subdomains
-dig +short api.orbaagent.dev A
-dig +short app.orbaagent.dev A
-dig +short auth.orbaagent.dev A
-dig +short files.orbaagent.dev A
-dig +short computers.orbaagent.dev A
-dig +short test.computers.orbaagent.dev A
-
-# Security & Mail Records
-dig +short orbaagent.dev CAA
-dig +short orbaagent.dev TXT
-dig +short _dmarc.orbaagent.dev TXT
+echo "--- CAA & Mail Security Records ---"
+echo " CAA:   $(dig +short orbaagent.dev CAA)"
+echo " SPF:   $(dig +short orbaagent.dev TXT)"
+echo " DMARC: $(dig +short _dmarc.orbaagent.dev TXT)"
 ```
 
-### Verification Matrix
-
-| Record | Expected Output | Status |
-| :--- | :--- | :--- |
-| `orbaagent.dev` | `85.215.156.241` | **Verified** |
-| `www.orbaagent.dev` | `85.215.156.241` | **Verified** |
-| `api.orbaagent.dev` | `85.215.156.241` | Pending IONOS Entry |
-| `app.orbaagent.dev` | `85.215.156.241` | Pending IONOS Entry |
-| `auth.orbaagent.dev` | `85.215.156.241` | Pending IONOS Entry |
-| `files.orbaagent.dev` | `85.215.156.241` | Pending IONOS Entry |
-| `computers.orbaagent.dev` | `85.215.156.241` | Pending IONOS Entry |
-| `*.computers.orbaagent.dev` | `85.215.156.241` | Pending IONOS Entry |
-| CAA Record | `0 issue "letsencrypt.org"` | Pending IONOS Entry |
-| SPF Record | `"v=spf1 -all"` | Pending IONOS Entry |
-| DMARC Record | `"v=DMARC1; p=reject; rua=mailto:ph@klaw.at"` | Pending IONOS Entry |
 
 ---
 
