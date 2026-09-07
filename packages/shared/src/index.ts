@@ -1,10 +1,17 @@
 import { z } from "zod";
 
 export const HealthResponseSchema = z.object({
-  status: z.literal("ok"),
+  status: z.enum(["ok", "error"]),
   version: z.string(),
   commitSha: z.string(),
+  uptime: z.number(),
   timestamp: z.string().datetime(),
+  checks: z
+    .object({
+      postgres: z.enum(["up", "down"]),
+      redis: z.enum(["up", "down"]),
+    })
+    .optional(),
 });
 
 export type HealthResponse = z.infer<typeof HealthResponseSchema>;

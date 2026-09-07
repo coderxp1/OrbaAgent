@@ -7,9 +7,30 @@ describe("Shared Package Tests", () => {
       status: "ok",
       version: "0.1.0",
       commitSha: "abc1234",
+      uptime: 42.5,
       timestamp: new Date().toISOString(),
+      checks: {
+        postgres: "up",
+        redis: "up",
+      },
     };
     const parsed = HealthResponseSchema.safeParse(valid);
+    expect(parsed.success).toBe(true);
+  });
+
+  it("validates degraded/error health response schema", () => {
+    const errorState = {
+      status: "error",
+      version: "0.1.0",
+      commitSha: "abc1234",
+      uptime: 10.2,
+      timestamp: new Date().toISOString(),
+      checks: {
+        postgres: "down",
+        redis: "up",
+      },
+    };
+    const parsed = HealthResponseSchema.safeParse(errorState);
     expect(parsed.success).toBe(true);
   });
 
@@ -18,6 +39,7 @@ describe("Shared Package Tests", () => {
       status: "degraded",
       version: "0.1.0",
       commitSha: "abc1234",
+      uptime: 5,
       timestamp: new Date().toISOString(),
     };
     const parsed = HealthResponseSchema.safeParse(invalid);
