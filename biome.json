@@ -15,7 +15,9 @@
       "**/next-env.d.ts",
       "**/target/**",
       "**/coverage/**",
-      "**/acme.json"
+      "**/acme.json",
+      "**/scratch*/**",
+      "**/.kilo/**"
     ]
   },
   "formatter": {
