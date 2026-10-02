@@ -25,12 +25,12 @@ const MODEL_DEFAULT_TOKENS: Record<string, number> = {
   "openrouter/free": 100000,
 };
 
-// Local usage tracking map per composite key (tenant:credential:modelId or modelId)
+// Local usage tracking map per composite key (tenantId:modelId or modelId)
 const LOCAL_USAGE_MAP: Map<string, LocalUsage> = new Map();
 
-function getUsageKey(modelId: string, tenantId?: string, credentialId?: string): string {
-  if (tenantId || credentialId) {
-    return `${tenantId || "default"}:${credentialId || "default"}:${modelId}`;
+function getUsageKey(modelId: string, tenantId?: string): string {
+  if (tenantId) {
+    return `${tenantId}:${modelId}`;
   }
   return modelId;
 }
@@ -59,14 +59,10 @@ export function getConfiguredQuotaLimits(modelId?: string): QuotaLimits {
 }
 
 /**
- * Retrieve locally tracked usage metrics for a model (with BYOK tenant/credential isolation).
+ * Retrieve locally tracked usage metrics for a model (with platform tenant-level isolation).
  */
-export function getLocalTrackedUsage(
-  modelId: string,
-  tenantId?: string,
-  credentialId?: string,
-): LocalUsage {
-  const key = getUsageKey(modelId, tenantId, credentialId);
+export function getLocalTrackedUsage(modelId: string, tenantId?: string): LocalUsage {
+  const key = getUsageKey(modelId, tenantId);
   const existing = LOCAL_USAGE_MAP.get(key);
   if (existing) return existing;
   const initial = { requests: 0, tokens: 0 };
@@ -77,14 +73,9 @@ export function getLocalTrackedUsage(
 /**
  * Record successful request usage against locally tracked counters.
  */
-export function recordLocalUsage(
-  modelId: string,
-  tokens: number,
-  tenantId?: string,
-  credentialId?: string,
-): void {
-  const key = getUsageKey(modelId, tenantId, credentialId);
-  const usage = getLocalTrackedUsage(modelId, tenantId, credentialId);
+export function recordLocalUsage(modelId: string, tokens: number, tenantId?: string): void {
+  const key = getUsageKey(modelId, tenantId);
+  const usage = getLocalTrackedUsage(modelId, tenantId);
   usage.requests += 1;
   usage.tokens += tokens;
   LOCAL_USAGE_MAP.set(key, usage);
@@ -93,22 +84,18 @@ export function recordLocalUsage(
 /**
  * Check whether a model has reached its locally configured quota limit.
  */
-export function isLocalQuotaExhausted(
-  modelId: string,
-  tenantId?: string,
-  credentialId?: string,
-): boolean {
+export function isLocalQuotaExhausted(modelId: string, tenantId?: string): boolean {
   const limits = getConfiguredQuotaLimits(modelId);
-  const usage = getLocalTrackedUsage(modelId, tenantId, credentialId);
+  const usage = getLocalTrackedUsage(modelId, tenantId);
   return usage.requests >= limits.maxRequests || usage.tokens >= limits.maxTokens;
 }
 
 /**
  * Reset local usage counters (primarily for testing and environment resets).
  */
-export function resetLocalUsage(modelId?: string, tenantId?: string, credentialId?: string): void {
+export function resetLocalUsage(modelId?: string, tenantId?: string): void {
   if (modelId) {
-    const key = getUsageKey(modelId, tenantId, credentialId);
+    const key = getUsageKey(modelId, tenantId);
     LOCAL_USAGE_MAP.set(key, { requests: 0, tokens: 0 });
   } else {
     LOCAL_USAGE_MAP.clear();

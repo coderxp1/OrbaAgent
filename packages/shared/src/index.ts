@@ -104,7 +104,6 @@ export const TraceMetadataSchema = z.object({
   userId: z.string().default("default-user"),
   conversationId: z.string().default("default-conversation"),
   agentRunId: z.string().default("default-run"),
-  credentialId: z.string().optional(),
 });
 export type TraceMetadata = z.infer<typeof TraceMetadataSchema>;
 

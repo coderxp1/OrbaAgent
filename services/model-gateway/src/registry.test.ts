@@ -47,13 +47,13 @@ describe("Model Gateway Registry & Spec Management", () => {
     expect(limitsGpt5.maxTokens).toBe(120000);
   });
 
-  it("should isolate quota tracking per BYOK tenant and credential ID", () => {
+  it("should isolate quota tracking per platform tenant ID", () => {
     // Record usage for Tenant A
-    recordLocalUsage("gpt-5", 100000, "tenant-A", "cred-A");
-    expect(isLocalQuotaExhausted("gpt-5", "tenant-A", "cred-A")).toBe(true);
+    recordLocalUsage("gpt-5", 100000, "tenant-A");
+    expect(isLocalQuotaExhausted("gpt-5", "tenant-A")).toBe(true);
 
     // Tenant B should remain completely unexhausted
-    expect(isLocalQuotaExhausted("gpt-5", "tenant-B", "cred-B")).toBe(false);
+    expect(isLocalQuotaExhausted("gpt-5", "tenant-B")).toBe(false);
   });
 
   it("should evaluate 499 requests as available and 500 as exhausted", () => {

@@ -141,7 +141,7 @@ export class ModelGateway {
 
         this.router.recordProviderSuccess(currentModel.provider, currentModel.id);
         // Only record quota usage on SUCCESSFUL request completions
-        recordLocalUsage(currentModel.id, totalTokens || 50, trace.tenantId, trace.credentialId);
+        recordLocalUsage(currentModel.id, totalTokens || 50, trace.tenantId);
         successfulModel = currentModel;
         streamSucceeded = true;
         break; // Stream succeeded, break failover loop

@@ -139,7 +139,6 @@ export class IntelligenceRouter {
     const openrouterHealth = this.getProviderHealth("openrouter");
 
     const tenantId = request.trace?.tenantId;
-    const credentialId = request.trace?.credentialId;
 
     const needsVision = complexity === "vision";
     const needsTools =
@@ -155,7 +154,7 @@ export class IntelligenceRouter {
       ? allLangdockModels
           .filter((m) => !needsVision || hasConfirmedCapability(m, "vision"))
           .filter((m) => !needsTools || hasConfirmedCapability(m, "tool_calling"))
-          .filter((m) => !isLocalQuotaExhausted(m.id, tenantId, credentialId))
+          .filter((m) => !isLocalQuotaExhausted(m.id, tenantId))
           .filter((m) => (this.modelFailureMap.get(m.id) || 0) < 3)
       : [];
 
@@ -181,7 +180,7 @@ export class IntelligenceRouter {
           .filter((m): m is ModelSpec => Boolean(m))
           .filter((m) => !needsVision || hasConfirmedCapability(m, "vision"))
           .filter((m) => !needsTools || hasConfirmedCapability(m, "tool_calling"))
-          .filter((m) => !isLocalQuotaExhausted(m.id, tenantId, credentialId))
+          .filter((m) => !isLocalQuotaExhausted(m.id, tenantId))
           .filter((m) => (this.modelFailureMap.get(m.id) || 0) < 3)
       : [];
 

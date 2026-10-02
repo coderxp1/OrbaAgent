@@ -37,11 +37,7 @@ describe("ModelGateway Provider Failover & Production Safety", () => {
     const textDeltas = events.filter((e) => e.type === "text_delta");
     expect(textDeltas.length).toBeGreaterThan(0);
 
-    const usage = getLocalTrackedUsage(
-      gateway.auditLogs[0].model,
-      sampleRequest.trace.tenantId,
-      sampleRequest.trace.credentialId,
-    );
+    const usage = getLocalTrackedUsage(gateway.auditLogs[0].model, sampleRequest.trace.tenantId);
     expect(usage.requests).toBe(1);
     expect(usage.tokens).toBeGreaterThan(0);
   });
