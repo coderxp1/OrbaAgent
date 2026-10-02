@@ -108,6 +108,58 @@ describe("IntelligenceRouter", () => {
     expect(routing.fallbackChain.some((m) => m.id === "openrouter/free")).toBe(true);
   });
 
+  it("should skip OpenRouter models if OpenRouter is in circuit breaker cooldown", () => {
+    // Record failures for OpenRouter
+    router.recordProviderFailure("openrouter");
+    router.recordProviderFailure("openrouter");
+    router.recordProviderFailure("openrouter");
+
+    const req: ChatCompletionRequest = {
+      modelId: "auto",
+      messages: [{ role: "user", content: "Write a python script" }],
+      stream: true,
+      trace: {
+        traceId: "tr_5",
+        tenantId: "t_1",
+        userId: "u_1",
+        conversationId: "c_1",
+        agentRunId: "r_1",
+      },
+    };
+
+    const routing = router.selectRouting(req);
+    expect(routing.primaryModel.provider).toBe("langdock");
+    expect(routing.fallbackChain.some((m) => m.provider === "openrouter")).toBe(false);
+  });
+
+  it("should throw a clean error when both Langdock and OpenRouter are in circuit breaker cooldown", () => {
+    // Record failures for both providers
+    router.recordProviderFailure("langdock");
+    router.recordProviderFailure("langdock");
+    router.recordProviderFailure("langdock");
+
+    router.recordProviderFailure("openrouter");
+    router.recordProviderFailure("openrouter");
+    router.recordProviderFailure("openrouter");
+
+    const req: ChatCompletionRequest = {
+      modelId: "auto",
+      messages: [{ role: "user", content: "Write a python script" }],
+      stream: true,
+      trace: {
+        traceId: "tr_6",
+        tenantId: "t_1",
+        userId: "u_1",
+        conversationId: "c_1",
+        agentRunId: "r_1",
+      },
+    };
+
+    expect(() => router.selectRouting(req)).toThrow(
+      "All provider routes are unavailable or in circuit breaker cooldown",
+    );
+  });
+
   it("should enforce non-mock policy in production", () => {
     const originalEnv = process.env.NODE_ENV;
     try {

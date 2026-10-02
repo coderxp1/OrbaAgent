@@ -10,63 +10,126 @@ export interface LocalUsage {
   tokens: number;
 }
 
-// Local usage tracking map per model ID
+// Model-specific default max tokens dictionary (e.g. Anthropic vs OpenAI based models)
+const MODEL_DEFAULT_TOKENS: Record<string, number> = {
+  "gpt-6-sol": 300000,
+  "gpt-5.4": 250000,
+  "gpt-5.4-mini": 250000,
+  "gpt-5.2-pro": 200000,
+  "gpt-5.2": 150000,
+  "gpt-5.1": 250000,
+  "gpt-5": 100000,
+  "gpt-5-eu": 250000,
+  "gpt-5-mini-eu": 250000,
+  "openrouter/auto": 500000,
+  "openrouter/free": 100000,
+};
+
+// Local usage tracking map per composite key (tenant:credential:modelId or modelId)
 const LOCAL_USAGE_MAP: Map<string, LocalUsage> = new Map();
 
+function getUsageKey(modelId: string, tenantId?: string, credentialId?: string): string {
+  if (tenantId || credentialId) {
+    return `${tenantId || "default"}:${credentialId || "default"}:${modelId}`;
+  }
+  return modelId;
+}
+
 /**
- * Retrieve configured quota limits from environment configuration or sensible defaults.
- * Allows limits to be adjusted without modifying application source code.
+ * Retrieve configured quota limits from environment configuration or model defaults.
+ * Supports per-model capacity overrides (e.g. LANGDOCK_MODEL_MAX_TOKENS_GPT_5).
  */
-export function getConfiguredQuotaLimits(): QuotaLimits {
+export function getConfiguredQuotaLimits(modelId?: string): QuotaLimits {
   const reqEnv = process.env.LANGDOCK_MODEL_MAX_REQUESTS;
-  const tokenEnv = process.env.LANGDOCK_MODEL_MAX_TOKENS;
+  const envKey = modelId
+    ? `LANGDOCK_MODEL_MAX_TOKENS_${modelId.toUpperCase().replace(/[^A-Z0-9]/g, "_")}`
+    : "LANGDOCK_MODEL_MAX_TOKENS";
+  const tokenEnv = process.env[envKey] || process.env.LANGDOCK_MODEL_MAX_TOKENS;
+
+  const defaultTokens = (modelId && MODEL_DEFAULT_TOKENS[modelId]) || 250000;
+
   const maxRequests =
     reqEnv && reqEnv !== "undefined" && !Number.isNaN(Number(reqEnv)) ? Number(reqEnv) : 500;
   const maxTokens =
     tokenEnv && tokenEnv !== "undefined" && !Number.isNaN(Number(tokenEnv))
       ? Number(tokenEnv)
-      : 250000;
+      : defaultTokens;
+
   return { maxRequests, maxTokens };
 }
 
 /**
- * Retrieve locally tracked usage metrics for a model.
+ * Retrieve locally tracked usage metrics for a model (with BYOK tenant/credential isolation).
  */
-export function getLocalTrackedUsage(modelId: string): LocalUsage {
-  const existing = LOCAL_USAGE_MAP.get(modelId);
+export function getLocalTrackedUsage(
+  modelId: string,
+  tenantId?: string,
+  credentialId?: string,
+): LocalUsage {
+  const key = getUsageKey(modelId, tenantId, credentialId);
+  const existing = LOCAL_USAGE_MAP.get(key);
   if (existing) return existing;
   const initial = { requests: 0, tokens: 0 };
-  LOCAL_USAGE_MAP.set(modelId, initial);
+  LOCAL_USAGE_MAP.set(key, initial);
   return initial;
 }
 
 /**
  * Record successful request usage against locally tracked counters.
  */
-export function recordLocalUsage(modelId: string, tokens: number): void {
-  const usage = getLocalTrackedUsage(modelId);
+export function recordLocalUsage(
+  modelId: string,
+  tokens: number,
+  tenantId?: string,
+  credentialId?: string,
+): void {
+  const key = getUsageKey(modelId, tenantId, credentialId);
+  const usage = getLocalTrackedUsage(modelId, tenantId, credentialId);
   usage.requests += 1;
   usage.tokens += tokens;
+  LOCAL_USAGE_MAP.set(key, usage);
 }
 
 /**
  * Check whether a model has reached its locally configured quota limit.
  */
-export function isLocalQuotaExhausted(modelId: string): boolean {
-  const limits = getConfiguredQuotaLimits();
-  const usage = getLocalTrackedUsage(modelId);
+export function isLocalQuotaExhausted(
+  modelId: string,
+  tenantId?: string,
+  credentialId?: string,
+): boolean {
+  const limits = getConfiguredQuotaLimits(modelId);
+  const usage = getLocalTrackedUsage(modelId, tenantId, credentialId);
   return usage.requests >= limits.maxRequests || usage.tokens >= limits.maxTokens;
 }
 
 /**
  * Reset local usage counters (primarily for testing and environment resets).
  */
-export function resetLocalUsage(modelId?: string): void {
+export function resetLocalUsage(modelId?: string, tenantId?: string, credentialId?: string): void {
   if (modelId) {
-    LOCAL_USAGE_MAP.set(modelId, { requests: 0, tokens: 0 });
+    const key = getUsageKey(modelId, tenantId, credentialId);
+    LOCAL_USAGE_MAP.set(key, { requests: 0, tokens: 0 });
   } else {
     LOCAL_USAGE_MAP.clear();
   }
+}
+
+/**
+ * Check whether a model has a confirmed capability for hard routing decisions.
+ * Basic capabilities ("text", "streaming") are standard.
+ * Specialized capabilities ("vision", "thinking", "json_mode") require isUnconfirmed to be false.
+ */
+export function hasConfirmedCapability(
+  model: ModelSpec,
+  capability: "text" | "vision" | "streaming" | "tool_calling" | "json_mode" | "thinking",
+): boolean {
+  if (!model.capabilities.includes(capability)) return false;
+  if (capability === "text" || capability === "streaming" || capability === "tool_calling") {
+    return true;
+  }
+  // Specialized capabilities require confirmed status
+  return !model.isUnconfirmed;
 }
 
 export const MODEL_REGISTRY: Record<string, ModelSpec> = {
@@ -152,7 +215,13 @@ export const MODEL_REGISTRY: Record<string, ModelSpec> = {
 };
 
 export function getModelSpec(modelId: string): ModelSpec {
-  const model = MODEL_REGISTRY[modelId] || MODEL_REGISTRY["gpt-5.4"];
+  if (modelId === "auto" || modelId === "" || !modelId) {
+    return MODEL_REGISTRY["gpt-5.4"];
+  }
+  const model = MODEL_REGISTRY[modelId];
+  if (!model) {
+    throw new Error(`Invalid or unknown model ID: "${modelId}"`);
+  }
   return model;
 }
 

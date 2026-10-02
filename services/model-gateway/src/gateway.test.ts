@@ -37,7 +37,11 @@ describe("ModelGateway Provider Failover & Production Safety", () => {
     const textDeltas = events.filter((e) => e.type === "text_delta");
     expect(textDeltas.length).toBeGreaterThan(0);
 
-    const usage = getLocalTrackedUsage(gateway.auditLogs[0].model);
+    const usage = getLocalTrackedUsage(
+      gateway.auditLogs[0].model,
+      sampleRequest.trace.tenantId,
+      sampleRequest.trace.credentialId,
+    );
     expect(usage.requests).toBe(1);
     expect(usage.tokens).toBeGreaterThan(0);
   });
@@ -223,6 +227,35 @@ describe("ModelGateway Provider Failover & Production Safety", () => {
     } finally {
       process.env.NODE_ENV = originalEnv;
     }
+  });
+
+  it("should protect tool call execution against duplicate side effects during stream failover", async () => {
+    class ToolFailingLangdockAdapter extends LangdockAdapter {
+      override async *streamChat(
+        req: ChatCompletionRequest,
+      ): AsyncGenerator<NormalizedEvent, void, unknown> {
+        yield {
+          type: "tool_call_start",
+          traceId: req.trace.traceId,
+          toolCall: { id: "tc_123", name: "execute_command", arguments: { command: "ls" } },
+        };
+        throw new Error("Stream connection dropped after tool call");
+      }
+    }
+
+    const gateway = new ModelGateway({
+      langdock: new ToolFailingLangdockAdapter(),
+      openrouter: new OpenRouterAdapter(),
+    });
+
+    const events: NormalizedEvent[] = [];
+    for await (const event of gateway.streamChat(sampleRequest)) {
+      events.push(event);
+    }
+
+    // Ensure tool call event was yielded exactly once despite failover
+    const toolCallEvents = events.filter((e) => e.type === "tool_call_start");
+    expect(toolCallEvents.length).toBe(1);
   });
 
   it("should ignore user model selection and perform automatic routing", () => {

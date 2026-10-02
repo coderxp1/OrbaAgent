@@ -1,5 +1,5 @@
 import type { ChatCompletionRequest, ModelSpec, ProviderId } from "@orbaagent/shared";
-import { MODEL_REGISTRY, isLocalQuotaExhausted } from "./registry.js";
+import { MODEL_REGISTRY, hasConfirmedCapability, isLocalQuotaExhausted } from "./registry.js";
 
 export type TaskComplexity = "high_reasoning" | "coding" | "vision" | "fast_response" | "general";
 
@@ -136,6 +136,10 @@ export class IntelligenceRouter {
   selectRouting(request: ChatCompletionRequest): RoutingDecision {
     const complexity = this.classifyTask(request);
     const langdockHealth = this.getProviderHealth("langdock");
+    const openrouterHealth = this.getProviderHealth("openrouter");
+
+    const tenantId = request.trace?.tenantId;
+    const credentialId = request.trace?.credentialId;
 
     const needsVision = complexity === "vision";
     const needsTools =
@@ -146,19 +150,21 @@ export class IntelligenceRouter {
       (m) => m.provider === "langdock",
     );
 
-    // Filter eligible Langdock models by task capabilities, quota limits, and failure count
-    const eligibleLangdock = allLangdockModels
-      .filter((m) => !needsVision || m.capabilities.includes("vision"))
-      .filter((m) => !needsTools || m.capabilities.includes("tool_calling"))
-      .filter((m) => !isLocalQuotaExhausted(m.id))
-      .filter((m) => (this.modelFailureMap.get(m.id) || 0) < 3);
+    // Filter eligible Langdock models by confirmed capabilities, quota limits, and failure count
+    const eligibleLangdock = langdockHealth.isHealthy
+      ? allLangdockModels
+          .filter((m) => !needsVision || hasConfirmedCapability(m, "vision"))
+          .filter((m) => !needsTools || hasConfirmedCapability(m, "tool_calling"))
+          .filter((m) => !isLocalQuotaExhausted(m.id, tenantId, credentialId))
+          .filter((m) => (this.modelFailureMap.get(m.id) || 0) < 3)
+      : [];
 
     // Score eligible models dynamically based on task complexity alignment
     const scoredLangdock = eligibleLangdock.map((m) => {
       let score = 10;
-      if (complexity === "high_reasoning" && m.capabilities.includes("thinking")) score += 15;
-      if (complexity === "coding" && m.capabilities.includes("tool_calling")) score += 10;
-      if (complexity === "vision" && m.capabilities.includes("vision")) score += 15;
+      if (complexity === "high_reasoning" && hasConfirmedCapability(m, "thinking")) score += 15;
+      if (complexity === "coding" && hasConfirmedCapability(m, "tool_calling")) score += 10;
+      if (complexity === "vision" && hasConfirmedCapability(m, "vision")) score += 15;
       if (complexity === "fast_response" && m.id.includes("mini")) score += 10;
 
       const failures = this.modelFailureMap.get(m.id) || 0;
@@ -169,8 +175,15 @@ export class IntelligenceRouter {
     scoredLangdock.sort((a, b) => b.score - a.score);
     const sortedLangdockModels = scoredLangdock.map((sm) => sm.model);
 
-    const openrouterAuto = MODEL_REGISTRY["openrouter/auto"];
-    const openrouterFree = MODEL_REGISTRY["openrouter/free"];
+    // Retrieve eligible OpenRouter models if OpenRouter provider is healthy
+    const eligibleOpenRouter = openrouterHealth.isHealthy
+      ? [MODEL_REGISTRY["openrouter/auto"], MODEL_REGISTRY["openrouter/free"]]
+          .filter((m): m is ModelSpec => Boolean(m))
+          .filter((m) => !needsVision || hasConfirmedCapability(m, "vision"))
+          .filter((m) => !needsTools || hasConfirmedCapability(m, "tool_calling"))
+          .filter((m) => !isLocalQuotaExhausted(m.id, tenantId, credentialId))
+          .filter((m) => (this.modelFailureMap.get(m.id) || 0) < 3)
+      : [];
 
     let primaryModel: ModelSpec;
     let fallbackChain: ModelSpec[];
@@ -178,13 +191,16 @@ export class IntelligenceRouter {
     if (langdockHealth.isHealthy && sortedLangdockModels.length > 0) {
       primaryModel = sortedLangdockModels[0];
       const remainingLangdock = sortedLangdockModels.slice(1);
-      fallbackChain = [...remainingLangdock, openrouterAuto, openrouterFree].filter(
-        (m): m is ModelSpec => Boolean(m),
-      );
+      fallbackChain = [...remainingLangdock, ...eligibleOpenRouter];
+    } else if (openrouterHealth.isHealthy && eligibleOpenRouter.length > 0) {
+      primaryModel = eligibleOpenRouter[0];
+      fallbackChain = eligibleOpenRouter.slice(1);
     } else {
-      // Langdock provider in cooldown or all Langdock models exhausted → Failover to OpenRouter
-      primaryModel = openrouterAuto || openrouterFree;
-      fallbackChain = [openrouterFree].filter((m): m is ModelSpec => Boolean(m));
+      throw new Error(
+        `All provider routes are unavailable or in circuit breaker cooldown (Langdock health: ${
+          langdockHealth.isHealthy ? "healthy (no eligible models)" : "cooldown"
+        }, OpenRouter health: ${openrouterHealth.isHealthy ? "healthy (no eligible models)" : "cooldown"}).`,
+      );
     }
 
     return {
@@ -193,6 +209,8 @@ export class IntelligenceRouter {
       complexity,
       reason: `Execution route selected (complexity: ${complexity}, langdockHealth: ${
         langdockHealth.isHealthy ? "healthy" : "cooldown"
+      }, openrouterHealth: ${
+        openrouterHealth.isHealthy ? "healthy" : "cooldown"
       }). Selected primary: ${primaryModel.id}, fallbacks: ${fallbackChain
         .map((m) => m.id)
         .join(", ")}.`,

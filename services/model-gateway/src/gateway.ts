@@ -11,7 +11,7 @@ import type { IModelProviderAdapter } from "./adapters/base.js";
 import { LangdockAdapter } from "./adapters/langdock.js";
 import { OpenRouterAdapter } from "./adapters/openrouter.js";
 import { getModelSpec, recordLocalUsage } from "./registry.js";
-import { IntelligenceRouter } from "./router.js";
+import { IntelligenceRouter, type RoutingDecision } from "./router.js";
 
 export class ModelGateway {
   private readonly adapters: Record<ProviderId, IModelProviderAdapter>;
@@ -44,8 +44,44 @@ export class ModelGateway {
     const startTime = new Date();
     const trace = request.trace;
 
-    // Intelligence Router selects internal primary model and fallback chain dynamically
-    const routing = this.router.selectRouting(request);
+    let routing: RoutingDecision;
+    try {
+      routing = this.router.selectRouting(request);
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      yield {
+        type: "error",
+        traceId: trace.traceId,
+        error: {
+          code: "all_providers_unavailable",
+          message: errMsg,
+          retryable: true,
+        },
+      };
+
+      const auditEvent: AuditLogEvent = {
+        traceId: trace.traceId,
+        tenantId: trace.tenantId,
+        userId: trace.userId,
+        conversationId: trace.conversationId,
+        agentRunId: trace.agentRunId,
+        provider: "langdock",
+        model: "gpt-5.4",
+        startTime: startTime.toISOString(),
+        endTime: new Date().toISOString(),
+        latencyMs: Date.now() - startTime.getTime(),
+        promptTokens: 0,
+        completionTokens: 0,
+        totalTokens: 0,
+        toolCallsCount: 0,
+        status: "error",
+        errorMessage: errMsg,
+        providerAttempts: [],
+      };
+      this.auditLogs.push(auditEvent);
+      return;
+    }
+
     const candidateModels = [routing.primaryModel, ...routing.fallbackChain];
 
     let promptTokens = 0;
@@ -58,6 +94,7 @@ export class ModelGateway {
     const providerAttempts: ProviderAttempt[] = [];
     let successfulModel = routing.primaryModel;
     let streamSucceeded = false;
+    const executedToolCallIds = new Set<string>();
 
     for (let i = 0; i < candidateModels.length; i++) {
       const currentModel = candidateModels[i];
@@ -78,7 +115,15 @@ export class ModelGateway {
             promptTokens = event.usage.promptTokens;
             completionTokens = event.usage.completionTokens;
             totalTokens = event.usage.totalTokens;
-          } else if (event.type === "tool_call_start") {
+          } else if (event.type === "tool_call_start" && event.toolCall) {
+            const toolCallKey =
+              event.toolCall.id ||
+              `${event.toolCall.name}:${JSON.stringify(event.toolCall.arguments)}`;
+            if (executedToolCallIds.has(toolCallKey)) {
+              // Idempotency: skip duplicate tool execution on route failover
+              continue;
+            }
+            executedToolCallIds.add(toolCallKey);
             toolCallsCount++;
           } else if (event.type === "error" && event.error) {
             throw new Error(event.error.message);
@@ -96,7 +141,7 @@ export class ModelGateway {
 
         this.router.recordProviderSuccess(currentModel.provider, currentModel.id);
         // Only record quota usage on SUCCESSFUL request completions
-        recordLocalUsage(currentModel.id, totalTokens || 50);
+        recordLocalUsage(currentModel.id, totalTokens || 50, trace.tenantId, trace.credentialId);
         successfulModel = currentModel;
         streamSucceeded = true;
         break; // Stream succeeded, break failover loop
