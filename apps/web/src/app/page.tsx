@@ -1,5 +1,6 @@
 "use client";
 
+import type { ChatMessage } from "@orbaagent/shared";
 import { Bot, Sparkles } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { ErrorBanner } from "../components/ErrorBanner";
@@ -79,7 +80,7 @@ export default function Home() {
           </div>
         ) : (
           <div className="flex flex-col min-h-full">
-            {messages.map((msg) => (
+            {messages.map((msg: ChatMessage) => (
               <MessageItem key={msg.id || Math.random().toString()} message={msg} />
             ))}
           </div>

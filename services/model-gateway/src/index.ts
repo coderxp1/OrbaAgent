@@ -10,7 +10,10 @@ export * from "./registry.js";
 export * from "./gateway.js";
 export * from "./server.js";
 
-export function startGatewayServer(port = Number(process.env.PORT) || 3001, host = process.env.HOST || "0.0.0.0") {
+export function startGatewayServer(
+  port = Number(process.env.PORT) || 3001,
+  host = process.env.HOST || "0.0.0.0",
+) {
   const server = createModelGatewayServer(new ModelGateway());
   return server.listen({ port, host }, (err: unknown, address: string) => {
     if (err) {
