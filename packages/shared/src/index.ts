@@ -106,8 +106,17 @@ export const TraceMetadataSchema = z.object({
 });
 export type TraceMetadata = z.infer<typeof TraceMetadataSchema>;
 
+export const RoutingStrategySchema = z.enum([
+  "auto",
+  "cost_optimized",
+  "high_reasoning",
+  "fast_response",
+  "fallback",
+]);
+export type RoutingStrategy = z.infer<typeof RoutingStrategySchema>;
+
 export const ChatCompletionRequestSchema = z.object({
-  modelId: z.string(),
+  modelId: z.string().optional().default("auto"),
   messages: z.array(ChatMessageSchema),
   systemPrompt: z.string().optional(),
   tools: z.array(ToolDefinitionSchema).optional(),

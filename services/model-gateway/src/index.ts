@@ -7,6 +7,7 @@ export * from "./adapters/openai.js";
 export * from "./adapters/anthropic.js";
 export * from "./adapters/google.js";
 export * from "./registry.js";
+export * from "./router.js";
 export * from "./gateway.js";
 export * from "./server.js";
 

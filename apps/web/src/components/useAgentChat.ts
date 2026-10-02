@@ -1,10 +1,9 @@
 "use client";
 
-import type { ChatMessage, NormalizedEvent, ToolCall, UsageStats } from "@orbaagent/shared";
+import type { ChatMessage, NormalizedEvent, UsageStats } from "@orbaagent/shared";
 import { useCallback, useRef, useState } from "react";
 
-export function useAgentChat(initialModelId = "grok-2-latest") {
-  const [modelId, setModelId] = useState<string>(initialModelId);
+export function useAgentChat() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [error, setError] = useState<{ code: string; message: string } | null>(null);
@@ -61,7 +60,7 @@ export function useAgentChat(initialModelId = "grok-2-latest") {
           headers: { "Content-Type": "application/json" },
           signal: controller.signal,
           body: JSON.stringify({
-            modelId,
+            modelId: "auto",
             messages: updatedMessages.map((m) => ({
               role: m.role,
               content: m.content,
@@ -153,7 +152,7 @@ export function useAgentChat(initialModelId = "grok-2-latest") {
         abortControllerRef.current = null;
       }
     },
-    [isGenerating, messages, modelId],
+    [isGenerating, messages],
   );
 
   const retryLastMessage = useCallback(() => {
@@ -173,8 +172,6 @@ export function useAgentChat(initialModelId = "grok-2-latest") {
   }, [cancelGeneration]);
 
   return {
-    modelId,
-    setModelId,
     messages,
     isGenerating,
     error,

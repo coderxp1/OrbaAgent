@@ -12,12 +12,17 @@ import { GoogleAdapter } from "./adapters/google.js";
 import { OpenAIAdapter } from "./adapters/openai.js";
 import { XAIAdapter } from "./adapters/xai.js";
 import { getModelSpec } from "./registry.js";
+import { IntelligenceRouter } from "./router.js";
 
 export class ModelGateway {
   private readonly adapters: Record<ProviderId, IModelProviderAdapter>;
+  public readonly router: IntelligenceRouter;
   public readonly auditLogs: AuditLogEvent[] = [];
 
-  constructor(customAdapters?: Partial<Record<ProviderId, IModelProviderAdapter>>) {
+  constructor(
+    customAdapters?: Partial<Record<ProviderId, IModelProviderAdapter>>,
+    customRouter?: IntelligenceRouter,
+  ) {
     this.adapters = {
       xai: customAdapters?.xai || new XAIAdapter(),
       openai: customAdapters?.openai || new OpenAIAdapter(),
@@ -25,6 +30,7 @@ export class ModelGateway {
       google: customAdapters?.google || new GoogleAdapter(),
       local: customAdapters?.local || new OpenAIAdapter(),
     };
+    this.router = customRouter || new IntelligenceRouter();
   }
 
   getAdapterForModel(modelId: string): { adapter: IModelProviderAdapter; providerId: ProviderId } {
@@ -41,7 +47,10 @@ export class ModelGateway {
   ): AsyncGenerator<NormalizedEvent, void, unknown> {
     const startTime = new Date();
     const trace = request.trace;
-    const { adapter, providerId } = this.getAdapterForModel(request.modelId);
+
+    // Use OrbaAgent Intelligence Router to select optimal primary model & fallback chain
+    const routing = this.router.selectRouting(request);
+    const targetModel = routing.primaryModel;
 
     let promptTokens = 0;
     let completionTokens = 0;
@@ -50,8 +59,15 @@ export class ModelGateway {
     let status: "success" | "error" | "cancelled" = "success";
     let errorMessage: string | undefined;
 
+    const actualRequest: ChatCompletionRequest = {
+      ...request,
+      modelId: targetModel.id,
+    };
+
+    const { adapter, providerId } = this.getAdapterForModel(targetModel.id);
+
     try {
-      for await (const event of adapter.streamChat(request)) {
+      for await (const event of adapter.streamChat(actualRequest)) {
         if (event.type === "usage" && event.usage) {
           promptTokens = event.usage.promptTokens;
           completionTokens = event.usage.completionTokens;
@@ -87,7 +103,7 @@ export class ModelGateway {
         conversationId: trace.conversationId,
         agentRunId: trace.agentRunId,
         provider: providerId,
-        model: request.modelId,
+        model: targetModel.id,
         startTime: startTime.toISOString(),
         endTime: endTime.toISOString(),
         latencyMs,

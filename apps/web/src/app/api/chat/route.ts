@@ -8,14 +8,15 @@ export async function POST(request: Request) {
   try {
     const body = (await request.json()) as ChatCompletionRequest;
 
-    if (!body.modelId || !body.messages) {
-      return Response.json({ error: "Missing modelId or messages" }, { status: 400 });
+    if (!body.messages || !Array.isArray(body.messages)) {
+      return Response.json({ error: "Missing messages array" }, { status: 400 });
     }
 
     const traceId =
       body.trace?.traceId || `trace_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     const fullRequest: ChatCompletionRequest = {
       ...body,
+      modelId: body.modelId || "auto",
       trace: {
         traceId,
         tenantId: body.trace?.tenantId || "default-tenant",

@@ -1,7 +1,7 @@
 "use client";
 
 import type { ChatMessage } from "@orbaagent/shared";
-import { Bot, Sparkles } from "lucide-react";
+import { Bot, Code2, Cpu, Terminal } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { Header } from "../components/Header";
@@ -12,8 +12,6 @@ import { useAgentChat } from "../components/useAgentChat";
 
 export default function Home() {
   const {
-    modelId,
-    setModelId,
     messages,
     isGenerating,
     error,
@@ -23,7 +21,7 @@ export default function Home() {
     cancelGeneration,
     retryLastMessage,
     clearChat,
-  } = useAgentChat("grok-2-latest");
+  } = useAgentChat();
 
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -36,12 +34,7 @@ export default function Home() {
   return (
     <div className="flex h-screen w-screen flex-col bg-zinc-950 text-zinc-100 font-sans antialiased overflow-hidden">
       {/* Header Bar */}
-      <Header
-        modelId={modelId}
-        onSelectModel={setModelId}
-        activeTraceId={activeTraceId}
-        onClearChat={clearChat}
-      />
+      <Header activeTraceId={activeTraceId} onClearChat={clearChat} />
 
       {/* Main Conversation Feed */}
       <main ref={scrollRef} className="flex-1 overflow-y-auto">
@@ -51,30 +44,44 @@ export default function Home() {
               <Bot className="h-9 w-9 text-white" />
             </div>
             <h2 className="text-2xl font-bold tracking-tight text-white mb-2">
-              Welcome to OrbaAgent
+              What can OrbaAgent build for you?
             </h2>
             <p className="max-w-md text-sm text-zinc-400 mb-8 leading-relaxed">
-              Autonomous AI Agent Platform powered by normalized Model Gateway. Ask questions,
-              explore code, or simulate tool calls with xAI Grok, Claude, GPT-4o, and Gemini.
+              Autonomous Software Engineering Agent. Give OrbaAgent an objective and it will plan,
+              execute shell commands, edit code, run tests, and deliver results automatically.
             </p>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-lg w-full text-left">
               <button
-                onClick={() => sendMessage("What is the architecture of OrbaAgent?")}
+                onClick={() =>
+                  sendMessage("Build a full-stack web application with Next.js & Tailwind CSS.")
+                }
                 type="button"
                 className="flex items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-900/60 p-4 text-xs text-zinc-300 hover:border-cyan-500/50 hover:bg-zinc-900 transition-all group"
               >
-                <Sparkles className="h-4 w-4 text-cyan-400 shrink-0 group-hover:scale-110 transition-transform" />
-                <span>Explain OrbaAgent Architecture</span>
+                <Code2 className="h-4 w-4 text-cyan-400 shrink-0 group-hover:scale-110 transition-transform" />
+                <div>
+                  <div className="font-semibold text-zinc-200">Build Full-Stack App</div>
+                  <div className="text-zinc-500 text-[11px]">
+                    Generate Next.js application & components
+                  </div>
+                </div>
               </button>
 
               <button
-                onClick={() => sendMessage("Demonstrate tool execution and agent thought process.")}
+                onClick={() =>
+                  sendMessage("Simulate terminal execution, multi-step planning, and tool calls.")
+                }
                 type="button"
                 className="flex items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-900/60 p-4 text-xs text-zinc-300 hover:border-cyan-500/50 hover:bg-zinc-900 transition-all group"
               >
-                <Sparkles className="h-4 w-4 text-indigo-400 shrink-0 group-hover:scale-110 transition-transform" />
-                <span>Simulate Agent Tool Calling</span>
+                <Terminal className="h-4 w-4 text-indigo-400 shrink-0 group-hover:scale-110 transition-transform" />
+                <div>
+                  <div className="font-semibold text-zinc-200">Execute Terminal Workflow</div>
+                  <div className="text-zinc-500 text-[11px]">
+                    Simulate CLI tool calls & execution plan
+                  </div>
+                </div>
               </button>
             </div>
           </div>
