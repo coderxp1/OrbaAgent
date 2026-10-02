@@ -2,10 +2,8 @@ import { ModelGateway } from "./gateway.js";
 import { createModelGatewayServer } from "./server.js";
 
 export * from "./adapters/base.js";
-export * from "./adapters/xai.js";
-export * from "./adapters/openai.js";
-export * from "./adapters/anthropic.js";
-export * from "./adapters/google.js";
+export * from "./adapters/langdock.js";
+export * from "./adapters/openrouter.js";
 export * from "./registry.js";
 export * from "./router.js";
 export * from "./gateway.js";

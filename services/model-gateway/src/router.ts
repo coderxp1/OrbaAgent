@@ -1,5 +1,5 @@
 import type { ChatCompletionRequest, ModelSpec } from "@orbaagent/shared";
-import { MODEL_REGISTRY, getModelSpec } from "./registry.js";
+import { MODEL_REGISTRY } from "./registry.js";
 
 export type TaskComplexity = "high_reasoning" | "coding" | "vision" | "fast_response" | "general";
 
@@ -74,75 +74,25 @@ export class IntelligenceRouter {
   }
 
   /**
-   * Select primary model and ordered fallback chain based on task intelligence
+   * Select primary model (Langdock) and ordered fallback chain (OpenRouter) based on task intelligence.
+   * Note: External model selection is rejected/ignored and normalized to "auto".
    */
   selectRouting(request: ChatCompletionRequest): RoutingDecision {
-    const reqModel = request.modelId || "auto";
-
-    // If explicit model requested (and not auto), honor explicit request first
-    if (reqModel !== "auto" && MODEL_REGISTRY[reqModel]) {
-      const primary = getModelSpec(reqModel);
-      const fallbacks = Object.values(MODEL_REGISTRY).filter((m) => m.id !== primary.id);
-      return {
-        primaryModel: primary,
-        fallbackChain: fallbacks,
-        complexity: "general",
-        reason: `User explicitly specified model: ${primary.name}`,
-      };
-    }
-
+    // External model selection parameter is ignored & normalized to auto
+    const normalizedModel = "auto";
     const complexity = this.classifyTask(request);
 
-    switch (complexity) {
-      case "coding":
-      case "high_reasoning":
-        return {
-          primaryModel:
-            MODEL_REGISTRY["grok-2-latest"] || MODEL_REGISTRY["claude-3-5-sonnet-latest"],
-          fallbackChain: [
-            MODEL_REGISTRY["claude-3-5-sonnet-latest"],
-            MODEL_REGISTRY["gpt-4o"],
-            MODEL_REGISTRY["gemini-1.5-pro-latest"],
-            MODEL_REGISTRY["gpt-4o-mini"],
-          ].filter(Boolean),
-          complexity,
-          reason:
-            "Task requires advanced reasoning and coding capabilities; routed to top-tier agentic models.",
-        };
-      case "vision":
-        return {
-          primaryModel: MODEL_REGISTRY["grok-vision-beta"] || MODEL_REGISTRY["gpt-4o"],
-          fallbackChain: [
-            MODEL_REGISTRY["gpt-4o"],
-            MODEL_REGISTRY["claude-3-5-sonnet-latest"],
-            MODEL_REGISTRY["gemini-1.5-pro-latest"],
-          ].filter(Boolean),
-          complexity,
-          reason: "Multimodal vision task detected; routed to vision-capable model provider.",
-        };
-      case "fast_response":
-        return {
-          primaryModel: MODEL_REGISTRY["gpt-4o-mini"] || MODEL_REGISTRY["claude-3-haiku-20240307"],
-          fallbackChain: [
-            MODEL_REGISTRY["claude-3-haiku-20240307"],
-            MODEL_REGISTRY["gemini-1.5-flash-latest"],
-            MODEL_REGISTRY["grok-2-latest"],
-          ].filter(Boolean),
-          complexity,
-          reason: "Fast response task; routed to low-latency model with fallback to high-tier.",
-        };
-      default:
-        return {
-          primaryModel: MODEL_REGISTRY["grok-2-latest"] || MODEL_REGISTRY["gpt-4o"],
-          fallbackChain: [
-            MODEL_REGISTRY["gpt-4o"],
-            MODEL_REGISTRY["claude-3-5-sonnet-latest"],
-            MODEL_REGISTRY["gemini-1.5-pro-latest"],
-          ].filter(Boolean),
-          complexity,
-          reason: "General autonomous task; routed to OrbaAgent primary model.",
-        };
-    }
+    // Primary source: Langdock. Secondary source: OpenRouter.
+    const langdockPrimary = MODEL_REGISTRY["langdock-auto"] || MODEL_REGISTRY["langdock-fast"];
+    const openrouterSecondary =
+      MODEL_REGISTRY["openrouter/auto"] || MODEL_REGISTRY["openrouter/fallback"];
+
+    return {
+      primaryModel: langdockPrimary,
+      fallbackChain: [openrouterSecondary],
+      complexity,
+      reason: `Task classified as ${complexity}. Primary route: Langdock API (${langdockPrimary.id}); Fallback route: OpenRouter API (${openrouterSecondary.id}). External model selection normalized to '${normalizedModel}'.`,
+    };
   }
 
   /**

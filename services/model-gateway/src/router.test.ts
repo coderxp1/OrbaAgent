@@ -5,9 +5,9 @@ import { IntelligenceRouter } from "./router.js";
 describe("IntelligenceRouter", () => {
   const router = new IntelligenceRouter();
 
-  it("should classify coding tasks and select top-tier coding models", () => {
+  it("should route coding tasks to Langdock primary and OpenRouter fallback", () => {
     const req: ChatCompletionRequest = {
-      modelId: "auto",
+      modelId: "gpt-4o", // External model choice parameter to normalize
       messages: [
         { role: "user", content: "Build a React component with TypeScript and fix CI bugs" },
       ],
@@ -23,8 +23,8 @@ describe("IntelligenceRouter", () => {
 
     const routing = router.selectRouting(req);
     expect(routing.complexity).toBe("coding");
-    expect(routing.primaryModel).toBeDefined();
-    expect(routing.fallbackChain.length).toBeGreaterThan(0);
+    expect(routing.primaryModel.provider).toBe("langdock");
+    expect(routing.fallbackChain[0].provider).toBe("openrouter");
   });
 
   it("should classify vision tasks when images are mentioned", () => {

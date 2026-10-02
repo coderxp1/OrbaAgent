@@ -41,7 +41,7 @@ export class OrbaError extends Error {
 }
 
 // Model Registry & Provider Schemas
-export const ProviderIdSchema = z.enum(["xai", "openai", "anthropic", "google", "local"]);
+export const ProviderIdSchema = z.enum(["langdock", "openrouter", "local"]);
 export type ProviderId = z.infer<typeof ProviderIdSchema>;
 
 export const ModelCapabilitySchema = z.enum([
@@ -164,6 +164,15 @@ export const NormalizedEventSchema = z.object({
 });
 export type NormalizedEvent = z.infer<typeof NormalizedEventSchema>;
 
+export const ProviderAttemptSchema = z.object({
+  provider: ProviderIdSchema,
+  model: z.string(),
+  status: z.enum(["success", "error", "timeout"]),
+  latencyMs: z.number(),
+  errorMessage: z.string().optional(),
+});
+export type ProviderAttempt = z.infer<typeof ProviderAttemptSchema>;
+
 export const AuditLogEventSchema = z.object({
   traceId: z.string(),
   tenantId: z.string(),
@@ -181,5 +190,6 @@ export const AuditLogEventSchema = z.object({
   toolCallsCount: z.number(),
   status: z.enum(["success", "error", "cancelled"]),
   errorMessage: z.string().optional(),
+  providerAttempts: z.array(ProviderAttemptSchema).optional(),
 });
 export type AuditLogEvent = z.infer<typeof AuditLogEventSchema>;

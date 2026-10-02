@@ -2,15 +2,14 @@ import type {
   AuditLogEvent,
   ChatCompletionRequest,
   NormalizedEvent,
+  ProviderAttempt,
   ProviderId,
   ToolCall,
   UsageStats,
 } from "@orbaagent/shared";
-import { AnthropicAdapter } from "./adapters/anthropic.js";
 import type { IModelProviderAdapter } from "./adapters/base.js";
-import { GoogleAdapter } from "./adapters/google.js";
-import { OpenAIAdapter } from "./adapters/openai.js";
-import { XAIAdapter } from "./adapters/xai.js";
+import { LangdockAdapter } from "./adapters/langdock.js";
+import { OpenRouterAdapter } from "./adapters/openrouter.js";
 import { getModelSpec } from "./registry.js";
 import { IntelligenceRouter } from "./router.js";
 
@@ -24,11 +23,9 @@ export class ModelGateway {
     customRouter?: IntelligenceRouter,
   ) {
     this.adapters = {
-      xai: customAdapters?.xai || new XAIAdapter(),
-      openai: customAdapters?.openai || new OpenAIAdapter(),
-      anthropic: customAdapters?.anthropic || new AnthropicAdapter(),
-      google: customAdapters?.google || new GoogleAdapter(),
-      local: customAdapters?.local || new OpenAIAdapter(),
+      langdock: customAdapters?.langdock || new LangdockAdapter(),
+      openrouter: customAdapters?.openrouter || new OpenRouterAdapter(),
+      local: customAdapters?.local || new LangdockAdapter(),
     };
     this.router = customRouter || new IntelligenceRouter();
   }
@@ -48,76 +45,118 @@ export class ModelGateway {
     const startTime = new Date();
     const trace = request.trace;
 
-    // Use OrbaAgent Intelligence Router to select optimal primary model & fallback chain
+    // Intelligence Router selects primary model (Langdock) and ordered fallback chain (OpenRouter)
     const routing = this.router.selectRouting(request);
-    const targetModel = routing.primaryModel;
+    const candidateModels = [routing.primaryModel, ...routing.fallbackChain];
 
     let promptTokens = 0;
     let completionTokens = 0;
     let totalTokens = 0;
     let toolCallsCount = 0;
-    let status: "success" | "error" | "cancelled" = "success";
-    let errorMessage: string | undefined;
+    let finalStatus: "success" | "error" | "cancelled" = "success";
+    let finalErrorMessage: string | undefined;
 
-    const actualRequest: ChatCompletionRequest = {
-      ...request,
-      modelId: targetModel.id,
+    const providerAttempts: ProviderAttempt[] = [];
+    let successfulModel = routing.primaryModel;
+    let streamSucceeded = false;
+
+    for (let i = 0; i < candidateModels.length; i++) {
+      const currentModel = candidateModels[i];
+      const attemptStart = Date.now();
+
+      try {
+        const { adapter } = this.getAdapterForModel(currentModel.id);
+        const actualRequest: ChatCompletionRequest = {
+          ...request,
+          modelId: currentModel.id,
+        };
+
+        for await (const event of adapter.streamChat(actualRequest)) {
+          if (event.type === "usage" && event.usage) {
+            promptTokens = event.usage.promptTokens;
+            completionTokens = event.usage.completionTokens;
+            totalTokens = event.usage.totalTokens;
+          } else if (event.type === "tool_call_start") {
+            toolCallsCount++;
+          } else if (event.type === "error" && event.error) {
+            throw new Error(event.error.message);
+          }
+          yield event;
+        }
+
+        const attemptLatency = Date.now() - attemptStart;
+        providerAttempts.push({
+          provider: currentModel.provider,
+          model: currentModel.id,
+          status: "success",
+          latencyMs: attemptLatency,
+        });
+
+        successfulModel = currentModel;
+        streamSucceeded = true;
+        break; // Stream succeeded, break failover loop
+      } catch (err: unknown) {
+        const attemptLatency = Date.now() - attemptStart;
+        const errMsg = err instanceof Error ? err.message : String(err);
+        const lowerMsg = errMsg.toLowerCase();
+        const isTimeout = lowerMsg.includes("timeout") || lowerMsg.includes("timed out");
+
+        providerAttempts.push({
+          provider: currentModel.provider,
+          model: currentModel.id,
+          status: isTimeout ? "timeout" : "error",
+          latencyMs: attemptLatency,
+          errorMessage: errMsg,
+        });
+
+        if (i < candidateModels.length - 1) {
+          const nextModel = candidateModels[i + 1];
+          yield {
+            type: "thinking_delta",
+            traceId: trace.traceId,
+            thinkingDelta: `\n[OrbaAgent Router] Provider ${currentModel.provider} failed (${errMsg}). Initiating failover to ${nextModel.provider}...\n`,
+          };
+        } else {
+          finalStatus = "error";
+          finalErrorMessage = errMsg;
+          yield {
+            type: "error",
+            traceId: trace.traceId,
+            error: {
+              code: "all_providers_unavailable",
+              message: `All AI providers failed. Last error: ${errMsg}`,
+              retryable: true,
+            },
+          };
+        }
+      }
+    }
+
+    const endTime = new Date();
+    const latencyMs = endTime.getTime() - startTime.getTime();
+
+    const auditEvent: AuditLogEvent = {
+      traceId: trace.traceId,
+      tenantId: trace.tenantId,
+      userId: trace.userId,
+      conversationId: trace.conversationId,
+      agentRunId: trace.agentRunId,
+      provider: successfulModel.provider,
+      model: successfulModel.id,
+      startTime: startTime.toISOString(),
+      endTime: endTime.toISOString(),
+      latencyMs,
+      promptTokens,
+      completionTokens,
+      totalTokens,
+      toolCallsCount,
+      status: streamSucceeded ? "success" : finalStatus,
+      errorMessage: finalErrorMessage,
+      providerAttempts,
     };
 
-    const { adapter, providerId } = this.getAdapterForModel(targetModel.id);
-
-    try {
-      for await (const event of adapter.streamChat(actualRequest)) {
-        if (event.type === "usage" && event.usage) {
-          promptTokens = event.usage.promptTokens;
-          completionTokens = event.usage.completionTokens;
-          totalTokens = event.usage.totalTokens;
-        } else if (event.type === "tool_call_start") {
-          toolCallsCount++;
-        } else if (event.type === "error" && event.error) {
-          status = "error";
-          errorMessage = event.error.message;
-        }
-        yield event;
-      }
-    } catch (err: unknown) {
-      status = "error";
-      errorMessage = err instanceof Error ? err.message : String(err);
-      yield {
-        type: "error",
-        traceId: trace.traceId,
-        error: {
-          code: "gateway_execution_error",
-          message: errorMessage,
-          retryable: true,
-        },
-      };
-    } finally {
-      const endTime = new Date();
-      const latencyMs = endTime.getTime() - startTime.getTime();
-
-      const auditEvent: AuditLogEvent = {
-        traceId: trace.traceId,
-        tenantId: trace.tenantId,
-        userId: trace.userId,
-        conversationId: trace.conversationId,
-        agentRunId: trace.agentRunId,
-        provider: providerId,
-        model: targetModel.id,
-        startTime: startTime.toISOString(),
-        endTime: endTime.toISOString(),
-        latencyMs,
-        promptTokens,
-        completionTokens,
-        totalTokens,
-        toolCallsCount,
-        status,
-        errorMessage,
-      };
-
-      this.auditLogs.push(auditEvent);
-      console.log(`[ModelGateway Audit] ${JSON.stringify(auditEvent)}`);
-    }
+    this.auditLogs.push(auditEvent);
+    console.log(`[ModelGateway Audit] ${JSON.stringify(auditEvent)}`);
   }
 
   async chat(request: ChatCompletionRequest): Promise<{
