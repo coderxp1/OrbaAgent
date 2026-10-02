@@ -16,12 +16,25 @@ export function Header({ activeTraceId, onClearChat }: HeaderProps) {
         </div>
         <div>
           <div className="flex items-center gap-2">
-            <h1 className="font-bold text-lg tracking-tight">OrbaAgent</h1>
+            <a
+              href="/"
+              className="font-bold text-lg tracking-tight hover:text-cyan-400 transition-colors"
+            >
+              OrbaAgent
+            </a>
             <span className="rounded-md border border-cyan-500/30 bg-cyan-950/50 px-2 py-0.5 font-medium text-cyan-400 text-xs">
               Autonomous Agent Engine
             </span>
           </div>
-          <p className="text-xs text-zinc-400">General-Purpose Software Engineering Agent</p>
+          <div className="flex items-center gap-3 text-xs text-zinc-400">
+            <a href="/" className="hover:text-white transition-colors">
+              Home
+            </a>
+            <span>•</span>
+            <a href="/pricing" className="hover:text-white transition-colors">
+              Pricing
+            </a>
+          </div>
         </div>
       </div>
 

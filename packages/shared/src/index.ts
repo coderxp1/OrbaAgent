@@ -143,6 +143,7 @@ export const NormalizedEventTypeSchema = z.enum([
   "usage",
   "error",
   "done",
+  "stream_reset",
 ]);
 export type NormalizedEventType = z.infer<typeof NormalizedEventTypeSchema>;
 
@@ -161,6 +162,7 @@ export const NormalizedEventSchema = z.object({
     })
     .optional(),
   finishReason: z.string().optional(),
+  resetReason: z.string().optional(),
 });
 export type NormalizedEvent = z.infer<typeof NormalizedEventSchema>;
 

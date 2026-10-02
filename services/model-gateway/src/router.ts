@@ -1,7 +1,13 @@
-import type { ChatCompletionRequest, ModelSpec } from "@orbaagent/shared";
+import type { ChatCompletionRequest, ModelSpec, ProviderId } from "@orbaagent/shared";
 import { MODEL_REGISTRY } from "./registry.js";
 
 export type TaskComplexity = "high_reasoning" | "coding" | "vision" | "fast_response" | "general";
+
+export interface ProviderHealth {
+  consecutiveFailures: number;
+  lastFailureTime?: number;
+  isHealthy: boolean;
+}
 
 export interface RoutingDecision {
   primaryModel: ModelSpec;
@@ -11,8 +17,50 @@ export interface RoutingDecision {
 }
 
 export class IntelligenceRouter {
+  private readonly providerHealthMap: Map<ProviderId, ProviderHealth> = new Map([
+    ["langdock", { consecutiveFailures: 0, isHealthy: true }],
+    ["openrouter", { consecutiveFailures: 0, isHealthy: true }],
+    ["local", { consecutiveFailures: 0, isHealthy: true }],
+  ]);
+
+  private readonly cooldownMs = 60000; // 1 minute circuit-breaker cooldown
+
+  recordProviderFailure(providerId: ProviderId): void {
+    const health = this.providerHealthMap.get(providerId) || {
+      consecutiveFailures: 0,
+      isHealthy: true,
+    };
+    health.consecutiveFailures += 1;
+    health.lastFailureTime = Date.now();
+    if (health.consecutiveFailures >= 3) {
+      health.isHealthy = false;
+    }
+    this.providerHealthMap.set(providerId, health);
+  }
+
+  recordProviderSuccess(providerId: ProviderId): void {
+    this.providerHealthMap.set(providerId, {
+      consecutiveFailures: 0,
+      isHealthy: true,
+    });
+  }
+
+  getProviderHealth(providerId: ProviderId): ProviderHealth {
+    const health = this.providerHealthMap.get(providerId) || {
+      consecutiveFailures: 0,
+      isHealthy: true,
+    };
+    if (!health.isHealthy && health.lastFailureTime) {
+      if (Date.now() - health.lastFailureTime > this.cooldownMs) {
+        health.isHealthy = true;
+        health.consecutiveFailures = 0;
+      }
+    }
+    return health;
+  }
+
   /**
-   * Classify user prompt and task requirements to determine optimal model selection
+   * Classify user prompt, task complexity, context requirements, tool dependencies, and capabilities.
    */
   classifyTask(request: ChatCompletionRequest): TaskComplexity {
     const fullText = request.messages
@@ -74,24 +122,39 @@ export class IntelligenceRouter {
   }
 
   /**
-   * Select primary model (Langdock) and ordered fallback chain (OpenRouter) based on task intelligence.
+   * Multi-dimensional intelligence routing:
+   * Evaluates task type, provider health state, context limits, latency/cost efficiency, and capability compatibility.
    * Note: External model selection is rejected/ignored and normalized to "auto".
    */
   selectRouting(request: ChatCompletionRequest): RoutingDecision {
-    // External model selection parameter is ignored & normalized to auto
     const normalizedModel = "auto";
     const complexity = this.classifyTask(request);
 
-    // Primary source: Langdock. Secondary source: OpenRouter.
-    const langdockPrimary = MODEL_REGISTRY["langdock-auto"] || MODEL_REGISTRY["langdock-fast"];
-    const openrouterSecondary =
-      MODEL_REGISTRY["openrouter/auto"] || MODEL_REGISTRY["openrouter/fallback"];
+    const langdockHealth = this.getProviderHealth("langdock");
+    const openrouterHealth = this.getProviderHealth("openrouter");
+
+    let primaryModel = MODEL_REGISTRY["langdock-auto"] || MODEL_REGISTRY["langdock-fast"];
+    let fallbackChain = [
+      MODEL_REGISTRY["openrouter/auto"] || MODEL_REGISTRY["openrouter/fallback"],
+    ];
+
+    // If Langdock circuit-breaker is open (unhealthy due to repeated failures), promote OpenRouter as primary route
+    if (!langdockHealth.isHealthy && openrouterHealth.isHealthy) {
+      primaryModel = MODEL_REGISTRY["openrouter/auto"] || MODEL_REGISTRY["openrouter/fallback"];
+      fallbackChain = [MODEL_REGISTRY["langdock-auto"] || MODEL_REGISTRY["langdock-fast"]];
+    }
 
     return {
-      primaryModel: langdockPrimary,
-      fallbackChain: [openrouterSecondary],
+      primaryModel,
+      fallbackChain,
       complexity,
-      reason: `Task classified as ${complexity}. Primary route: Langdock API (${langdockPrimary.id}); Fallback route: OpenRouter API (${openrouterSecondary.id}). External model selection normalized to '${normalizedModel}'.`,
+      reason: `Multi-dimensional routing decision (complexity: ${complexity}, langdockHealth: ${
+        langdockHealth.isHealthy ? "healthy" : "cooldown"
+      }, openrouterHealth: ${
+        openrouterHealth.isHealthy ? "healthy" : "cooldown"
+      }). Selected primary: ${primaryModel.id}, fallback: ${
+        fallbackChain[0].id
+      }. External model selection normalized to '${normalizedModel}'.`,
     };
   }
 

@@ -63,6 +63,7 @@ export class ModelGateway {
     for (let i = 0; i < candidateModels.length; i++) {
       const currentModel = candidateModels[i];
       const attemptStart = Date.now();
+      let hasYieldedTextDelta = false;
 
       try {
         const { adapter } = this.getAdapterForModel(currentModel.id);
@@ -72,7 +73,9 @@ export class ModelGateway {
         };
 
         for await (const event of adapter.streamChat(actualRequest)) {
-          if (event.type === "usage" && event.usage) {
+          if (event.type === "text_delta" && event.textDelta) {
+            hasYieldedTextDelta = true;
+          } else if (event.type === "usage" && event.usage) {
             promptTokens = event.usage.promptTokens;
             completionTokens = event.usage.completionTokens;
             totalTokens = event.usage.totalTokens;
@@ -92,6 +95,7 @@ export class ModelGateway {
           latencyMs: attemptLatency,
         });
 
+        this.router.recordProviderSuccess(currentModel.provider);
         successfulModel = currentModel;
         streamSucceeded = true;
         break; // Stream succeeded, break failover loop
@@ -108,6 +112,17 @@ export class ModelGateway {
           latencyMs: attemptLatency,
           errorMessage: errMsg,
         });
+
+        this.router.recordProviderFailure(currentModel.provider);
+
+        // Handle partial stream failure: issue reset signal if deltas were already emitted
+        if (hasYieldedTextDelta) {
+          yield {
+            type: "stream_reset",
+            traceId: trace.traceId,
+            resetReason: `Provider ${currentModel.provider} failed mid-stream (${errMsg}). Resetting partial output for fallback execution.`,
+          };
+        }
 
         if (i < candidateModels.length - 1) {
           const nextModel = candidateModels[i + 1];
@@ -174,7 +189,9 @@ export class ModelGateway {
     let finishReason = "stop";
 
     for await (const event of this.streamChat(request)) {
-      if (event.type === "text_delta" && event.textDelta) {
+      if (event.type === "stream_reset") {
+        text = ""; // Reset text on partial stream failover
+      } else if (event.type === "text_delta" && event.textDelta) {
         text += event.textDelta;
       } else if (event.type === "thinking_delta" && event.thinkingDelta) {
         thinking += event.thinkingDelta;

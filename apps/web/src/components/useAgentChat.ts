@@ -104,7 +104,11 @@ export function useAgentChat() {
               try {
                 const event = JSON.parse(trimmed.slice(6)) as NormalizedEvent;
 
-                if (event.type === "text_delta" && event.textDelta) {
+                if (event.type === "stream_reset") {
+                  setMessages((prev) =>
+                    prev.map((msg) => (msg.id === assistantMsgId ? { ...msg, content: "" } : msg)),
+                  );
+                } else if (event.type === "text_delta" && event.textDelta) {
                   setMessages((prev) =>
                     prev.map((msg) =>
                       msg.id === assistantMsgId

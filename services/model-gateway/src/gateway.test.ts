@@ -43,6 +43,18 @@ describe("ModelGateway Provider Failover & Production Safety", () => {
     expect(latestAudit.providerAttempts?.[0].status).toBe("success");
   });
 
+  it("should stream successfully via OpenRouter adapter directly", async () => {
+    const adapter = new OpenRouterAdapter();
+    const events: NormalizedEvent[] = [];
+    for await (const event of adapter.streamChat(sampleRequest)) {
+      events.push(event);
+    }
+
+    expect(events.length).toBeGreaterThan(0);
+    const textDeltas = events.filter((e) => e.type === "text_delta");
+    expect(textDeltas.length).toBeGreaterThan(0);
+  });
+
   it("should failover from Langdock timeout to OpenRouter fallback", async () => {
     class TimeoutLangdockAdapter extends LangdockAdapter {
       // biome-ignore lint/correctness/useYield: Interface requirement
@@ -99,6 +111,39 @@ describe("ModelGateway Provider Failover & Production Safety", () => {
     expect(latestAudit.provider).toBe("openrouter");
     expect(latestAudit.providerAttempts?.[0].status).toBe("error");
     expect(latestAudit.providerAttempts?.[1].status).toBe("success");
+  });
+
+  it("should handle partial-stream failover by emitting stream_reset event", async () => {
+    class PartialFailingLangdockAdapter extends LangdockAdapter {
+      override async *streamChat(
+        req: ChatCompletionRequest,
+      ): AsyncGenerator<NormalizedEvent, void, unknown> {
+        yield {
+          type: "text_delta",
+          traceId: req.trace.traceId,
+          textDelta: "Partial text generated before failure...",
+        };
+        throw new Error("Langdock stream connection dropped mid-transfer");
+      }
+    }
+
+    const gateway = new ModelGateway({
+      langdock: new PartialFailingLangdockAdapter(),
+      openrouter: new OpenRouterAdapter(),
+    });
+
+    const events: NormalizedEvent[] = [];
+    for await (const event of gateway.streamChat(sampleRequest)) {
+      events.push(event);
+    }
+
+    const resetEvent = events.find((e) => e.type === "stream_reset");
+    expect(resetEvent).toBeDefined();
+    expect(resetEvent?.resetReason).toContain("Langdock stream connection dropped mid-transfer");
+
+    const latestAudit = gateway.auditLogs[gateway.auditLogs.length - 1];
+    expect(latestAudit.status).toBe("success");
+    expect(latestAudit.provider).toBe("openrouter");
   });
 
   it("should handle error gracefully when both Langdock and OpenRouter fail", async () => {

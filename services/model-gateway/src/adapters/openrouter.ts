@@ -12,6 +12,7 @@ export interface OpenRouterAdapterConfig {
   apiKey?: string;
   baseUrl?: string;
   timeoutMs?: number;
+  maxRetries?: number;
 }
 
 export class OpenRouterAdapter implements IModelProviderAdapter {
@@ -19,6 +20,7 @@ export class OpenRouterAdapter implements IModelProviderAdapter {
   private readonly apiKey: string | undefined;
   private readonly baseUrl: string;
   private readonly timeoutMs: number;
+  private readonly maxRetries: number;
 
   constructor(config?: OpenRouterAdapterConfig) {
     const rawKey = config?.apiKey || process.env.OPENROUTER_API_KEY;
@@ -26,6 +28,7 @@ export class OpenRouterAdapter implements IModelProviderAdapter {
     this.baseUrl =
       config?.baseUrl || process.env.OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1";
     this.timeoutMs = config?.timeoutMs || Number(process.env.OPENROUTER_TIMEOUT_MS) || 15000;
+    this.maxRetries = config?.maxRetries ?? Number(process.env.OPENROUTER_MAX_RETRIES ?? 2);
   }
 
   async *streamChat(
@@ -58,51 +61,138 @@ export class OpenRouterAdapter implements IModelProviderAdapter {
       );
     }
 
+    let response: Response | null = null;
+    let lastError: Error | null = null;
+
+    // Bounded retries for connection & initial HTTP request
+    for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+
+      try {
+        const res = await fetch(`${this.baseUrl}/chat/completions`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${this.apiKey}`,
+            "HTTP-Referer": "https://orbaagent.dev",
+            "X-Title": "OrbaAgent Intelligence Gateway",
+          },
+          signal: controller.signal,
+          body: JSON.stringify({
+            model: request.modelId || "openrouter/auto",
+            messages: request.messages.map((m: { role: string; content: string }) => ({
+              role: m.role,
+              content: m.content,
+            })),
+            stream: true,
+            temperature: request.temperature ?? 0.7,
+            max_tokens: request.maxTokens,
+          }),
+        });
+
+        clearTimeout(timer);
+
+        if (!res.ok) {
+          const errorText = await res.text().catch(() => "Unknown OpenRouter error");
+          const isRetryableStatus = res.status === 429 || res.status >= 500;
+          const err = new OrbaError(
+            `OpenRouter API error (${res.status}): ${errorText}`,
+            res.status === 429 ? "RATE_LIMITED" : "PROVIDER_ERROR",
+            res.status,
+          );
+
+          if (isRetryableStatus && attempt < this.maxRetries) {
+            lastError = err;
+            await new Promise((r) => setTimeout(r, 100 * 2 ** attempt));
+            continue;
+          }
+          throw err;
+        }
+
+        response = res;
+        break;
+      } catch (err: unknown) {
+        clearTimeout(timer);
+        const isAbort = err instanceof Error && err.name === "AbortError";
+        const formattedErr = isAbort
+          ? new OrbaError(
+              `OpenRouter request timed out after ${this.timeoutMs}ms`,
+              "PROVIDER_TIMEOUT",
+              504,
+            )
+          : err instanceof Error
+            ? err
+            : new Error(String(err));
+
+        lastError = formattedErr;
+        if (attempt < this.maxRetries) {
+          await new Promise((r) => setTimeout(r, 100 * 2 ** attempt));
+          continue;
+        }
+        throw formattedErr;
+      }
+    }
+
+    if (!response) {
+      throw lastError || new Error("Failed to connect to OpenRouter API after retries");
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error("No response reader from OpenRouter API");
+
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    const decoder = new TextDecoder("utf-8");
+    let buffer = "";
+
+    // Active streaming chunk timeout watcher
+    let streamTimer: NodeJS.Timeout | null = null;
+    const resetStreamTimer = () => {
+      if (streamTimer) clearTimeout(streamTimer);
+      streamTimer = setTimeout(() => {
+        controller.abort(
+          new OrbaError(
+            `OpenRouter stream stalled: no chunk received for ${this.timeoutMs}ms`,
+            "PROVIDER_TIMEOUT",
+            504,
+          ),
+        );
+      }, this.timeoutMs);
+    };
+
+    resetStreamTimer();
 
     try {
-      const response = await fetch(`${this.baseUrl}/chat/completions`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${this.apiKey}`,
-          "HTTP-Referer": "https://orbaagent.dev",
-          "X-Title": "OrbaAgent",
-        },
-        signal: controller.signal,
-        body: JSON.stringify({
-          model: request.modelId || "openrouter/auto",
-          messages: request.messages.map((m: { role: string; content: string }) => ({
-            role: m.role,
-            content: m.content,
-          })),
-          stream: true,
-          temperature: request.temperature ?? 0.7,
-          max_tokens: request.maxTokens,
-        }),
-      });
-
-      clearTimeout(timer);
-
-      if (!response.ok) {
-        const errorText = await response.text().catch(() => "Unknown OpenRouter error");
-        throw new OrbaError(
-          `OpenRouter API error (${response.status}): ${errorText}`,
-          response.status === 429 ? "RATE_LIMITED" : "PROVIDER_ERROR",
-          response.status,
-        );
-      }
-
-      const reader = response.body?.getReader();
-      if (!reader) throw new Error("No response reader from OpenRouter API");
-
-      const decoder = new TextDecoder("utf-8");
-      let buffer = "";
-
       while (true) {
-        const { done, value } = await reader.read();
+        if (controller.signal.aborted) {
+          throw (
+            controller.signal.reason ||
+            new OrbaError(
+              `OpenRouter stream timed out after ${this.timeoutMs}ms`,
+              "PROVIDER_TIMEOUT",
+              504,
+            )
+          );
+        }
+
+        const readPromise = reader.read();
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          controller.signal.addEventListener("abort", () => {
+            reject(
+              controller.signal.reason ||
+                new OrbaError(
+                  `OpenRouter stream timed out after ${this.timeoutMs}ms`,
+                  "PROVIDER_TIMEOUT",
+                  504,
+                ),
+            );
+          });
+        });
+
+        const { done, value } = await Promise.race([readPromise, timeoutPromise]);
         if (done) break;
+
+        resetStreamTimer();
 
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split("\n");
@@ -136,23 +226,15 @@ export class OpenRouterAdapter implements IModelProviderAdapter {
                 };
               }
             } catch {
-              // Ignore chunk JSON parse errors
+              // Ignore invalid SSE JSON chunk
             }
           }
         }
       }
 
       yield { type: "done", traceId: request.trace.traceId, finishReason: "stop" };
-    } catch (err: unknown) {
-      clearTimeout(timer);
-      if (err instanceof Error && err.name === "AbortError") {
-        throw new OrbaError(
-          `OpenRouter request timed out after ${this.timeoutMs}ms`,
-          "PROVIDER_TIMEOUT",
-          504,
-        );
-      }
-      throw err;
+    } finally {
+      if (streamTimer) clearTimeout(streamTimer);
     }
   }
 
@@ -162,10 +244,11 @@ export class OpenRouterAdapter implements IModelProviderAdapter {
     yield {
       type: "thinking_delta",
       traceId: request.trace.traceId,
-      thinkingDelta: "[OpenRouter Failover Engine] Executing failover stream via OpenRouter...",
+      thinkingDelta:
+        "[OpenRouter Fallback Engine] Operating fallback intelligence route for OrbaAgent task...",
     };
 
-    const responseText = "OrbaAgent failover completed cleanly via OpenRouter provider.";
+    const responseText = "OrbaAgent executing task via OpenRouter fallback provider pipeline.";
     for (const char of responseText) {
       yield {
         type: "text_delta",

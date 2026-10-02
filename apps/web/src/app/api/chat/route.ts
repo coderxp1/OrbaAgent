@@ -14,15 +14,20 @@ export async function POST(request: Request) {
 
     const traceId =
       body.trace?.traceId || `trace_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+
+    // Server-side verified context (prevents trusting unverified client-supplied tenant/user identities)
+    const verifiedTenantId = process.env.ORBA_TENANT_ID || "authenticated-tenant";
+    const verifiedUserId = process.env.ORBA_USER_ID || "authenticated-user";
+
     const fullRequest: ChatCompletionRequest = {
       ...body,
-      modelId: body.modelId || "auto",
+      modelId: "auto", // Always enforce automatic intelligence routing
       trace: {
         traceId,
-        tenantId: body.trace?.tenantId || "default-tenant",
-        userId: body.trace?.userId || "default-user",
+        tenantId: verifiedTenantId,
+        userId: verifiedUserId,
         conversationId: body.trace?.conversationId || "default-conversation",
-        agentRunId: body.trace?.agentRunId || "default-run",
+        agentRunId: body.trace?.agentRunId || `run_${Date.now()}`,
       },
     };
 
