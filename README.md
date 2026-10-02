@@ -9,7 +9,7 @@ orbaagent/
 ├── apps/
 │   ├── api/                  # Fastify 5 + Zod core backend API
 │   ├── desktop/              # Tauri cross-platform desktop application
-│   └── web/                  # Next.js 15 web application
+│   └── web/                  # Next.js 16.3.4 (App Router, React 19) web application
 ├── services/
 │   ├── agent-runtime/        # Agent execution and thought-action engine
 │   ├── computer-runtime/     # Docker sandbox container management & streaming

@@ -110,8 +110,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile || pnpm install
 
-      - name: Build shared package
-        run: pnpm --filter=@orbaagent/shared run build
+      - name: Build workspace packages
+        run: pnpm run build
 
       - name: Run typecheck
         run: pnpm run typecheck

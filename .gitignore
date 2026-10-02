@@ -17,6 +17,8 @@ target/
 .env
 .env.*
 !.env.example
+coderxp.env
+*.env
 *.pem
 *.key
 *.cert
@@ -51,3 +53,5 @@ Thumbs.db
 # Temporary / Scratch
 tmp/
 scratch/
+scratch*/
+
