@@ -84,7 +84,8 @@ export class IntelligenceRouter {
 
     // Primary source: Langdock. Secondary source: OpenRouter.
     const langdockPrimary = MODEL_REGISTRY["langdock-auto"] || MODEL_REGISTRY["langdock-fast"];
-    const openrouterSecondary = MODEL_REGISTRY["openrouter/auto"] || MODEL_REGISTRY["openrouter/fallback"];
+    const openrouterSecondary =
+      MODEL_REGISTRY["openrouter/auto"] || MODEL_REGISTRY["openrouter/fallback"];
 
     return {
       primaryModel: langdockPrimary,
@@ -106,4 +107,3 @@ export class IntelligenceRouter {
     return process.env.USE_MOCK_PROVIDERS === "true" || process.env.ALLOW_MOCK_PROVIDERS === "true";
   }
 }
-
