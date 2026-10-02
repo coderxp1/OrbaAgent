@@ -13,7 +13,6 @@ import {
   Play,
   ShieldCheck,
   Terminal,
-  Zap,
 } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
@@ -76,11 +75,6 @@ export default function LandingPage() {
       {/* Hero Section */}
       <section className="relative pt-20 pb-16 px-6 overflow-hidden">
         <div className="mx-auto max-w-5xl text-center">
-          <div className="inline-flex items-center gap-2 rounded-full border border-zinc-800 bg-zinc-900/80 px-3.5 py-1.5 text-xs text-zinc-300 mb-8 font-mono">
-            <span className="flex h-2 w-2 rounded-full bg-cyan-400 animate-pulse" />
-            Phase 1 Production Release • Multi-Provider Model Gateway
-          </div>
-
           <h1 className="text-4xl sm:text-6xl font-extrabold tracking-tight text-white leading-[1.1] mb-6">
             Autonomous Software Engineering <br className="hidden sm:inline" />
             <span className="text-transparent bg-clip-text bg-gradient-to-r from-zinc-100 via-zinc-300 to-zinc-500">
@@ -89,8 +83,8 @@ export default function LandingPage() {
           </h1>
 
           <p className="mx-auto max-w-2xl text-base sm:text-lg text-zinc-400 mb-10 leading-relaxed">
-            OrbaAgent analyzes tasks, formulates execution plans, writes code, executes shell
-            commands, runs tests, and submits GitHub pull requests — completely autonomously.
+            OrbaAgent analyzes software tasks, formulates execution plans, writes code, executes
+            shell commands, runs test suites, and manages GitHub pull requests automatically.
           </p>
 
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
@@ -102,15 +96,15 @@ export default function LandingPage() {
               <ArrowRight className="h-4 w-4" />
             </Link>
             <a
-              href="#architecture"
+              href="#features"
               className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900 px-6 py-3 text-sm font-semibold text-zinc-300 hover:border-zinc-700 hover:bg-zinc-850 hover:text-white transition-all"
             >
-              Explore Architecture
+              Explore Features
             </a>
           </div>
         </div>
 
-        {/* Live Product Terminal & Demonstration Component */}
+        {/* Product Terminal & UI Demonstration Component */}
         <div className="mx-auto max-w-5xl mt-16 rounded-xl border border-zinc-800 bg-zinc-900/90 shadow-2xl overflow-hidden">
           <div className="flex items-center justify-between border-b border-zinc-800 bg-zinc-950/90 px-4 py-3">
             <div className="flex items-center gap-2">
@@ -118,7 +112,7 @@ export default function LandingPage() {
               <span className="h-3 w-3 rounded-full bg-zinc-700" />
               <span className="h-3 w-3 rounded-full bg-zinc-700" />
               <span className="ml-2 font-mono text-xs text-zinc-400">
-                orbaagent-runtime / task-run-8492
+                orbaagent-runtime / execution-session
               </span>
             </div>
             <div className="flex items-center gap-1 font-mono text-xs">
@@ -153,7 +147,7 @@ export default function LandingPage() {
                     : "text-zinc-400 hover:text-zinc-200"
                 }`}
               >
-                GitHub PR #24
+                Pull Request
               </button>
             </div>
           </div>
@@ -162,29 +156,26 @@ export default function LandingPage() {
             {activeTab === "terminal" && (
               <div className="space-y-3 text-zinc-300">
                 <div className="text-zinc-500">
-                  [OrbaAgent Router] Task classified as coding. Selected primary: Langdock API
-                  (langdock-auto).
+                  Execution route selected. Planning complete. Starting implementation...
                 </div>
                 <div className="text-cyan-400 font-semibold flex items-center gap-2">
-                  <Play className="h-3.5 w-3.5" /> Executing step 1/4: Analyzing repository
-                  structure and typescript definitions...
+                  <Play className="h-3.5 w-3.5" /> Step 1/4: Analyzing repository structure and
+                  typescript definitions...
                 </div>
                 <div className="pl-4 text-zinc-400 border-l border-zinc-800">
-                  $ git checkout -b feat/model-gateway-routing <br />$ pnpm exec biome check .{" "}
-                  <br />
-                  Checked 54 files. 0 errors found.
+                  $ git checkout -b feat/add-authentication <br />$ pnpm exec biome check . <br />
+                  Checked 56 files. 0 errors found.
                 </div>
                 <div className="text-indigo-400 font-semibold flex items-center gap-2">
-                  <Terminal className="h-3.5 w-3.5" /> Executing step 2/4: Running Vitest unit test
-                  suite...
+                  <Terminal className="h-3.5 w-3.5" /> Step 2/4: Running Vitest unit test suite...
                 </div>
                 <div className="pl-4 text-emerald-400 border-l border-zinc-800">
-                  ✓ services/model-gateway/src/gateway.test.ts (7 tests) 20ms <br />✓
-                  services/model-gateway/src/router.test.ts (3 tests) 9ms <br />
-                  Test Files 4 passed (4) | Tests 17 passed (17)
+                  ✓ services/model-gateway/src/gateway.test.ts (9 tests) <br />✓
+                  services/model-gateway/src/router.test.ts (3 tests) <br />
+                  Test Files 4 passed | Tests 19 passed
                 </div>
                 <div className="text-emerald-400 font-semibold flex items-center gap-2">
-                  <CheckCircle2 className="h-3.5 w-3.5" /> Step 4/4 Complete: GitHub PR created
+                  <CheckCircle2 className="h-3.5 w-3.5" /> Step 4/4 Complete: Pull Request created
                   cleanly.
                 </div>
               </div>
@@ -209,7 +200,7 @@ export default function LandingPage() {
                   + &nbsp;&nbsp;&nbsp;&nbsp;const routing = this.router.selectRouting(request);
                 </div>
                 <div className="bg-emerald-950/40 text-emerald-300 px-2 py-1 rounded">
-                  {"+     // Automatic failover from Langdock to OpenRouter"}
+                  {"+     // Execution route failover optimization"}
                 </div>
                 <div className="bg-emerald-950/40 text-emerald-300 px-2 py-1 rounded">
                   + &nbsp;&nbsp;&#125;
@@ -223,27 +214,27 @@ export default function LandingPage() {
                   <div className="flex items-center gap-2">
                     <GitPullRequest className="h-4 w-4 text-emerald-400" />
                     <span className="font-semibold text-white">
-                      feat: implement multi-provider model gateway & failover
+                      feat: implement automated software engineering workflow
                     </span>
-                    <span className="text-zinc-500">#24</span>
                   </div>
                   <span className="rounded-full bg-emerald-950 text-emerald-400 border border-emerald-800 px-2.5 py-0.5 text-[11px] font-semibold">
                     Open
                   </span>
                 </div>
                 <p className="text-zinc-300 text-xs leading-relaxed">
-                  Automated PR created by OrbaAgent. Implements Langdock primary adapter and
-                  OpenRouter failover adapter with strict production credential checks and audit log
-                  telemetry.
+                  Automated Pull Request generated by OrbaAgent. Includes clean code changes, unit
+                  test coverage, and passing CI validation.
                 </p>
                 <div className="grid grid-cols-2 gap-3 pt-2">
                   <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-3">
-                    <div className="text-zinc-400 text-[11px]">CI Checks</div>
-                    <div className="font-semibold text-emerald-400 mt-1">7/7 Passed</div>
+                    <div className="text-zinc-400 text-[11px]">CI Verification</div>
+                    <div className="font-semibold text-emerald-400 mt-1">All Checks Passing</div>
                   </div>
                   <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-3">
-                    <div className="text-zinc-400 text-[11px]">Commit SHA</div>
-                    <div className="font-mono font-semibold text-zinc-200 mt-1">85699ea</div>
+                    <div className="text-zinc-400 text-[11px]">Branch</div>
+                    <div className="font-mono font-semibold text-zinc-200 mt-1">
+                      feat/add-authentication
+                    </div>
                   </div>
                 </div>
               </div>
@@ -260,8 +251,8 @@ export default function LandingPage() {
               Engineered for Production Autonomy
             </h2>
             <p className="text-zinc-400 text-base leading-relaxed">
-              OrbaAgent hides model complexity behind a unified intelligence architecture, ensuring
-              resilience, speed, and clean code output.
+              OrbaAgent operates behind a unified intelligence architecture, ensuring resilience,
+              speed, and clean code output.
             </p>
           </div>
 
@@ -270,10 +261,10 @@ export default function LandingPage() {
               <div className="h-10 w-10 flex items-center justify-center rounded-lg bg-cyan-950 border border-cyan-800 text-cyan-400 mb-5">
                 <ShieldCheck className="h-5 w-5" />
               </div>
-              <h3 className="text-lg font-semibold text-white mb-2">Provider Failover</h3>
+              <h3 className="text-lg font-semibold text-white mb-2">Automated Route Failover</h3>
               <p className="text-sm text-zinc-400 leading-relaxed">
-                Automatic failover from primary Langdock API to secondary OpenRouter API on rate
-                limit (429), server error (5xx), or timeout.
+                Seamless automatic failover handling across intelligence routes on rate limits,
+                server errors, or timeouts.
               </p>
             </div>
 
@@ -283,8 +274,8 @@ export default function LandingPage() {
               </div>
               <h3 className="text-lg font-semibold text-white mb-2">Intelligence Router</h3>
               <p className="text-sm text-zinc-400 leading-relaxed">
-                Evaluates task complexity, context requirements, tool dependencies, and provider
-                health automatically without manual model dropdowns.
+                Evaluates task complexity, context requirements, tool dependencies, and availability
+                automatically without manual configuration.
               </p>
             </div>
 
@@ -387,8 +378,8 @@ export default function LandingPage() {
                 User Request <br />↓ <br />
                 <span className="text-cyan-400">OrbaAgent Orchestrator</span> <br />↓ <br />
                 <span className="text-indigo-400">Intelligence Router</span> <br />↓ <br />
-                <span className="text-emerald-400">Langdock API (Primary)</span> →{" "}
-                <span className="text-amber-400">[Failover: OpenRouter API]</span> <br />↓ <br />
+                <span className="text-emerald-400">Primary Execution Route</span> →{" "}
+                <span className="text-amber-400">[Failover Route]</span> <br />↓ <br />
                 Execution Runtime & Tool Call Loop <br />↓ <br />
                 Verified Output & GitHub Pull Request
               </div>
@@ -407,16 +398,12 @@ export default function LandingPage() {
           <div className="space-y-4">
             {[
               {
-                q: "Do I select which LLM model to use?",
-                a: "No. OrbaAgent automatically routes tasks using its internal Intelligence Router based on complexity, context requirements, latency, and provider health. The user never needs to select models or providers.",
+                q: "Do I select which model to use?",
+                a: "No. OrbaAgent automatically routes tasks using its internal Intelligence Router based on complexity, context requirements, latency, and provider health. Model selection is handled entirely by OrbaAgent.",
               },
               {
-                q: "Which AI provider APIs are used?",
-                a: "OrbaAgent uses Langdock API as its primary intelligence provider and OpenRouter API as its secondary failover provider.",
-              },
-              {
-                q: "What happens if a provider experiences an outage or rate limit?",
-                a: "OrbaAgent automatically detects 429 rate limits, 5xx server errors, or timeouts and seamlessly fails over to the secondary provider without corrupting output.",
+                q: "What happens if a route experiences an outage or rate limit?",
+                a: "OrbaAgent automatically detects rate limits, server errors, or timeouts and seamlessly fails over to alternate eligible routes without corrupting output.",
               },
               {
                 q: "How are API credentials handled?",

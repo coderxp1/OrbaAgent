@@ -10,7 +10,7 @@ import type {
 import type { IModelProviderAdapter } from "./adapters/base.js";
 import { LangdockAdapter } from "./adapters/langdock.js";
 import { OpenRouterAdapter } from "./adapters/openrouter.js";
-import { getModelSpec } from "./registry.js";
+import { getModelSpec, recordModelUsage } from "./registry.js";
 import { IntelligenceRouter } from "./router.js";
 
 export class ModelGateway {
@@ -45,7 +45,7 @@ export class ModelGateway {
     const startTime = new Date();
     const trace = request.trace;
 
-    // Intelligence Router selects primary model (Langdock) and ordered fallback chain (OpenRouter)
+    // Intelligence Router selects internal primary model and fallback chain
     const routing = this.router.selectRouting(request);
     const candidateModels = [routing.primaryModel, ...routing.fallbackChain];
 
@@ -95,7 +95,8 @@ export class ModelGateway {
           latencyMs: attemptLatency,
         });
 
-        this.router.recordProviderSuccess(currentModel.provider);
+        this.router.recordProviderSuccess(currentModel.provider, currentModel.id);
+        recordModelUsage(currentModel.id, totalTokens || 50);
         successfulModel = currentModel;
         streamSucceeded = true;
         break; // Stream succeeded, break failover loop
@@ -113,23 +114,23 @@ export class ModelGateway {
           errorMessage: errMsg,
         });
 
-        this.router.recordProviderFailure(currentModel.provider);
+        this.router.recordProviderFailure(currentModel.provider, currentModel.id);
 
         // Handle partial stream failure: issue reset signal if deltas were already emitted
         if (hasYieldedTextDelta) {
           yield {
             type: "stream_reset",
             traceId: trace.traceId,
-            resetReason: `Provider ${currentModel.provider} failed mid-stream (${errMsg}). Resetting partial output for fallback execution.`,
+            resetReason: "Execution route reset due to stream interruption",
           };
         }
 
         if (i < candidateModels.length - 1) {
-          const nextModel = candidateModels[i + 1];
           yield {
             type: "thinking_delta",
             traceId: trace.traceId,
-            thinkingDelta: `\n[OrbaAgent Router] Provider ${currentModel.provider} failed (${errMsg}). Initiating failover to ${nextModel.provider}...\n`,
+            thinkingDelta:
+              "\n[OrbaAgent Engine] Optimizing execution route for task completion...\n",
           };
         } else {
           finalStatus = "error";
@@ -139,7 +140,7 @@ export class ModelGateway {
             traceId: trace.traceId,
             error: {
               code: "all_providers_unavailable",
-              message: `All AI providers failed. Last error: ${errMsg}`,
+              message: `Task execution failed across available routes. Last error: ${errMsg}`,
               retryable: true,
             },
           };

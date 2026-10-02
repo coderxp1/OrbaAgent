@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight, Check, Cpu, HelpCircle, ShieldCheck } from "lucide-react";
+import { ArrowRight, Check, Cpu, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 
@@ -8,8 +8,7 @@ export interface PricingPlan {
   id: string;
   name: string;
   description: string;
-  monthlyPrice: number | "Custom";
-  annualMonthlyPrice: number | "Custom";
+  priceDisplay: string;
   includedUsage: string;
   isPopular?: boolean;
   ctaText: string;
@@ -22,18 +21,18 @@ export const PLAN_CONFIGS: PricingPlan[] = [
   {
     id: "developer",
     name: "Developer",
-    description: "Ideal for individual developers building and testing autonomous software agents.",
-    monthlyPrice: 0,
-    annualMonthlyPrice: 0,
+    description:
+      "Configurable tier for individual developers building and testing autonomous software agents.",
+    priceDisplay: "Provisional",
     includedUsage: "50 agent runs / month",
-    ctaText: "Get Started Free",
+    ctaText: "Launch Agent Studio",
     ctaHref: "/app",
     features: [
-      "Langdock API primary routing",
+      "Automatic intelligence route selection",
       "Automatic failover architecture",
       "Terminal & shell tool execution",
       "Git branch & commit automation",
-      "Standard audit log retention (7 days)",
+      "Standard audit log retention",
     ],
     limits: ["Single concurrent agent run", "Standard queue priority"],
   },
@@ -41,39 +40,37 @@ export const PLAN_CONFIGS: PricingPlan[] = [
     id: "team",
     name: "Team",
     description:
-      "Designed for software engineering teams requiring scale, resilience, and GitHub PR workflows.",
-    monthlyPrice: 49,
-    annualMonthlyPrice: 39,
+      "Configurable tier for engineering teams requiring scale, resilience, and GitHub PR workflows.",
+    priceDisplay: "Provisional",
     includedUsage: "1,000 agent runs / month",
     isPopular: true,
-    ctaText: "Start Team Trial",
+    ctaText: "Launch Agent Studio",
     ctaHref: "/app",
     features: [
-      "Langdock + OpenRouter multi-provider failover",
+      "Multi-provider failover architecture",
       "Multi-dimensional Intelligence Router",
       "Automated GitHub Pull Request creation",
       "Vitest & Docker build verification",
-      "30-day detailed audit log telemetry",
-      "5 concurrent agent execution runs",
+      "Detailed audit log telemetry",
+      "Concurrent execution runs",
     ],
-    limits: ["Priority email & Discord support"],
+    limits: ["Priority queue allocation"],
   },
   {
     id: "enterprise",
     name: "Enterprise",
     description:
       "Custom deployment, dedicated compute instances, and compliance controls for enterprise fleets.",
-    monthlyPrice: "Custom",
-    annualMonthlyPrice: "Custom",
-    includedUsage: "Unlimited agent runs",
-    ctaText: "Contact Sales",
-    ctaHref: "mailto:sales@orbaagent.dev",
+    priceDisplay: "Custom",
+    includedUsage: "Configurable usage allocation",
+    ctaText: "Contact Engineering",
+    ctaHref: "mailto:contact@orbaagent.dev",
     features: [
       "Custom provider endpoint integrations",
       "Isolated container execution environments",
       "SSO & SAML authentication",
-      "Unlimited audit log retention",
-      "Dedicated account manager & 99.9% SLA",
+      "Custom audit log retention",
+      "Dedicated SLA support",
       "Custom rate limits and context allocations",
     ],
     limits: [],
@@ -81,7 +78,7 @@ export const PLAN_CONFIGS: PricingPlan[] = [
 ];
 
 export default function PricingPage() {
-  const [isAnnual, setIsAnnual] = useState(true);
+  const [billingCycle, setBillingCycle] = useState<"monthly" | "annual">("monthly");
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 font-sans antialiased selection:bg-cyan-500/20 selection:text-cyan-300">
@@ -124,33 +121,40 @@ export default function PricingPage() {
       {/* Hero Header */}
       <section className="pt-16 pb-12 px-6 text-center">
         <div className="mx-auto max-w-3xl">
+          <div className="inline-flex items-center gap-2 rounded-full border border-zinc-800 bg-zinc-900/80 px-3.5 py-1.5 text-xs text-zinc-400 mb-6 font-mono">
+            Configurable Pricing Architecture • Final Rates Pending Launch Approval
+          </div>
+
           <h1 className="text-4xl font-extrabold tracking-tight text-white mb-4">
-            Simple, Transparent Pricing for Software Teams
+            Transparent Agent Pricing
           </h1>
           <p className="text-base text-zinc-400 leading-relaxed mb-8">
-            Clear usage limits and production-grade provider failover. No hidden tokens or
-            artificial surprises.
+            Modular plan architecture designed for software development teams.
           </p>
 
-          {/* Monthly / Annual Toggle */}
+          {/* Billing Cycle Toggle */}
           <div className="inline-flex items-center gap-3 rounded-full border border-zinc-800 bg-zinc-900 p-1">
             <button
               type="button"
-              onClick={() => setIsAnnual(false)}
+              onClick={() => setBillingCycle("monthly")}
               className={`rounded-full px-4 py-1.5 text-xs font-semibold transition-colors ${
-                !isAnnual ? "bg-zinc-800 text-white shadow-sm" : "text-zinc-400 hover:text-white"
+                billingCycle === "monthly"
+                  ? "bg-zinc-800 text-white shadow-sm"
+                  : "text-zinc-400 hover:text-white"
               }`}
             >
-              Monthly Billing
+              Monthly Cycle
             </button>
             <button
               type="button"
-              onClick={() => setIsAnnual(true)}
+              onClick={() => setBillingCycle("annual")}
               className={`rounded-full px-4 py-1.5 text-xs font-semibold transition-colors ${
-                isAnnual ? "bg-cyan-500 text-zinc-950 font-bold" : "text-zinc-400 hover:text-white"
+                billingCycle === "annual"
+                  ? "bg-cyan-500 text-zinc-950 font-bold"
+                  : "text-zinc-400 hover:text-white"
               }`}
             >
-              Annual Billing (Save 20%)
+              Annual Cycle
             </button>
           </div>
         </div>
@@ -159,72 +163,64 @@ export default function PricingPage() {
       {/* Pricing Cards Grid */}
       <section className="py-12 px-6 max-w-7xl mx-auto">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-stretch">
-          {PLAN_CONFIGS.map((plan) => {
-            const price = isAnnual ? plan.annualMonthlyPrice : plan.monthlyPrice;
-            return (
-              <div
-                key={plan.id}
-                className={`rounded-2xl border flex flex-col justify-between p-8 relative transition-all ${
-                  plan.isPopular
-                    ? "border-cyan-500 bg-zinc-900 shadow-xl shadow-cyan-950/20"
-                    : "border-zinc-800 bg-zinc-900/60 hover:border-zinc-700"
-                }`}
-              >
-                {plan.isPopular && (
-                  <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 rounded-full bg-cyan-500 px-3 py-0.5 text-[11px] font-bold text-zinc-950 uppercase tracking-wider">
-                    Most Popular
+          {PLAN_CONFIGS.map((plan) => (
+            <div
+              key={plan.id}
+              className={`rounded-2xl border flex flex-col justify-between p-8 relative transition-all ${
+                plan.isPopular
+                  ? "border-cyan-500 bg-zinc-900 shadow-xl shadow-cyan-950/20"
+                  : "border-zinc-800 bg-zinc-900/60 hover:border-zinc-700"
+              }`}
+            >
+              {plan.isPopular && (
+                <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 rounded-full bg-cyan-500 px-3 py-0.5 text-[11px] font-bold text-zinc-950 uppercase tracking-wider">
+                  Configured Tier
+                </div>
+              )}
+
+              <div>
+                <h3 className="text-xl font-bold text-white mb-2">{plan.name}</h3>
+                <p className="text-xs text-zinc-400 min-h-[40px] leading-relaxed mb-6">
+                  {plan.description}
+                </p>
+
+                <div className="mb-6 border-b border-zinc-800/80 pb-6">
+                  <div className="flex items-baseline gap-1">
+                    <span className="text-3xl font-extrabold text-white">{plan.priceDisplay}</span>
                   </div>
-                )}
-
-                <div>
-                  <h3 className="text-xl font-bold text-white mb-2">{plan.name}</h3>
-                  <p className="text-xs text-zinc-400 min-h-[40px] leading-relaxed mb-6">
-                    {plan.description}
-                  </p>
-
-                  <div className="mb-6 border-b border-zinc-800/80 pb-6">
-                    <div className="flex items-baseline gap-1">
-                      <span className="text-4xl font-extrabold text-white">
-                        {typeof price === "number" ? `$${price}` : price}
-                      </span>
-                      {typeof price === "number" && (
-                        <span className="text-xs text-zinc-400">/ month</span>
-                      )}
-                    </div>
-                    <div className="mt-2 inline-block rounded-md bg-zinc-800/60 px-2.5 py-1 font-mono text-[11px] text-cyan-400 font-medium">
-                      Included: {plan.includedUsage}
-                    </div>
-                  </div>
-
-                  <div className="space-y-3 mb-8">
-                    <div className="text-xs font-semibold text-zinc-300 uppercase tracking-wider">
-                      Included Capabilities
-                    </div>
-                    {plan.features.map((feature) => (
-                      <div key={feature} className="flex items-start gap-2.5 text-xs text-zinc-300">
-                        <Check className="h-4 w-4 text-cyan-400 shrink-0 mt-0.5" />
-                        <span>{feature}</span>
-                      </div>
-                    ))}
+                  <div className="mt-2 inline-block rounded-md bg-zinc-800/60 px-2.5 py-1 font-mono text-[11px] text-cyan-400 font-medium">
+                    {plan.includedUsage}
                   </div>
                 </div>
 
-                <div>
-                  <Link
-                    href={plan.ctaHref}
-                    className={`w-full inline-flex items-center justify-center gap-2 rounded-lg py-3 text-xs font-semibold transition-colors shadow-sm ${
-                      plan.isPopular
-                        ? "bg-cyan-500 text-zinc-950 hover:bg-cyan-400"
-                        : "bg-zinc-800 text-white hover:bg-zinc-750"
-                    }`}
-                  >
-                    {plan.ctaText}
-                    <ArrowRight className="h-3.5 w-3.5" />
-                  </Link>
+                <div className="space-y-3 mb-8">
+                  <div className="text-xs font-semibold text-zinc-300 uppercase tracking-wider">
+                    Included Capabilities
+                  </div>
+                  {plan.features.map((feature) => (
+                    <div key={feature} className="flex items-start gap-2.5 text-xs text-zinc-300">
+                      <Check className="h-4 w-4 text-cyan-400 shrink-0 mt-0.5" />
+                      <span>{feature}</span>
+                    </div>
+                  ))}
                 </div>
               </div>
-            );
-          })}
+
+              <div>
+                <Link
+                  href={plan.ctaHref}
+                  className={`w-full inline-flex items-center justify-center gap-2 rounded-lg py-3 text-xs font-semibold transition-colors shadow-sm ${
+                    plan.isPopular
+                      ? "bg-cyan-500 text-zinc-950 hover:bg-cyan-400"
+                      : "bg-zinc-800 text-white hover:bg-zinc-750"
+                  }`}
+                >
+                  {plan.ctaText}
+                  <ArrowRight className="h-3.5 w-3.5" />
+                </Link>
+              </div>
+            </div>
+          ))}
         </div>
       </section>
 
@@ -236,11 +232,11 @@ export default function PricingPage() {
           </div>
           <div>
             <h4 className="text-base font-semibold text-white mb-1">
-              Production Gateway & Zero Vendor Lock-in
+              Production Gateway & Data Protection
             </h4>
             <p className="text-xs text-zinc-400 leading-relaxed">
-              All plans benefit from OrbaAgent&apos;s provider-independent Model Gateway. Your code,
-              API keys, and repository metadata remain private and secure at all times.
+              All plans run on OrbaAgent&apos;s provider-independent Model Gateway. Source code,
+              credentials, and execution data remain secure at all times.
             </p>
           </div>
         </div>

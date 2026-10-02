@@ -1,5 +1,5 @@
 import type { ChatCompletionRequest, ModelSpec, ProviderId } from "@orbaagent/shared";
-import { MODEL_REGISTRY } from "./registry.js";
+import { MODEL_REGISTRY, isQuotaExhausted } from "./registry.js";
 
 export type TaskComplexity = "high_reasoning" | "coding" | "vision" | "fast_response" | "general";
 
@@ -23,9 +23,10 @@ export class IntelligenceRouter {
     ["local", { consecutiveFailures: 0, isHealthy: true }],
   ]);
 
-  private readonly cooldownMs = 60000; // 1 minute circuit-breaker cooldown
+  private readonly modelFailureMap: Map<string, number> = new Map();
+  private readonly cooldownMs = 60000; // 1 minute circuit breaker cooldown
 
-  recordProviderFailure(providerId: ProviderId): void {
+  recordProviderFailure(providerId: ProviderId, modelId?: string): void {
     const health = this.providerHealthMap.get(providerId) || {
       consecutiveFailures: 0,
       isHealthy: true,
@@ -36,13 +37,21 @@ export class IntelligenceRouter {
       health.isHealthy = false;
     }
     this.providerHealthMap.set(providerId, health);
+
+    if (modelId) {
+      const fails = (this.modelFailureMap.get(modelId) || 0) + 1;
+      this.modelFailureMap.set(modelId, fails);
+    }
   }
 
-  recordProviderSuccess(providerId: ProviderId): void {
+  recordProviderSuccess(providerId: ProviderId, modelId?: string): void {
     this.providerHealthMap.set(providerId, {
       consecutiveFailures: 0,
       isHealthy: true,
     });
+    if (modelId) {
+      this.modelFailureMap.delete(modelId);
+    }
   }
 
   getProviderHealth(providerId: ProviderId): ProviderHealth {
@@ -123,38 +132,75 @@ export class IntelligenceRouter {
 
   /**
    * Multi-dimensional intelligence routing:
-   * Evaluates task type, provider health state, context limits, latency/cost efficiency, and capability compatibility.
-   * Note: External model selection is rejected/ignored and normalized to "auto".
+   * Evaluates task type, provider health state, quota/allowance exhaustion, context limits, and model capabilities.
+   * User model parameters are strictly ignored and normalized to "auto".
    */
   selectRouting(request: ChatCompletionRequest): RoutingDecision {
-    const normalizedModel = "auto";
     const complexity = this.classifyTask(request);
-
     const langdockHealth = this.getProviderHealth("langdock");
-    const openrouterHealth = this.getProviderHealth("openrouter");
 
-    let primaryModel = MODEL_REGISTRY["langdock-auto"] || MODEL_REGISTRY["langdock-fast"];
-    let fallbackChain = [
-      MODEL_REGISTRY["openrouter/auto"] || MODEL_REGISTRY["openrouter/fallback"],
-    ];
+    // Candidate model priority ordering per task type
+    let candidateLangdockIds: string[];
+    switch (complexity) {
+      case "high_reasoning":
+        candidateLangdockIds = [
+          "gpt-6-sol",
+          "gpt-5.4",
+          "gpt-5.2-pro",
+          "gpt-5.2",
+          "gpt-5.1",
+          "gpt-5",
+          "gpt-5-eu",
+        ];
+        break;
+      case "coding":
+        candidateLangdockIds = ["gpt-5.4", "gpt-5.2-pro", "gpt-5.2", "gpt-5.1", "gpt-5.4-mini"];
+        break;
+      case "vision":
+        candidateLangdockIds = ["gpt-5.4", "gpt-5.2-pro", "gpt-5.2", "gpt-6-sol"];
+        break;
+      case "fast_response":
+        candidateLangdockIds = ["gpt-5.4-mini", "gpt-5-mini-eu", "gpt-5.1", "gpt-5.2"];
+        break;
+      default:
+        candidateLangdockIds = ["gpt-5.2", "gpt-5.1", "gpt-5", "gpt-5-eu", "gpt-5.4-mini"];
+        break;
+    }
 
-    // If Langdock circuit-breaker is open (unhealthy due to repeated failures), promote OpenRouter as primary route
-    if (!langdockHealth.isHealthy && openrouterHealth.isHealthy) {
-      primaryModel = MODEL_REGISTRY["openrouter/auto"] || MODEL_REGISTRY["openrouter/fallback"];
-      fallbackChain = [MODEL_REGISTRY["langdock-auto"] || MODEL_REGISTRY["langdock-fast"]];
+    // Filter eligible Langdock models based on health, quota availability, and model failure count
+    const eligibleLangdock = candidateLangdockIds
+      .map((id) => MODEL_REGISTRY[id])
+      .filter((m): m is ModelSpec => Boolean(m))
+      .filter((m) => !isQuotaExhausted(m.id))
+      .filter((m) => (this.modelFailureMap.get(m.id) || 0) < 3);
+
+    const openrouterAuto = MODEL_REGISTRY["openrouter/auto"];
+    const openrouterFree = MODEL_REGISTRY["openrouter/free"];
+
+    let primaryModel: ModelSpec;
+    let fallbackChain: ModelSpec[];
+
+    if (langdockHealth.isHealthy && eligibleLangdock.length > 0) {
+      primaryModel = eligibleLangdock[0];
+      const remainingLangdock = eligibleLangdock.slice(1);
+      fallbackChain = [...remainingLangdock, openrouterAuto, openrouterFree].filter(
+        (m): m is ModelSpec => Boolean(m),
+      );
+    } else {
+      // Langdock provider unhealthy or all Langdock models exhausted → Failover to OpenRouter
+      primaryModel = openrouterAuto || openrouterFree;
+      fallbackChain = [openrouterFree].filter((m): m is ModelSpec => Boolean(m));
     }
 
     return {
       primaryModel,
       fallbackChain,
       complexity,
-      reason: `Multi-dimensional routing decision (complexity: ${complexity}, langdockHealth: ${
+      reason: `Execution route selected (complexity: ${complexity}, langdockHealth: ${
         langdockHealth.isHealthy ? "healthy" : "cooldown"
-      }, openrouterHealth: ${
-        openrouterHealth.isHealthy ? "healthy" : "cooldown"
-      }). Selected primary: ${primaryModel.id}, fallback: ${
-        fallbackChain[0].id
-      }. External model selection normalized to '${normalizedModel}'.`,
+      }). Selected internal primary: ${primaryModel.id}, fallbacks: ${fallbackChain
+        .map((m) => m.id)
+        .join(", ")}.`,
     };
   }
 
