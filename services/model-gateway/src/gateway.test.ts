@@ -182,3 +182,4 @@ describe("ModelGateway Provider Failover & Production Safety", () => {
     expect(decision.fallbackChain[0].provider).toBe("openrouter");
   });
 });
+
