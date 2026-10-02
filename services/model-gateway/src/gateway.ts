@@ -10,7 +10,7 @@ import type {
 import type { IModelProviderAdapter } from "./adapters/base.js";
 import { LangdockAdapter } from "./adapters/langdock.js";
 import { OpenRouterAdapter } from "./adapters/openrouter.js";
-import { getModelSpec, recordModelUsage } from "./registry.js";
+import { getModelSpec, recordLocalUsage } from "./registry.js";
 import { IntelligenceRouter } from "./router.js";
 
 export class ModelGateway {
@@ -25,7 +25,6 @@ export class ModelGateway {
     this.adapters = {
       langdock: customAdapters?.langdock || new LangdockAdapter(),
       openrouter: customAdapters?.openrouter || new OpenRouterAdapter(),
-      local: customAdapters?.local || new LangdockAdapter(),
     };
     this.router = customRouter || new IntelligenceRouter();
   }
@@ -45,7 +44,7 @@ export class ModelGateway {
     const startTime = new Date();
     const trace = request.trace;
 
-    // Intelligence Router selects internal primary model and fallback chain
+    // Intelligence Router selects internal primary model and fallback chain dynamically
     const routing = this.router.selectRouting(request);
     const candidateModels = [routing.primaryModel, ...routing.fallbackChain];
 
@@ -96,7 +95,8 @@ export class ModelGateway {
         });
 
         this.router.recordProviderSuccess(currentModel.provider, currentModel.id);
-        recordModelUsage(currentModel.id, totalTokens || 50);
+        // Only record quota usage on SUCCESSFUL request completions
+        recordLocalUsage(currentModel.id, totalTokens || 50);
         successfulModel = currentModel;
         streamSucceeded = true;
         break; // Stream succeeded, break failover loop

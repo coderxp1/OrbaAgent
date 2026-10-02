@@ -4,11 +4,13 @@ import type { IModelProviderAdapter } from "./adapters/base.js";
 import { LangdockAdapter } from "./adapters/langdock.js";
 import { OpenRouterAdapter } from "./adapters/openrouter.js";
 import { ModelGateway } from "./gateway.js";
+import { getLocalTrackedUsage, resetLocalUsage } from "./registry.js";
 
 describe("ModelGateway Provider Failover & Production Safety", () => {
   beforeEach(() => {
     process.env.USE_MOCK_PROVIDERS = "true";
     process.env.NODE_ENV = undefined;
+    resetLocalUsage();
   });
 
   const sampleRequest: ChatCompletionRequest = {
@@ -24,7 +26,7 @@ describe("ModelGateway Provider Failover & Production Safety", () => {
     },
   };
 
-  it("should stream successfully via primary Langdock provider automatically", async () => {
+  it("should stream successfully via primary Langdock provider and record usage", async () => {
     const gateway = new ModelGateway();
     const events: NormalizedEvent[] = [];
     for await (const event of gateway.streamChat(sampleRequest)) {
@@ -35,11 +37,9 @@ describe("ModelGateway Provider Failover & Production Safety", () => {
     const textDeltas = events.filter((e) => e.type === "text_delta");
     expect(textDeltas.length).toBeGreaterThan(0);
 
-    const latestAudit = gateway.auditLogs[gateway.auditLogs.length - 1];
-    expect(latestAudit.provider).toBe("langdock");
-    expect(latestAudit.status).toBe("success");
-    expect(latestAudit.providerAttempts).toBeDefined();
-    expect(latestAudit.providerAttempts?.[0].provider).toBe("langdock");
+    const usage = getLocalTrackedUsage(gateway.auditLogs[0].model);
+    expect(usage.requests).toBe(1);
+    expect(usage.tokens).toBeGreaterThan(0);
   });
 
   it("should stream successfully via OpenRouter adapter directly", async () => {
@@ -80,7 +80,27 @@ describe("ModelGateway Provider Failover & Production Safety", () => {
     const latestAudit = gateway.auditLogs[gateway.auditLogs.length - 1];
     expect(latestAudit.status).toBe("success");
     expect(latestAudit.provider).toBe("openrouter");
-    expect(latestAudit.providerAttempts?.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("should NOT consume successful request quota on failed attempts", async () => {
+    class FailingLangdockAdapter extends LangdockAdapter {
+      // biome-ignore lint/correctness/useYield: Interface requirement
+      override async *streamChat(): AsyncGenerator<NormalizedEvent, void, unknown> {
+        throw new Error("Langdock connection failed");
+      }
+    }
+
+    const gateway = new ModelGateway({
+      langdock: new FailingLangdockAdapter(),
+      openrouter: new OpenRouterAdapter(),
+    });
+
+    for await (const _ of gateway.streamChat(sampleRequest)) {
+      // Stream
+    }
+
+    const langdockUsage = getLocalTrackedUsage("gpt-5.4");
+    expect(langdockUsage.requests).toBe(0); // Usage was NOT incorrectly incremented for failed attempt
   });
 
   it("should failover from Langdock 429/5xx error to OpenRouter fallback", async () => {

@@ -41,7 +41,7 @@ export class OrbaError extends Error {
 }
 
 // Model Registry & Provider Schemas
-export const ProviderIdSchema = z.enum(["langdock", "openrouter", "local"]);
+export const ProviderIdSchema = z.enum(["langdock", "openrouter"]);
 export type ProviderId = z.infer<typeof ProviderIdSchema>;
 
 export const ModelCapabilitySchema = z.enum([
@@ -58,11 +58,12 @@ export const ModelSpecSchema = z.object({
   id: z.string(),
   name: z.string(),
   provider: ProviderIdSchema,
-  contextWindow: z.number().int().positive(),
-  maxOutputTokens: z.number().int().positive(),
+  contextWindow: z.number().int().positive().optional(),
+  maxOutputTokens: z.number().int().positive().optional(),
   capabilities: z.array(ModelCapabilitySchema),
-  costPerInputToken: z.number(),
-  costPerOutputToken: z.number(),
+  costPerInputToken: z.number().optional(),
+  costPerOutputToken: z.number().optional(),
+  isUnconfirmed: z.boolean().optional(),
   isDefault: z.boolean().optional(),
 });
 export type ModelSpec = z.infer<typeof ModelSpecSchema>;

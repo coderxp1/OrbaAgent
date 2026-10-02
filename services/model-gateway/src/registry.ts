@@ -1,141 +1,139 @@
 import type { ModelSpec, ProviderId } from "@orbaagent/shared";
 
-export interface QuotaTracker {
+export interface QuotaLimits {
   maxRequests: number;
   maxTokens: number;
-  usedRequests: number;
-  usedTokens: number;
 }
 
-const DEFAULT_LANGDOCK_QUOTA: QuotaTracker = {
-  maxRequests: 500,
-  maxTokens: 250000,
-  usedRequests: 0,
-  usedTokens: 0,
-};
+export interface LocalUsage {
+  requests: number;
+  tokens: number;
+}
 
-// Quota usage map per model ID
-const MODEL_QUOTA_MAP: Map<string, QuotaTracker> = new Map();
+// Local usage tracking map per model ID
+const LOCAL_USAGE_MAP: Map<string, LocalUsage> = new Map();
 
-export function getQuotaState(modelId: string): QuotaTracker {
-  const existing = MODEL_QUOTA_MAP.get(modelId);
+/**
+ * Retrieve configured quota limits from environment configuration or sensible defaults.
+ * Allows limits to be adjusted without modifying application source code.
+ */
+export function getConfiguredQuotaLimits(): QuotaLimits {
+  const reqEnv = process.env.LANGDOCK_MODEL_MAX_REQUESTS;
+  const tokenEnv = process.env.LANGDOCK_MODEL_MAX_TOKENS;
+  const maxRequests =
+    reqEnv && reqEnv !== "undefined" && !Number.isNaN(Number(reqEnv)) ? Number(reqEnv) : 500;
+  const maxTokens =
+    tokenEnv && tokenEnv !== "undefined" && !Number.isNaN(Number(tokenEnv))
+      ? Number(tokenEnv)
+      : 250000;
+  return { maxRequests, maxTokens };
+}
+
+/**
+ * Retrieve locally tracked usage metrics for a model.
+ */
+export function getLocalTrackedUsage(modelId: string): LocalUsage {
+  const existing = LOCAL_USAGE_MAP.get(modelId);
   if (existing) return existing;
-  const initial = { ...DEFAULT_LANGDOCK_QUOTA };
-  MODEL_QUOTA_MAP.set(modelId, initial);
+  const initial = { requests: 0, tokens: 0 };
+  LOCAL_USAGE_MAP.set(modelId, initial);
   return initial;
 }
 
-export function recordModelUsage(modelId: string, tokens: number): void {
-  const quota = getQuotaState(modelId);
-  quota.usedRequests += 1;
-  quota.usedTokens += tokens;
+/**
+ * Record successful request usage against locally tracked counters.
+ */
+export function recordLocalUsage(modelId: string, tokens: number): void {
+  const usage = getLocalTrackedUsage(modelId);
+  usage.requests += 1;
+  usage.tokens += tokens;
 }
 
-export function isQuotaExhausted(modelId: string): boolean {
-  const quota = getQuotaState(modelId);
-  return quota.usedRequests >= quota.maxRequests || quota.usedTokens >= quota.maxTokens;
+/**
+ * Check whether a model has reached its locally configured quota limit.
+ */
+export function isLocalQuotaExhausted(modelId: string): boolean {
+  const limits = getConfiguredQuotaLimits();
+  const usage = getLocalTrackedUsage(modelId);
+  return usage.requests >= limits.maxRequests || usage.tokens >= limits.maxTokens;
 }
 
-export function resetQuotaState(modelId?: string): void {
+/**
+ * Reset local usage counters (primarily for testing and environment resets).
+ */
+export function resetLocalUsage(modelId?: string): void {
   if (modelId) {
-    MODEL_QUOTA_MAP.set(modelId, { ...DEFAULT_LANGDOCK_QUOTA });
+    LOCAL_USAGE_MAP.set(modelId, { requests: 0, tokens: 0 });
   } else {
-    MODEL_QUOTA_MAP.clear();
+    LOCAL_USAGE_MAP.clear();
   }
 }
 
 export const MODEL_REGISTRY: Record<string, ModelSpec> = {
-  // Langdock API Confirmed Models (500 requests / 250k tokens quota per model)
+  // Confirmed Langdock Models (unverified specs marked isUnconfirmed: true)
   "gpt-6-sol": {
     id: "gpt-6-sol",
     name: "Langdock Sol Engine",
     provider: "langdock",
-    contextWindow: 500000,
-    maxOutputTokens: 16384,
     capabilities: ["text", "vision", "streaming", "tool_calling", "json_mode", "thinking"],
-    costPerInputToken: 0.000003,
-    costPerOutputToken: 0.000015,
+    isUnconfirmed: true,
   },
   "gpt-5.4": {
     id: "gpt-5.4",
     name: "Langdock High Intelligence Engine",
     provider: "langdock",
-    contextWindow: 300000,
-    maxOutputTokens: 8192,
     capabilities: ["text", "vision", "streaming", "tool_calling", "json_mode", "thinking"],
-    costPerInputToken: 0.000002,
-    costPerOutputToken: 0.00001,
     isDefault: true,
+    isUnconfirmed: true,
   },
   "gpt-5.4-mini": {
     id: "gpt-5.4-mini",
     name: "Langdock Fast Execution Engine",
     provider: "langdock",
-    contextWindow: 128000,
-    maxOutputTokens: 4096,
     capabilities: ["text", "streaming", "tool_calling"],
-    costPerInputToken: 0.0000005,
-    costPerOutputToken: 0.0000015,
+    isUnconfirmed: true,
   },
   "gpt-5.2-pro": {
     id: "gpt-5.2-pro",
     name: "Langdock Pro Reasoning Engine",
     provider: "langdock",
-    contextWindow: 250000,
-    maxOutputTokens: 8192,
     capabilities: ["text", "vision", "streaming", "tool_calling", "json_mode", "thinking"],
-    costPerInputToken: 0.0000025,
-    costPerOutputToken: 0.000012,
+    isUnconfirmed: true,
   },
   "gpt-5.2": {
     id: "gpt-5.2",
     name: "Langdock Standard Engine",
     provider: "langdock",
-    contextWindow: 200000,
-    maxOutputTokens: 8192,
     capabilities: ["text", "vision", "streaming", "tool_calling", "json_mode"],
-    costPerInputToken: 0.000002,
-    costPerOutputToken: 0.000008,
+    isUnconfirmed: true,
   },
   "gpt-5.1": {
     id: "gpt-5.1",
     name: "Langdock Balanced Engine",
     provider: "langdock",
-    contextWindow: 128000,
-    maxOutputTokens: 4096,
     capabilities: ["text", "streaming", "tool_calling"],
-    costPerInputToken: 0.0000015,
-    costPerOutputToken: 0.000006,
+    isUnconfirmed: true,
   },
   "gpt-5": {
     id: "gpt-5",
     name: "Langdock Base Engine",
     provider: "langdock",
-    contextWindow: 128000,
-    maxOutputTokens: 4096,
     capabilities: ["text", "streaming", "tool_calling"],
-    costPerInputToken: 0.0000015,
-    costPerOutputToken: 0.000006,
+    isUnconfirmed: true,
   },
   "gpt-5-eu": {
     id: "gpt-5-eu",
     name: "Langdock EU Regional Engine",
     provider: "langdock",
-    contextWindow: 128000,
-    maxOutputTokens: 4096,
     capabilities: ["text", "streaming", "tool_calling"],
-    costPerInputToken: 0.0000015,
-    costPerOutputToken: 0.000006,
+    isUnconfirmed: true,
   },
   "gpt-5-mini-eu": {
     id: "gpt-5-mini-eu",
     name: "Langdock Fast EU Regional Engine",
     provider: "langdock",
-    contextWindow: 128000,
-    maxOutputTokens: 4096,
     capabilities: ["text", "streaming", "tool_calling"],
-    costPerInputToken: 0.0000005,
-    costPerOutputToken: 0.0000015,
+    isUnconfirmed: true,
   },
 
   // OpenRouter Secondary & Fallback Models
@@ -143,21 +141,13 @@ export const MODEL_REGISTRY: Record<string, ModelSpec> = {
     id: "openrouter/auto",
     name: "OpenRouter Unified Engine",
     provider: "openrouter",
-    contextWindow: 200000,
-    maxOutputTokens: 8192,
     capabilities: ["text", "vision", "streaming", "tool_calling", "json_mode", "thinking"],
-    costPerInputToken: 0.000002,
-    costPerOutputToken: 0.00001,
   },
   "openrouter/free": {
     id: "openrouter/free",
     name: "OpenRouter Free Fallback Engine",
     provider: "openrouter",
-    contextWindow: 128000,
-    maxOutputTokens: 4096,
     capabilities: ["text", "streaming", "tool_calling"],
-    costPerInputToken: 0,
-    costPerOutputToken: 0,
   },
 };
 

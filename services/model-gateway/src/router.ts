@@ -1,5 +1,5 @@
 import type { ChatCompletionRequest, ModelSpec, ProviderId } from "@orbaagent/shared";
-import { MODEL_REGISTRY, isQuotaExhausted } from "./registry.js";
+import { MODEL_REGISTRY, isLocalQuotaExhausted } from "./registry.js";
 
 export type TaskComplexity = "high_reasoning" | "coding" | "vision" | "fast_response" | "general";
 
@@ -20,7 +20,6 @@ export class IntelligenceRouter {
   private readonly providerHealthMap: Map<ProviderId, ProviderHealth> = new Map([
     ["langdock", { consecutiveFailures: 0, isHealthy: true }],
     ["openrouter", { consecutiveFailures: 0, isHealthy: true }],
-    ["local", { consecutiveFailures: 0, isHealthy: true }],
   ]);
 
   private readonly modelFailureMap: Map<string, number> = new Map();
@@ -105,7 +104,6 @@ export class IntelligenceRouter {
       "typescript",
       "python",
       "api",
-      "architecture",
       "refactor",
       "ci/cd",
     ];
@@ -117,7 +115,7 @@ export class IntelligenceRouter {
     }
 
     // Check for complex reasoning
-    const reasoningKeywords = ["explain", "analyze", "compare", "plan", "design", "solve", "why"];
+    const reasoningKeywords = ["explain", "analyze", "compare", "plan", "solve", "prove", "math"];
     if (reasoningKeywords.some((kw) => fullText.includes(kw)) || fullText.length > 300) {
       return "high_reasoning";
     }
@@ -131,48 +129,45 @@ export class IntelligenceRouter {
   }
 
   /**
-   * Multi-dimensional intelligence routing:
-   * Evaluates task type, provider health state, quota/allowance exhaustion, context limits, and model capabilities.
-   * User model parameters are strictly ignored and normalized to "auto".
+   * Dynamic Capability-Based Intelligence Routing:
+   * Evaluates task requirements, model capabilities, local quota limits, runtime model failure penalties,
+   * and provider circuit-breaker health dynamically without hardcoded static lists.
    */
   selectRouting(request: ChatCompletionRequest): RoutingDecision {
     const complexity = this.classifyTask(request);
     const langdockHealth = this.getProviderHealth("langdock");
 
-    // Candidate model priority ordering per task type
-    let candidateLangdockIds: string[];
-    switch (complexity) {
-      case "high_reasoning":
-        candidateLangdockIds = [
-          "gpt-6-sol",
-          "gpt-5.4",
-          "gpt-5.2-pro",
-          "gpt-5.2",
-          "gpt-5.1",
-          "gpt-5",
-          "gpt-5-eu",
-        ];
-        break;
-      case "coding":
-        candidateLangdockIds = ["gpt-5.4", "gpt-5.2-pro", "gpt-5.2", "gpt-5.1", "gpt-5.4-mini"];
-        break;
-      case "vision":
-        candidateLangdockIds = ["gpt-5.4", "gpt-5.2-pro", "gpt-5.2", "gpt-6-sol"];
-        break;
-      case "fast_response":
-        candidateLangdockIds = ["gpt-5.4-mini", "gpt-5-mini-eu", "gpt-5.1", "gpt-5.2"];
-        break;
-      default:
-        candidateLangdockIds = ["gpt-5.2", "gpt-5.1", "gpt-5", "gpt-5-eu", "gpt-5.4-mini"];
-        break;
-    }
+    const needsVision = complexity === "vision";
+    const needsTools =
+      Boolean(request.tools && request.tools.length > 0) || complexity === "coding";
 
-    // Filter eligible Langdock models based on health, quota availability, and model failure count
-    const eligibleLangdock = candidateLangdockIds
-      .map((id) => MODEL_REGISTRY[id])
-      .filter((m): m is ModelSpec => Boolean(m))
-      .filter((m) => !isQuotaExhausted(m.id))
+    // Retrieve all registered Langdock models
+    const allLangdockModels = Object.values(MODEL_REGISTRY).filter(
+      (m) => m.provider === "langdock",
+    );
+
+    // Filter eligible Langdock models by task capabilities, quota limits, and failure count
+    const eligibleLangdock = allLangdockModels
+      .filter((m) => !needsVision || m.capabilities.includes("vision"))
+      .filter((m) => !needsTools || m.capabilities.includes("tool_calling"))
+      .filter((m) => !isLocalQuotaExhausted(m.id))
       .filter((m) => (this.modelFailureMap.get(m.id) || 0) < 3);
+
+    // Score eligible models dynamically based on task complexity alignment
+    const scoredLangdock = eligibleLangdock.map((m) => {
+      let score = 10;
+      if (complexity === "high_reasoning" && m.capabilities.includes("thinking")) score += 15;
+      if (complexity === "coding" && m.capabilities.includes("tool_calling")) score += 10;
+      if (complexity === "vision" && m.capabilities.includes("vision")) score += 15;
+      if (complexity === "fast_response" && m.id.includes("mini")) score += 10;
+
+      const failures = this.modelFailureMap.get(m.id) || 0;
+      score -= failures * 5;
+      return { model: m, score };
+    });
+
+    scoredLangdock.sort((a, b) => b.score - a.score);
+    const sortedLangdockModels = scoredLangdock.map((sm) => sm.model);
 
     const openrouterAuto = MODEL_REGISTRY["openrouter/auto"];
     const openrouterFree = MODEL_REGISTRY["openrouter/free"];
@@ -180,14 +175,14 @@ export class IntelligenceRouter {
     let primaryModel: ModelSpec;
     let fallbackChain: ModelSpec[];
 
-    if (langdockHealth.isHealthy && eligibleLangdock.length > 0) {
-      primaryModel = eligibleLangdock[0];
-      const remainingLangdock = eligibleLangdock.slice(1);
+    if (langdockHealth.isHealthy && sortedLangdockModels.length > 0) {
+      primaryModel = sortedLangdockModels[0];
+      const remainingLangdock = sortedLangdockModels.slice(1);
       fallbackChain = [...remainingLangdock, openrouterAuto, openrouterFree].filter(
         (m): m is ModelSpec => Boolean(m),
       );
     } else {
-      // Langdock provider unhealthy or all Langdock models exhausted → Failover to OpenRouter
+      // Langdock provider in cooldown or all Langdock models exhausted → Failover to OpenRouter
       primaryModel = openrouterAuto || openrouterFree;
       fallbackChain = [openrouterFree].filter((m): m is ModelSpec => Boolean(m));
     }
@@ -198,7 +193,7 @@ export class IntelligenceRouter {
       complexity,
       reason: `Execution route selected (complexity: ${complexity}, langdockHealth: ${
         langdockHealth.isHealthy ? "healthy" : "cooldown"
-      }). Selected internal primary: ${primaryModel.id}, fallbacks: ${fallbackChain
+      }). Selected primary: ${primaryModel.id}, fallbacks: ${fallbackChain
         .map((m) => m.id)
         .join(", ")}.`,
     };

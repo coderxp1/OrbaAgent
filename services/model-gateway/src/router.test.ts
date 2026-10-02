@@ -1,6 +1,6 @@
 import type { ChatCompletionRequest } from "@orbaagent/shared";
 import { beforeEach, describe, expect, it } from "vitest";
-import { recordModelUsage, resetQuotaState } from "./registry.js";
+import { recordLocalUsage, resetLocalUsage } from "./registry.js";
 import { IntelligenceRouter } from "./router.js";
 
 describe("IntelligenceRouter", () => {
@@ -8,10 +8,10 @@ describe("IntelligenceRouter", () => {
 
   beforeEach(() => {
     router = new IntelligenceRouter();
-    resetQuotaState();
+    resetLocalUsage();
   });
 
-  it("should route coding tasks to primary Langdock gpt-5.4 model and OpenRouter fallback", () => {
+  it("should route coding tasks to dynamic Langdock primary model and OpenRouter fallback", () => {
     const req: ChatCompletionRequest = {
       modelId: "user-requested-custom-model", // External choice to ignore
       messages: [
@@ -30,11 +30,10 @@ describe("IntelligenceRouter", () => {
     const routing = router.selectRouting(req);
     expect(routing.complexity).toBe("coding");
     expect(routing.primaryModel.provider).toBe("langdock");
-    expect(routing.primaryModel.id).toBe("gpt-5.4");
     expect(routing.fallbackChain.some((m) => m.provider === "openrouter")).toBe(true);
   });
 
-  it("should select gpt-6-sol for complex reasoning tasks", () => {
+  it("should dynamically select thinking capability model for complex reasoning tasks", () => {
     const req: ChatCompletionRequest = {
       modelId: "auto",
       messages: [
@@ -56,12 +55,15 @@ describe("IntelligenceRouter", () => {
 
     const routing = router.selectRouting(req);
     expect(routing.complexity).toBe("high_reasoning");
-    expect(routing.primaryModel.id).toBe("gpt-6-sol");
+    expect(routing.primaryModel.provider).toBe("langdock");
+    expect(routing.primaryModel.capabilities).toContain("thinking");
   });
 
-  it("should automatically select next eligible Langdock model when primary model quota is exhausted", () => {
-    // Exhaust quota for gpt-5.4 (500 requests / 250k tokens)
-    recordModelUsage("gpt-5.4", 260000);
+  it("should select another eligible Langdock model when primary model quota is exhausted", () => {
+    // Record 500 requests for gpt-5.4
+    for (let i = 0; i < 500; i++) {
+      recordLocalUsage("gpt-5.4", 100);
+    }
 
     const req: ChatCompletionRequest = {
       modelId: "auto",
@@ -81,8 +83,8 @@ describe("IntelligenceRouter", () => {
     expect(routing.primaryModel.provider).toBe("langdock");
   });
 
-  it("should failover to OpenRouter when Langdock circuit breaker is triggered", () => {
-    // Record repeated failures to trigger circuit breaker
+  it("should failover to OpenRouter auto and free when Langdock provider is unhealthy", () => {
+    // Record repeated failures to trigger Langdock circuit breaker
     router.recordProviderFailure("langdock");
     router.recordProviderFailure("langdock");
     router.recordProviderFailure("langdock");
@@ -102,6 +104,8 @@ describe("IntelligenceRouter", () => {
 
     const routing = router.selectRouting(req);
     expect(routing.primaryModel.provider).toBe("openrouter");
+    expect(routing.primaryModel.id).toBe("openrouter/auto");
+    expect(routing.fallbackChain.some((m) => m.id === "openrouter/free")).toBe(true);
   });
 
   it("should enforce non-mock policy in production", () => {

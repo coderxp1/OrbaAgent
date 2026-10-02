@@ -78,7 +78,7 @@ export class LangdockAdapter implements IModelProviderAdapter {
           },
           signal: controller.signal,
           body: JSON.stringify({
-            model: request.modelId || "langdock-auto",
+            model: request.modelId || "gpt-5.4",
             messages: request.messages.map((m: { role: string; content: string }) => ({
               role: m.role,
               content: m.content,
@@ -93,6 +93,24 @@ export class LangdockAdapter implements IModelProviderAdapter {
 
         if (!res.ok) {
           const errorText = await res.text().catch(() => "Unknown Langdock error");
+
+          // Explicit Error Classification
+          if (res.status === 401 || res.status === 403) {
+            throw new OrbaError(
+              `Langdock authentication error (${res.status}): ${errorText}`,
+              "MISSING_PRODUCTION_CREDENTIALS",
+              res.status,
+            );
+          }
+
+          if (res.status === 400) {
+            throw new OrbaError(
+              `Langdock invalid request error (${res.status}): ${errorText}`,
+              "INVALID_REQUEST",
+              400,
+            );
+          }
+
           const isRetryableStatus = res.status === 429 || res.status >= 500;
           const err = new OrbaError(
             `Langdock API error (${res.status}): ${errorText}`,
@@ -112,6 +130,13 @@ export class LangdockAdapter implements IModelProviderAdapter {
         break; // Request succeeded
       } catch (err: unknown) {
         clearTimeout(timer);
+        if (
+          err instanceof OrbaError &&
+          (err.code === "MISSING_PRODUCTION_CREDENTIALS" || err.code === "INVALID_REQUEST")
+        ) {
+          throw err; // Non-retryable errors fail immediately closed
+        }
+
         const isAbort = err instanceof Error && err.name === "AbortError";
         const formattedErr = isAbort
           ? new OrbaError(
@@ -139,11 +164,11 @@ export class LangdockAdapter implements IModelProviderAdapter {
     const reader = response.body?.getReader();
     if (!reader) throw new Error("No response reader from Langdock API");
 
+    // Unified cancellation controller controlling stream reader, chunk timeout, and cleanup
     const controller = new AbortController();
     const decoder = new TextDecoder("utf-8");
     let buffer = "";
 
-    // Active streaming chunk timeout watcher
     let streamTimer: NodeJS.Timeout | null = null;
     const resetStreamTimer = () => {
       if (streamTimer) clearTimeout(streamTimer);
@@ -233,6 +258,11 @@ export class LangdockAdapter implements IModelProviderAdapter {
       yield { type: "done", traceId: request.trace.traceId, finishReason: "stop" };
     } finally {
       if (streamTimer) clearTimeout(streamTimer);
+      try {
+        await reader.cancel();
+      } catch {
+        // Reader cancellation cleanup
+      }
     }
   }
 
