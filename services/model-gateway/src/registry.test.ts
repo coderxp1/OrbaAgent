@@ -26,4 +26,3 @@ describe("ModelRegistry", () => {
     expect(spec.provider).toBe("langdock");
   });
 });
-

@@ -60,4 +60,3 @@ export function listAvailableModels(providerFilter?: ProviderId): ModelSpec[] {
   }
   return models;
 }
-
