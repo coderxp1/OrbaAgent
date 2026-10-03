@@ -23,7 +23,7 @@ export class LangdockAdapter implements IModelProviderAdapter {
   private readonly maxRetries: number;
 
   constructor(config?: LangdockAdapterConfig) {
-    const rawKey = config?.apiKey || process.env.LANGDOCK_API_KEY;
+    const rawKey = config?.apiKey || process.env.LANGDOCK_API_KEY || process.env.Langdock_API_KEY;
     this.apiKey = rawKey && rawKey !== "undefined" ? rawKey : undefined;
     this.baseUrl =
       config?.baseUrl || process.env.LANGDOCK_BASE_URL || "https://api.langdock.com/v1";

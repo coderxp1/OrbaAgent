@@ -8,3 +8,4 @@ target
 *.log
 .env*
 infra/proxy/acme.json
+infra/proxy/acme

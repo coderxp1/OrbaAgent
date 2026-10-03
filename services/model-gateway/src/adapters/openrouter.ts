@@ -23,7 +23,7 @@ export class OpenRouterAdapter implements IModelProviderAdapter {
   private readonly maxRetries: number;
 
   constructor(config?: OpenRouterAdapterConfig) {
-    const rawKey = config?.apiKey || process.env.OPENROUTER_API_KEY;
+    const rawKey = config?.apiKey || process.env.OPENROUTER_API_KEY || process.env.OPENROUTER_API;
     this.apiKey = rawKey && rawKey !== "undefined" ? rawKey : undefined;
     this.baseUrl =
       config?.baseUrl || process.env.OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1";
