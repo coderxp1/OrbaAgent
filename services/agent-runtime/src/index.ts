@@ -1,9 +1,8 @@
-export const SERVICE_NAME = "agent-runtime";
-
-export async function run() {
-  console.log(`Starting ${SERVICE_NAME}...`);
-}
-
-if (process.env.NODE_ENV !== "test") {
-  run();
-}
+export * from "./tools/base.js";
+export * from "./tools/shell.js";
+export * from "./tools/filesystem.js";
+export * from "./tools/git.js";
+export * from "./tools/github.js";
+export * from "./tools/web.js";
+export * from "./integrations.js";
+export * from "./registry.js";

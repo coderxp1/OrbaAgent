@@ -272,7 +272,6 @@ export class ModelGateway {
         if (i < candidateModels.length - 1) {
           const currentProvider = candidateModels[i].provider;
           const nextProvider = candidateModels[i + 1].provider;
-          // Emit route optimization notice only when transitioning between provider families
           if (currentProvider !== nextProvider && !emittedFailoverNotice) {
             emittedFailoverNotice = true;
             yield {

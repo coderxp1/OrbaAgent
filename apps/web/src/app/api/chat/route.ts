@@ -1,8 +1,8 @@
-import { ModelGateway } from "@orbaagent/model-gateway";
+import { AgentOrchestrator } from "@orbaagent/orchestrator";
 import type { ChatCompletionRequest } from "@orbaagent/shared";
 
-// Shared gateway instance inside server runtime
-const gateway = new ModelGateway();
+// Shared orchestrator instance inside server runtime
+const orchestrator = new AgentOrchestrator();
 
 export async function POST(request: Request) {
   try {
@@ -35,7 +35,7 @@ export async function POST(request: Request) {
       async start(controller) {
         const encoder = new TextEncoder();
         try {
-          for await (const event of gateway.streamChat(fullRequest)) {
+          for await (const event of orchestrator.executeAgentLoop(fullRequest)) {
             const payload = `data: ${JSON.stringify(event)}\n\n`;
             controller.enqueue(encoder.encode(payload));
           }

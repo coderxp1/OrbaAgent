@@ -1,0 +1,243 @@
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
+import type { ToolDefinition, ToolExecutionResult } from "@orbaagent/shared";
+import type { ITool, ToolExecutionContext } from "./base.js";
+
+function resolveSafePath(workspaceDir: string, relativePath: string): string {
+  const normalized = path.normalize(relativePath || ".").replace(/^(\.\.(\/|\\))+/, "");
+  const absolute = path.resolve(workspaceDir, normalized);
+  if (!absolute.startsWith(path.resolve(workspaceDir))) {
+    throw new Error(`Path traversal denied: '${relativePath}' is outside workspace scope.`);
+  }
+  return absolute;
+}
+
+export class ListFilesTool implements ITool {
+  public readonly definition: ToolDefinition = {
+    name: "list_files",
+    description: "List contents of a directory in the workspace.",
+    parameters: {
+      type: "object",
+      properties: {
+        dirPath: {
+          type: "string",
+          description: "Relative path to directory (default '.').",
+        },
+      },
+    },
+  };
+
+  async execute(
+    args: Record<string, unknown>,
+    context: ToolExecutionContext,
+  ): Promise<ToolExecutionResult> {
+    const startTime = Date.now();
+    const toolCallId = (args._toolCallId as string) || `tc_ls_${Date.now()}`;
+    const dirPath = String(args.dirPath || ".");
+
+    try {
+      const targetDir = resolveSafePath(context.workspaceDir, dirPath);
+      const entries = await fs.readdir(targetDir, { withFileTypes: true });
+
+      const fileList = entries
+        .map((e) => `${e.isDirectory() ? "[DIR]" : "[FILE]"} ${e.name}`)
+        .join("\n");
+
+      return {
+        toolCallId,
+        name: this.definition.name,
+        success: true,
+        output: fileList || "(directory is empty)",
+        executionTimeMs: Date.now() - startTime,
+      };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        toolCallId,
+        name: this.definition.name,
+        success: false,
+        output: "",
+        error: msg,
+        executionTimeMs: Date.now() - startTime,
+      };
+    }
+  }
+}
+
+export class ReadFileTool implements ITool {
+  public readonly definition: ToolDefinition = {
+    name: "read_file",
+    description: "Read the full contents of a file in the workspace.",
+    parameters: {
+      type: "object",
+      properties: {
+        filePath: {
+          type: "string",
+          description: "Relative path to file in workspace.",
+        },
+      },
+      required: ["filePath"],
+    },
+  };
+
+  async execute(
+    args: Record<string, unknown>,
+    context: ToolExecutionContext,
+  ): Promise<ToolExecutionResult> {
+    const startTime = Date.now();
+    const toolCallId = (args._toolCallId as string) || `tc_read_${Date.now()}`;
+    const filePath = String(args.filePath || "");
+
+    try {
+      const targetPath = resolveSafePath(context.workspaceDir, filePath);
+      const content = await fs.readFile(targetPath, "utf-8");
+
+      return {
+        toolCallId,
+        name: this.definition.name,
+        success: true,
+        output: content,
+        executionTimeMs: Date.now() - startTime,
+      };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        toolCallId,
+        name: this.definition.name,
+        success: false,
+        output: "",
+        error: msg,
+        executionTimeMs: Date.now() - startTime,
+      };
+    }
+  }
+}
+
+export class WriteFileTool implements ITool {
+  public readonly definition: ToolDefinition = {
+    name: "write_file",
+    description:
+      "Write content to a file in the workspace (creates file and parent directories if needed).",
+    parameters: {
+      type: "object",
+      properties: {
+        filePath: {
+          type: "string",
+          description: "Relative path to file.",
+        },
+        content: {
+          type: "string",
+          description: "File text content to write.",
+        },
+      },
+      required: ["filePath", "content"],
+    },
+  };
+
+  async execute(
+    args: Record<string, unknown>,
+    context: ToolExecutionContext,
+  ): Promise<ToolExecutionResult> {
+    const startTime = Date.now();
+    const toolCallId = (args._toolCallId as string) || `tc_write_${Date.now()}`;
+    const filePath = String(args.filePath || "");
+    const content = String(args.content ?? "");
+
+    try {
+      const targetPath = resolveSafePath(context.workspaceDir, filePath);
+      await fs.mkdir(path.dirname(targetPath), { recursive: true });
+      await fs.writeFile(targetPath, content, "utf-8");
+
+      return {
+        toolCallId,
+        name: this.definition.name,
+        success: true,
+        output: `Successfully wrote ${content.length} characters to '${filePath}'.`,
+        executionTimeMs: Date.now() - startTime,
+      };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        toolCallId,
+        name: this.definition.name,
+        success: false,
+        output: "",
+        error: msg,
+        executionTimeMs: Date.now() - startTime,
+      };
+    }
+  }
+}
+
+export class EditFileTool implements ITool {
+  public readonly definition: ToolDefinition = {
+    name: "edit_file",
+    description: "Replace exact content snippet in a file with new content.",
+    parameters: {
+      type: "object",
+      properties: {
+        filePath: {
+          type: "string",
+          description: "Relative path to file.",
+        },
+        targetContent: {
+          type: "string",
+          description: "Exact text string to be replaced.",
+        },
+        replacementContent: {
+          type: "string",
+          description: "New content to replace target text.",
+        },
+      },
+      required: ["filePath", "targetContent", "replacementContent"],
+    },
+  };
+
+  async execute(
+    args: Record<string, unknown>,
+    context: ToolExecutionContext,
+  ): Promise<ToolExecutionResult> {
+    const startTime = Date.now();
+    const toolCallId = (args._toolCallId as string) || `tc_edit_${Date.now()}`;
+    const filePath = String(args.filePath || "");
+    const targetContent = String(args.targetContent || "");
+    const replacementContent = String(args.replacementContent || "");
+
+    try {
+      const targetPath = resolveSafePath(context.workspaceDir, filePath);
+      const original = await fs.readFile(targetPath, "utf-8");
+
+      if (!original.includes(targetContent)) {
+        return {
+          toolCallId,
+          name: this.definition.name,
+          success: false,
+          output: "",
+          error: `Target content snippet not found in '${filePath}'.`,
+          executionTimeMs: Date.now() - startTime,
+        };
+      }
+
+      const updated = original.replace(targetContent, replacementContent);
+      await fs.writeFile(targetPath, updated, "utf-8");
+
+      return {
+        toolCallId,
+        name: this.definition.name,
+        success: true,
+        output: `Successfully replaced content in '${filePath}'.`,
+        executionTimeMs: Date.now() - startTime,
+      };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        toolCallId,
+        name: this.definition.name,
+        success: false,
+        output: "",
+        error: msg,
+        executionTimeMs: Date.now() - startTime,
+      };
+    }
+  }
+}

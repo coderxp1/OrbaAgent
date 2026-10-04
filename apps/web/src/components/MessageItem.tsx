@@ -1,7 +1,7 @@
 "use client";
 
 import type { ChatMessage, ToolCall } from "@orbaagent/shared";
-import { Brain, Check, Code, Copy, User, Wrench } from "lucide-react";
+import { AlertTriangle, Brain, Check, Code, Copy, User, Wrench } from "lucide-react";
 import { useState } from "react";
 
 interface MessageItemProps {
@@ -82,6 +82,39 @@ export function MessageItem({ message }: MessageItemProps) {
                 </div>
                 <pre className="overflow-x-auto rounded bg-zinc-950 p-2 font-mono text-[11px] text-zinc-300">
                   {JSON.stringify(tc.arguments, null, 2)}
+                </pre>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Tool Results Cards */}
+        {message.toolResults && message.toolResults.length > 0 && (
+          <div className="flex flex-col gap-2">
+            {message.toolResults.map((tr) => (
+              <div
+                key={tr.toolCallId}
+                className={`flex flex-col gap-1.5 rounded-lg border p-3 text-xs ${
+                  tr.success
+                    ? "border-emerald-900/40 bg-emerald-950/20 text-emerald-200"
+                    : "border-red-900/40 bg-red-950/20 text-red-200"
+                }`}
+              >
+                <div className="flex items-center gap-2 font-medium">
+                  {tr.success ? (
+                    <Check className="h-3.5 w-3.5 text-emerald-400" />
+                  ) : (
+                    <AlertTriangle className="h-3.5 w-3.5 text-red-400" />
+                  )}
+                  <span>
+                    Tool Output: {tr.name} ({tr.success ? "Success" : "Failed"})
+                  </span>
+                  <span className="ml-auto font-mono text-[10px] opacity-75">
+                    {tr.executionTimeMs ? `${tr.executionTimeMs}ms` : ""}
+                  </span>
+                </div>
+                <pre className="overflow-x-auto rounded bg-zinc-950 p-2 font-mono text-[11px] text-zinc-300 max-h-60 overflow-y-auto whitespace-pre-wrap">
+                  {tr.output || tr.error || "No output"}
                 </pre>
               </div>
             ))}

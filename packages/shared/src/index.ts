@@ -83,6 +83,17 @@ export const ToolDefinitionSchema = z.object({
 });
 export type ToolDefinition = z.infer<typeof ToolDefinitionSchema>;
 
+export const ToolExecutionResultSchema = z.object({
+  toolCallId: z.string(),
+  name: z.string(),
+  success: z.boolean(),
+  output: z.string(),
+  error: z.string().optional(),
+  executionTimeMs: z.number().optional(),
+  metadata: z.record(z.unknown()).optional(),
+});
+export type ToolExecutionResult = z.infer<typeof ToolExecutionResultSchema>;
+
 export const ChatMessageRoleSchema = z.enum(["system", "user", "assistant", "tool"]);
 export type ChatMessageRole = z.infer<typeof ChatMessageRoleSchema>;
 
@@ -93,6 +104,7 @@ export const ChatMessageSchema = z.object({
   name: z.string().optional(),
   toolCallId: z.string().optional(),
   toolCalls: z.array(ToolCallSchema).optional(),
+  toolResults: z.array(ToolExecutionResultSchema).optional(),
   thinking: z.string().optional(),
   timestamp: z.string().optional(),
 });
@@ -128,6 +140,44 @@ export const ChatCompletionRequestSchema = z.object({
 });
 export type ChatCompletionRequest = z.infer<typeof ChatCompletionRequestSchema>;
 
+export const IntegrationNameSchema = z.enum([
+  "github",
+  "slack",
+  "notion",
+  "email",
+  "gmail",
+  "jira",
+  "atlassian",
+  "linear",
+  "google_calendar",
+  "teams",
+  "outlook",
+  "salesforce",
+  "asana",
+  "box",
+  "google_drive",
+  "sharepoint",
+]);
+export type IntegrationName = z.infer<typeof IntegrationNameSchema>;
+
+export const IntegrationStatusSchema = z.object({
+  name: IntegrationNameSchema,
+  displayName: z.string(),
+  connected: z.boolean(),
+  accountName: z.string().optional(),
+  scopes: z.array(z.string()).optional(),
+  lastSyncedAt: z.string().optional(),
+});
+export type IntegrationStatus = z.infer<typeof IntegrationStatusSchema>;
+
+export const ToolManifestSchema = z.object({
+  availableTools: z.array(z.string()),
+  connectedServices: z.array(IntegrationStatusSchema),
+  workspaceId: z.string(),
+  permissions: z.record(z.boolean()),
+});
+export type ToolManifest = z.infer<typeof ToolManifestSchema>;
+
 export const UsageStatsSchema = z.object({
   promptTokens: z.number().int().nonnegative(),
   completionTokens: z.number().int().nonnegative(),
@@ -141,6 +191,8 @@ export const NormalizedEventTypeSchema = z.enum([
   "tool_call_start",
   "tool_call_delta",
   "tool_call_end",
+  "tool_call_result",
+  "agent_activity",
   "usage",
   "error",
   "done",
@@ -148,12 +200,21 @@ export const NormalizedEventTypeSchema = z.enum([
 ]);
 export type NormalizedEventType = z.infer<typeof NormalizedEventTypeSchema>;
 
+export const AgentActivitySchema = z.object({
+  step: z.string(),
+  status: z.enum(["in_progress", "completed", "failed"]),
+  details: z.string().optional(),
+});
+export type AgentActivity = z.infer<typeof AgentActivitySchema>;
+
 export const NormalizedEventSchema = z.object({
   type: NormalizedEventTypeSchema,
   traceId: z.string(),
   textDelta: z.string().optional(),
   thinkingDelta: z.string().optional(),
   toolCall: ToolCallSchema.optional(),
+  toolResult: ToolExecutionResultSchema.optional(),
+  activity: AgentActivitySchema.optional(),
   usage: UsageStatsSchema.optional(),
   error: z
     .object({

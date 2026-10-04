@@ -52,9 +52,15 @@ importers:
 
   apps/web:
     dependencies:
+      '@orbaagent/agent-runtime':
+        specifier: workspace:*
+        version: link:../../services/agent-runtime
       '@orbaagent/model-gateway':
         specifier: workspace:*
         version: link:../../services/model-gateway
+      '@orbaagent/orchestrator':
+        specifier: workspace:*
+        version: link:../../services/orchestrator
       '@orbaagent/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -159,6 +165,12 @@ importers:
 
   services/orchestrator:
     dependencies:
+      '@orbaagent/agent-runtime':
+        specifier: workspace:*
+        version: link:../agent-runtime
+      '@orbaagent/model-gateway':
+        specifier: workspace:*
+        version: link:../model-gateway
       '@orbaagent/shared':
         specifier: workspace:*
         version: link:../../packages/shared

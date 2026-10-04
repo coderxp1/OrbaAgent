@@ -1,6 +1,6 @@
 "use client";
 
-import type { ChatMessage, NormalizedEvent, UsageStats } from "@orbaagent/shared";
+import type { AgentActivity, ChatMessage, NormalizedEvent, UsageStats } from "@orbaagent/shared";
 import { useCallback, useRef, useState } from "react";
 
 export function useAgentChat() {
@@ -9,6 +9,7 @@ export function useAgentChat() {
   const [error, setError] = useState<{ code: string; message: string } | null>(null);
   const [latestUsage, setLatestUsage] = useState<UsageStats | null>(null);
   const [activeTraceId, setActiveTraceId] = useState<string | null>(null);
+  const [activeActivity, setActiveActivity] = useState<AgentActivity | null>(null);
 
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -137,6 +138,17 @@ export function useAgentChat() {
                       return { ...msg, toolCalls: [...existing, tc] };
                     }),
                   );
+                } else if (event.type === "tool_call_result" && event.toolResult) {
+                  const tr = event.toolResult;
+                  setMessages((prev) =>
+                    prev.map((msg) => {
+                      if (msg.id !== assistantMsgId) return msg;
+                      const existing = msg.toolResults || [];
+                      return { ...msg, toolResults: [...existing, tr] };
+                    }),
+                  );
+                } else if (event.type === "agent_activity" && event.activity) {
+                  setActiveActivity(event.activity);
                 } else if (event.type === "usage" && event.usage) {
                   setLatestUsage(event.usage);
                 } else if (event.type === "error" && event.error) {
@@ -157,6 +169,7 @@ export function useAgentChat() {
         }
       } finally {
         setIsGenerating(false);
+        setActiveActivity(null);
         abortControllerRef.current = null;
       }
     },
@@ -177,6 +190,7 @@ export function useAgentChat() {
     setError(null);
     setLatestUsage(null);
     setActiveTraceId(null);
+    setActiveActivity(null);
   }, [cancelGeneration]);
 
   return {
@@ -185,6 +199,7 @@ export function useAgentChat() {
     error,
     latestUsage,
     activeTraceId,
+    activeActivity,
     sendMessage,
     cancelGeneration,
     retryLastMessage,
