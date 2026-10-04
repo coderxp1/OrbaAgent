@@ -82,10 +82,47 @@ export class LangdockAdapter implements IModelProviderAdapter {
           signal: controller.signal,
           body: JSON.stringify({
             model: request.modelId || "gpt-5.4",
-            messages: request.messages.map((m: { role: string; content: string }) => ({
-              role: m.role,
-              content: m.content,
-            })),
+            messages: request.messages.map((m) => {
+              if (m.role === "assistant" && m.toolCalls && m.toolCalls.length > 0) {
+                return {
+                  role: "assistant",
+                  content: m.content || null,
+                  tool_calls: m.toolCalls.map((tc) => ({
+                    id: tc.id,
+                    type: "function",
+                    function: {
+                      name: tc.name,
+                      arguments:
+                        typeof tc.arguments === "string"
+                          ? tc.arguments
+                          : JSON.stringify(tc.arguments),
+                    },
+                  })),
+                };
+              }
+              if (m.role === "tool") {
+                return {
+                  role: "tool",
+                  tool_call_id: m.toolCallId,
+                  content: m.content,
+                };
+              }
+              return {
+                role: m.role,
+                content: m.content,
+              };
+            }),
+            tools:
+              request.tools && request.tools.length > 0
+                ? request.tools.map((t) => ({
+                    type: "function",
+                    function: {
+                      name: t.name,
+                      description: t.description,
+                      parameters: t.parameters,
+                    },
+                  }))
+                : undefined,
             stream: true,
             temperature: request.temperature ?? 0.7,
             max_tokens: request.maxTokens,
@@ -188,6 +225,8 @@ export class LangdockAdapter implements IModelProviderAdapter {
 
     resetStreamTimer();
 
+    const toolCallAccumulator: Record<number, { id: string; name: string; args: string }> = {};
+
     try {
       while (true) {
         if (controller.signal.aborted) {
@@ -240,6 +279,23 @@ export class LangdockAdapter implements IModelProviderAdapter {
                   textDelta: delta.content,
                 };
               }
+
+              if (delta?.tool_calls) {
+                for (const tc of delta.tool_calls) {
+                  const idx = tc.index ?? 0;
+                  if (!toolCallAccumulator[idx]) {
+                    toolCallAccumulator[idx] = {
+                      id: tc.id || `call_${Date.now()}_${idx}`,
+                      name: tc.function?.name || "",
+                      args: "",
+                    };
+                  }
+                  if (tc.id) toolCallAccumulator[idx].id = tc.id;
+                  if (tc.function?.name) toolCallAccumulator[idx].name += tc.function.name;
+                  if (tc.function?.arguments) toolCallAccumulator[idx].args += tc.function.arguments;
+                }
+              }
+
               if (parsed.usage) {
                 yield {
                   type: "usage",
@@ -258,7 +314,25 @@ export class LangdockAdapter implements IModelProviderAdapter {
         }
       }
 
-      yield { type: "done", traceId: request.trace.traceId, finishReason: "stop" };
+      for (const tc of Object.values(toolCallAccumulator)) {
+        let parsedArgs: Record<string, unknown> = {};
+        try {
+          parsedArgs = tc.args ? JSON.parse(tc.args) : {};
+        } catch {
+          parsedArgs = { raw: tc.args };
+        }
+        yield {
+          type: "tool_call_start",
+          traceId: request.trace.traceId,
+          toolCall: {
+            id: tc.id,
+            name: tc.name,
+            arguments: parsedArgs,
+          },
+        };
+      }
+
+      yield { type: "done", traceId: request.trace.traceId, finishReason: Object.keys(toolCallAccumulator).length > 0 ? "tool_calls" : "stop" };
     } finally {
       if (streamTimer) clearTimeout(streamTimer);
       try {
