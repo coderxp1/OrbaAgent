@@ -290,7 +290,17 @@ export class OpenRouterAdapter implements IModelProviderAdapter {
                     };
                   }
                   if (tc.id) toolCallAccumulator[idx].id = tc.id;
-                  if (tc.function?.name) toolCallAccumulator[idx].name += tc.function.name;
+                  if (tc.function?.name) {
+                    const incoming = tc.function.name;
+                    const current = toolCallAccumulator[idx].name;
+                    if (!current) {
+                      toolCallAccumulator[idx].name = incoming;
+                    } else if (incoming.startsWith(current)) {
+                      toolCallAccumulator[idx].name = incoming;
+                    } else if (!current.includes(incoming)) {
+                      toolCallAccumulator[idx].name += incoming;
+                    }
+                  }
                   if (tc.function?.arguments) toolCallAccumulator[idx].args += tc.function.arguments;
                 }
               }
