@@ -118,11 +118,15 @@ export function useAgentChat() {
                   );
                 } else if (event.type === "thinking_delta" && event.thinkingDelta) {
                   setMessages((prev) =>
-                    prev.map((msg) =>
-                      msg.id === assistantMsgId
-                        ? { ...msg, thinking: (msg.thinking || "") + event.thinkingDelta }
-                        : msg,
-                    ),
+                    prev.map((msg) => {
+                      if (msg.id !== assistantMsgId) return msg;
+                      const currentThinking = msg.thinking || "";
+                      const delta = event.thinkingDelta || "";
+                      if (currentThinking.endsWith(delta)) {
+                        return msg;
+                      }
+                      return { ...msg, thinking: currentThinking + delta };
+                    }),
                   );
                 } else if (event.type === "tool_call_start" && event.toolCall) {
                   const tc = event.toolCall;

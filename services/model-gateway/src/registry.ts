@@ -19,8 +19,11 @@ const MODEL_DEFAULT_TOKENS: Record<string, number> = {
   "gpt-5.2": 150000,
   "gpt-5.1": 250000,
   "gpt-5": 100000,
+  "gpt-5-mini": 100000,
   "gpt-5-eu": 250000,
   "gpt-5-mini-eu": 250000,
+  o3: 300000,
+  "o4-mini": 200000,
   "openrouter/auto": 500000,
   "openrouter/free": 100000,
 };
@@ -121,13 +124,6 @@ export function hasConfirmedCapability(
 
 export const MODEL_REGISTRY: Record<string, ModelSpec> = {
   // Confirmed Langdock Models (unverified specs marked isUnconfirmed: true)
-  "gpt-6-sol": {
-    id: "gpt-6-sol",
-    name: "Langdock Sol Engine",
-    provider: "langdock",
-    capabilities: ["text", "vision", "streaming", "tool_calling", "json_mode", "thinking"],
-    isUnconfirmed: true,
-  },
   "gpt-5.4": {
     id: "gpt-5.4",
     name: "Langdock High Intelligence Engine",
@@ -141,6 +137,13 @@ export const MODEL_REGISTRY: Record<string, ModelSpec> = {
     name: "Langdock Fast Execution Engine",
     provider: "langdock",
     capabilities: ["text", "streaming", "tool_calling"],
+    isUnconfirmed: true,
+  },
+  "gpt-6-sol": {
+    id: "gpt-6-sol",
+    name: "Langdock Sol Engine",
+    provider: "langdock",
+    capabilities: ["text", "vision", "streaming", "tool_calling", "json_mode", "thinking"],
     isUnconfirmed: true,
   },
   "gpt-5.2-pro": {
@@ -171,6 +174,13 @@ export const MODEL_REGISTRY: Record<string, ModelSpec> = {
     capabilities: ["text", "streaming", "tool_calling"],
     isUnconfirmed: true,
   },
+  "gpt-5-mini": {
+    id: "gpt-5-mini",
+    name: "Langdock Fast Engine",
+    provider: "langdock",
+    capabilities: ["text", "streaming", "tool_calling"],
+    isUnconfirmed: true,
+  },
   "gpt-5-eu": {
     id: "gpt-5-eu",
     name: "Langdock EU Regional Engine",
@@ -183,6 +193,20 @@ export const MODEL_REGISTRY: Record<string, ModelSpec> = {
     name: "Langdock Fast EU Regional Engine",
     provider: "langdock",
     capabilities: ["text", "streaming", "tool_calling"],
+    isUnconfirmed: true,
+  },
+  o3: {
+    id: "o3",
+    name: "Langdock Reasoning Engine (o3)",
+    provider: "langdock",
+    capabilities: ["text", "vision", "streaming", "tool_calling", "json_mode", "thinking"],
+    isUnconfirmed: true,
+  },
+  "o4-mini": {
+    id: "o4-mini",
+    name: "Langdock Fast Reasoning Engine (o4-mini)",
+    provider: "langdock",
+    capabilities: ["text", "vision", "streaming", "tool_calling"],
     isUnconfirmed: true,
   },
 

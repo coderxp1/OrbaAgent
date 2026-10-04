@@ -275,7 +275,7 @@ export class OpenRouterAdapter implements IModelProviderAdapter {
       type: "thinking_delta",
       traceId: request.trace.traceId,
       thinkingDelta:
-        "[OpenRouter Fallback Engine] Operating fallback intelligence route for OrbaAgent task...",
+        "[OrbaAgent Engine] Operating fallback intelligence route for OrbaAgent task...",
     };
 
     const responseText = "OrbaAgent executing task via OpenRouter fallback provider pipeline.";

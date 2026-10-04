@@ -26,7 +26,10 @@ export class LangdockAdapter implements IModelProviderAdapter {
     const rawKey = config?.apiKey || process.env.LANGDOCK_API_KEY || process.env.Langdock_API_KEY;
     this.apiKey = rawKey && rawKey !== "undefined" ? rawKey : undefined;
     this.baseUrl =
-      config?.baseUrl || process.env.LANGDOCK_BASE_URL || "https://api.langdock.com/v1";
+      config?.baseUrl ||
+      process.env.LANGDOCK_BASE_URL ||
+      process.env.LANGDOCK_ENDPOINT_URL ||
+      "https://api.langdock.com/openai/eu/v1";
     this.timeoutMs = config?.timeoutMs || Number(process.env.LANGDOCK_TIMEOUT_MS) || 15000;
     this.maxRetries = config?.maxRetries ?? Number(process.env.LANGDOCK_MAX_RETRIES ?? 2);
   }
@@ -272,7 +275,7 @@ export class LangdockAdapter implements IModelProviderAdapter {
     yield {
       type: "thinking_delta",
       traceId: request.trace.traceId,
-      thinkingDelta: "[Langdock Engine] Analyzing task requirements and routing execution plan...",
+      thinkingDelta: "[OrbaAgent Engine] Analyzing task requirements and routing execution plan...",
     };
 
     const responseText = "OrbaAgent executing task via primary Langdock provider pipeline.";
