@@ -14,6 +14,7 @@ import {
   LayoutGrid,
   Library,
   Loader2,
+  Menu,
   MessageSquare,
   Mic,
   PenSquare,
@@ -46,6 +47,7 @@ import {
 } from "../../components/AppIcons";
 import { ConnectionsModal } from "../../components/ConnectionsModal";
 import { ErrorBanner } from "../../components/ErrorBanner";
+import { GitHubConnectionModal } from "../../components/GitHubConnectionModal";
 import { MessageItem } from "../../components/MessageItem";
 import { useAgentChat } from "../../components/useAgentChat";
 
@@ -67,8 +69,42 @@ export default function WorkspacePage() {
   const [isConnectionsOpen, setIsConnectionsOpen] = useState<boolean>(false);
   const [selectedInitialApp, setSelectedInitialApp] = useState<string | null>(null);
 
+  // GitHub connection states
+  const [isGitHubModalOpen, setIsGitHubModalOpen] = useState<boolean>(false);
+  const [gitHubConnected, setGitHubConnected] = useState<boolean>(false);
+  const [gitHubAccount, setGitHubAccount] = useState<string | undefined>();
+
+  // Mobile sidebar state
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState<boolean>(false);
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Fetch initial connection state
+  useEffect(() => {
+    fetch("/api/connections")
+      .then((res) => res.json())
+      .then((data) => {
+        const gh = data.integrations?.find((i: { name: string }) => i.name === "github");
+        if (gh?.connected) {
+          setGitHubConnected(true);
+          setGitHubAccount(gh.accountName);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  // Listen for GitHub OAuth postMessage event
+  useEffect(() => {
+    const handleMsg = (e: MessageEvent) => {
+      if (e.data?.type === "ORBA_GITHUB_CONNECTED") {
+        setGitHubConnected(true);
+        setGitHubAccount(e.data.username || "GitHub User");
+      }
+    };
+    window.addEventListener("message", handleMsg);
+    return () => window.removeEventListener("message", handleMsg);
+  }, []);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -104,16 +140,34 @@ export default function WorkspacePage() {
   };
 
   const openAppConnection = (appName: string) => {
+    if (appName.toLowerCase() === "github") {
+      setIsGitHubModalOpen(true);
+      return;
+    }
     setSelectedInitialApp(appName);
     setIsConnectionsOpen(true);
   };
 
   return (
-    <div className="flex h-screen w-screen bg-[#111111] text-[#ededed] font-sans antialiased overflow-hidden select-none">
+    <div className="relative flex h-screen w-screen bg-[#111111] text-[#ededed] font-sans antialiased overflow-hidden select-none">
+      {/* Mobile Sidebar Overlay Backdrop */}
+      {isMobileSidebarOpen && (
+        <button
+          type="button"
+          aria-label="Close navigation overlay"
+          onClick={() => setIsMobileSidebarOpen(false)}
+          className="fixed inset-0 bg-black/70 backdrop-blur-xs z-40 md:hidden animate-in fade-in duration-200 border-none cursor-default"
+        />
+      )}
+
       {/* =========================================================================
           LEFT SIDEBAR (Matching media_1791118043558.png)
       ========================================================================= */}
-      <aside className="w-64 bg-[#141414] border-r border-[#242424] flex flex-col justify-between shrink-0 h-full p-3.5">
+      <aside
+        className={`fixed inset-y-0 left-0 z-50 w-72 bg-[#141414] border-r border-[#242424] flex flex-col justify-between h-full p-3.5 transition-transform duration-300 md:static md:w-64 md:translate-x-0 ${
+          isMobileSidebarOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full md:translate-x-0"
+        }`}
+      >
         <div className="flex flex-col gap-4 overflow-y-auto pr-1">
           {/* Workspace Header */}
           <div className="flex items-center justify-between px-1.5 py-1">
@@ -125,6 +179,14 @@ export default function WorkspacePage() {
                 Hartmann&apos;s Space
               </span>
             </div>
+            <button
+              onClick={() => setIsMobileSidebarOpen(false)}
+              type="button"
+              className="md:hidden p-1 text-zinc-400 hover:text-white rounded-md hover:bg-zinc-800 transition-colors"
+              title="Close sidebar"
+            >
+              <X className="w-4 h-4" />
+            </button>
           </div>
 
           {/* Top Quick Actions Row */}
@@ -298,9 +360,36 @@ export default function WorkspacePage() {
       {/* =========================================================================
           MAIN WORKSPACE VIEW (Matching media_1791118043558.png)
       ========================================================================= */}
-      <main className="flex-1 flex flex-col h-full overflow-hidden relative bg-[#131313]">
+      <main className="flex-1 flex flex-col h-full overflow-hidden relative bg-[#131313] min-w-0">
+        {/* Mobile Header Bar */}
+        <div className="flex md:hidden items-center justify-between px-3.5 py-2.5 bg-[#141414] border-b border-[#242424] shrink-0">
+          <button
+            onClick={() => setIsMobileSidebarOpen(true)}
+            type="button"
+            className="p-1.5 text-zinc-300 hover:text-white rounded-lg hover:bg-zinc-800 transition-colors"
+            title="Open navigation menu"
+          >
+            <Menu className="w-5 h-5" />
+          </button>
+          <div className="flex items-center gap-2">
+            <img src="/orba-mascot.svg" alt="OrbaAgent" className="w-5 h-5" />
+            <span className="font-bold text-sm text-white tracking-tight">OrbaAgent</span>
+          </div>
+          <button
+            onClick={() => {
+              clearChat();
+              setInputPrompt("");
+            }}
+            type="button"
+            className="p-1.5 text-zinc-300 hover:text-white rounded-lg hover:bg-zinc-800 transition-colors"
+            title="New chat"
+          >
+            <Plus className="w-5 h-5" />
+          </button>
+        </div>
+
         {/* Messages Feed or Center Hero */}
-        <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 sm:p-8">
+        <div ref={scrollRef} className="flex-1 overflow-y-auto p-3 sm:p-8">
           {messages.length === 0 ? (
             <div className="flex flex-col items-center justify-center min-h-[75vh] max-w-2xl mx-auto text-center px-4">
               {/* Mascot Logo (Exact brand mascot circle) */}
@@ -377,11 +466,11 @@ export default function WorkspacePage() {
                     <span className="text-zinc-400 font-medium text-[11px]">
                       Get better answers from your apps
                     </span>
-                    <div className="flex items-center gap-2.5">
+                    <div className="flex items-center gap-2.5 overflow-x-auto no-scrollbar touch-pan-x py-0.5">
                       <button
                         onClick={() => openAppConnection("slack")}
                         type="button"
-                        className="hover:scale-110 transition-transform"
+                        className="hover:scale-110 transition-transform shrink-0"
                         title="Slack"
                       >
                         <SlackIcon className="w-4 h-4" />
@@ -389,7 +478,7 @@ export default function WorkspacePage() {
                       <button
                         onClick={() => openAppConnection("gmail")}
                         type="button"
-                        className="hover:scale-110 transition-transform"
+                        className="hover:scale-110 transition-transform shrink-0"
                         title="Gmail"
                       >
                         <GmailIcon className="w-4 h-4" />
@@ -397,7 +486,7 @@ export default function WorkspacePage() {
                       <button
                         onClick={() => openAppConnection("google_calendar")}
                         type="button"
-                        className="hover:scale-110 transition-transform"
+                        className="hover:scale-110 transition-transform shrink-0"
                         title="Google Calendar"
                       >
                         <GoogleCalendarIcon className="w-4 h-4" />
@@ -405,7 +494,7 @@ export default function WorkspacePage() {
                       <button
                         onClick={() => openAppConnection("outlook")}
                         type="button"
-                        className="hover:scale-110 transition-transform"
+                        className="hover:scale-110 transition-transform shrink-0"
                         title="Outlook Calendar"
                       >
                         <OutlookCalendarIcon className="w-4 h-4" />
@@ -413,7 +502,7 @@ export default function WorkspacePage() {
                       <button
                         onClick={() => openAppConnection("google_drive")}
                         type="button"
-                        className="hover:scale-110 transition-transform"
+                        className="hover:scale-110 transition-transform shrink-0"
                         title="Google Drive"
                       >
                         <GoogleDriveIcon className="w-4 h-4" />
@@ -421,7 +510,7 @@ export default function WorkspacePage() {
                       <button
                         onClick={() => openAppConnection("teams")}
                         type="button"
-                        className="hover:scale-110 transition-transform"
+                        className="hover:scale-110 transition-transform shrink-0"
                         title="Microsoft Teams"
                       >
                         <TeamsIcon className="w-4 h-4" />
@@ -429,7 +518,7 @@ export default function WorkspacePage() {
                       <button
                         onClick={() => openAppConnection("outlook")}
                         type="button"
-                        className="hover:scale-110 transition-transform"
+                        className="hover:scale-110 transition-transform shrink-0"
                         title="Outlook"
                       >
                         <OutlookIcon className="w-4 h-4" />
@@ -437,7 +526,7 @@ export default function WorkspacePage() {
                       <button
                         onClick={() => openAppConnection("sharepoint")}
                         type="button"
-                        className="hover:scale-110 transition-transform"
+                        className="hover:scale-110 transition-transform shrink-0"
                         title="SharePoint & OneDrive"
                       >
                         <SharePointIcon className="w-4 h-4" />
@@ -445,7 +534,7 @@ export default function WorkspacePage() {
                       <button
                         onClick={() => openAppConnection("asana")}
                         type="button"
-                        className="hover:scale-110 transition-transform"
+                        className="hover:scale-110 transition-transform shrink-0"
                         title="Asana"
                       >
                         <AsanaIcon className="w-4 h-4" />
@@ -453,7 +542,7 @@ export default function WorkspacePage() {
                       <button
                         onClick={() => openAppConnection("box")}
                         type="button"
-                        className="hover:scale-110 transition-transform"
+                        className="hover:scale-110 transition-transform shrink-0"
                         title="Box"
                       >
                         <BoxIcon className="w-4 h-4" />
@@ -461,15 +550,22 @@ export default function WorkspacePage() {
                       <button
                         onClick={() => openAppConnection("github")}
                         type="button"
-                        className="text-white hover:scale-110 transition-transform"
-                        title="GitHub"
+                        className="relative text-white hover:scale-110 transition-transform shrink-0"
+                        title={
+                          gitHubConnected
+                            ? `GitHub (Connected as @${gitHubAccount || "user"})`
+                            : "GitHub"
+                        }
                       >
                         <GitHubIcon className="w-4 h-4" />
+                        {gitHubConnected && (
+                          <span className="absolute -top-1 -right-1 w-2 h-2 bg-emerald-400 rounded-full ring-2 ring-[#1a1a1a]" />
+                        )}
                       </button>
                       <button
                         onClick={() => openAppConnection("linear")}
                         type="button"
-                        className="hover:scale-110 transition-transform"
+                        className="hover:scale-110 transition-transform shrink-0"
                         title="Linear"
                       >
                         <LinearIcon className="w-4 h-4" />
@@ -477,7 +573,7 @@ export default function WorkspacePage() {
                       <button
                         onClick={() => openAppConnection("notion")}
                         type="button"
-                        className="hover:scale-110 transition-transform"
+                        className="hover:scale-110 transition-transform shrink-0"
                         title="Notion"
                       >
                         <NotionIcon className="w-4 h-4" />
@@ -485,7 +581,7 @@ export default function WorkspacePage() {
                       <button
                         onClick={() => openAppConnection("salesforce")}
                         type="button"
-                        className="hover:scale-110 transition-transform"
+                        className="hover:scale-110 transition-transform shrink-0"
                         title="Salesforce"
                       >
                         <SalesforceIcon className="w-4 h-4" />
@@ -493,7 +589,7 @@ export default function WorkspacePage() {
                       <button
                         onClick={() => setShowAppsBar(false)}
                         type="button"
-                        className="text-zinc-500 hover:text-zinc-300 ml-1 transition-colors"
+                        className="text-zinc-500 hover:text-zinc-300 ml-1 transition-colors shrink-0"
                         title="Dismiss"
                       >
                         <X className="w-3.5 h-3.5" />
@@ -647,15 +743,22 @@ export default function WorkspacePage() {
                       <button
                         onClick={() => openAppConnection("github")}
                         type="button"
-                        className="text-white hover:scale-110 transition-transform"
-                        title="GitHub"
+                        className="relative text-white hover:scale-110 transition-transform shrink-0"
+                        title={
+                          gitHubConnected
+                            ? `GitHub (Connected as @${gitHubAccount || "user"})`
+                            : "GitHub"
+                        }
                       >
                         <GitHubIcon className="w-3.5 h-3.5" />
+                        {gitHubConnected && (
+                          <span className="absolute -top-1 -right-1 w-1.5 h-1.5 bg-emerald-400 rounded-full ring-1 ring-[#181818]" />
+                        )}
                       </button>
                       <button
                         onClick={() => openAppConnection("slack")}
                         type="button"
-                        className="hover:scale-110 transition-transform"
+                        className="hover:scale-110 transition-transform shrink-0"
                         title="Slack"
                       >
                         <SlackIcon className="w-3.5 h-3.5" />
@@ -663,7 +766,7 @@ export default function WorkspacePage() {
                       <button
                         onClick={() => openAppConnection("linear")}
                         type="button"
-                        className="hover:scale-110 transition-transform"
+                        className="hover:scale-110 transition-transform shrink-0"
                         title="Linear"
                       >
                         <LinearIcon className="w-3.5 h-3.5" />
@@ -671,7 +774,7 @@ export default function WorkspacePage() {
                       <button
                         onClick={() => openAppConnection("google_drive")}
                         type="button"
-                        className="hover:scale-110 transition-transform"
+                        className="hover:scale-110 transition-transform shrink-0"
                         title="Google Drive"
                       >
                         <GoogleDriveIcon className="w-3.5 h-3.5" />
@@ -682,7 +785,7 @@ export default function WorkspacePage() {
                           setIsConnectionsOpen(true);
                         }}
                         type="button"
-                        className="text-blue-400 text-[11px] hover:underline ml-2"
+                        className="text-blue-400 text-[11px] hover:underline ml-2 shrink-0"
                       >
                         All apps...
                       </button>
@@ -702,6 +805,20 @@ export default function WorkspacePage() {
         isOpen={isConnectionsOpen}
         onClose={() => setIsConnectionsOpen(false)}
         initialApp={selectedInitialApp}
+      />
+
+      {/* =========================================================================
+          DEDICATED GITHUB OAUTH CONNECTION MODAL (Exact match to media_1791124877493.png)
+      ========================================================================= */}
+      <GitHubConnectionModal
+        isOpen={isGitHubModalOpen}
+        onClose={() => setIsGitHubModalOpen(false)}
+        isConnected={gitHubConnected}
+        connectedAccount={gitHubAccount}
+        onConnectedChange={(connected, account) => {
+          setGitHubConnected(connected);
+          setGitHubAccount(account);
+        }}
       />
     </div>
   );

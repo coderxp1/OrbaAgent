@@ -40,6 +40,7 @@ import {
   SlackIcon,
   TeamsIcon,
 } from "./AppIcons";
+import { GitHubConnectionModal } from "./GitHubConnectionModal";
 
 interface ConnectionsModalProps {
   isOpen: boolean;
@@ -231,6 +232,7 @@ export function ConnectionsModal({ isOpen, onClose, initialApp }: ConnectionsMod
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [actionLoading, setActionLoading] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>("");
+  const [isGitHubModalOpen, setIsGitHubModalOpen] = useState<boolean>(false);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -269,8 +271,34 @@ export function ConnectionsModal({ isOpen, onClose, initialApp }: ConnectionsMod
   if (!isOpen) return null;
 
   const handleToggleConnection = async (app: AppCardInfo) => {
+    if (app.id === "github" && !connections.github?.connected) {
+      setIsGitHubModalOpen(true);
+      return;
+    }
+
     setActionLoading(true);
     const currentStatus = connections[app.id]?.connected || false;
+
+    if (app.id === "github" && currentStatus) {
+      try {
+        await fetch("/api/auth/github/disconnect", { method: "POST" });
+        setConnections((prev) => ({
+          ...prev,
+          github: {
+            name: "github",
+            displayName: "GitHub",
+            connected: false,
+            accountName: undefined,
+          },
+        }));
+      } catch (e) {
+        console.error("Failed to disconnect GitHub", e);
+      } finally {
+        setActionLoading(false);
+      }
+      return;
+    }
+
     const newStatus: IntegrationStatus = {
       name: app.id,
       displayName: app.name,
@@ -310,8 +338,8 @@ export function ConnectionsModal({ isOpen, onClose, initialApp }: ConnectionsMod
   });
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-      <div className="relative flex w-full max-w-5xl h-[85vh] max-h-[760px] bg-[#191919] text-[#e0e0e0] rounded-2xl shadow-2xl border border-[#2b2b2b] overflow-hidden">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-2 sm:p-4 animate-in fade-in duration-200">
+      <div className="relative flex flex-col md:flex-row w-full max-w-5xl h-[92vh] sm:h-[85vh] max-h-[760px] bg-[#191919] text-[#e0e0e0] rounded-2xl shadow-2xl border border-[#2b2b2b] overflow-hidden">
         {/* Close Button top-right */}
         <button
           onClick={onClose}
@@ -323,9 +351,9 @@ export function ConnectionsModal({ isOpen, onClose, initialApp }: ConnectionsMod
 
         {/* If detail modal for a specific app is selected */}
         {selectedApp ? (
-          <div className="flex w-full h-full">
+          <div className="flex flex-col md:flex-row w-full h-full overflow-hidden">
             {/* Left Column of Detail: Navigation & Tabs */}
-            <div className="w-72 bg-[#141414] border-r border-[#262626] p-6 flex flex-col justify-between shrink-0">
+            <div className="hidden md:flex w-72 bg-[#141414] border-r border-[#262626] p-6 flex-col justify-between shrink-0">
               <div>
                 <button
                   onClick={() => setSelectedApp(null)}
@@ -409,8 +437,17 @@ export function ConnectionsModal({ isOpen, onClose, initialApp }: ConnectionsMod
             </div>
 
             {/* Right Column of Detail: Feature Showcase & Connect Action */}
-            <div className="flex-1 p-8 overflow-y-auto flex flex-col justify-between">
+            <div className="flex-1 p-4 sm:p-8 overflow-y-auto flex flex-col justify-between min-w-0">
               <div>
+                <button
+                  onClick={() => setSelectedApp(null)}
+                  type="button"
+                  className="md:hidden flex items-center gap-1.5 text-xs text-zinc-400 hover:text-white mb-4 transition-colors"
+                >
+                  <ChevronRight className="w-4 h-4 rotate-180" />
+                  <span>Back to connections</span>
+                </button>
+
                 <div className="flex items-center gap-2 mb-4">
                   <span className="text-xl font-bold text-white">AI connector</span>
                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] bg-zinc-800 text-zinc-300 font-medium">
@@ -497,9 +534,9 @@ export function ConnectionsModal({ isOpen, onClose, initialApp }: ConnectionsMod
           </div>
         ) : (
           /* Normal Settings View */
-          <div className="flex w-full h-full">
+          <div className="flex w-full h-full overflow-hidden">
             {/* Left Nav Pane (Matching mockups media_1791118351272.png) */}
-            <div className="w-64 bg-[#141414] border-r border-[#262626] p-4 flex flex-col justify-between shrink-0">
+            <div className="hidden md:flex w-64 bg-[#141414] border-r border-[#262626] p-4 flex-col justify-between shrink-0">
               <div className="overflow-y-auto">
                 {/* Search Bar top */}
                 <div className="relative mb-6">
@@ -592,7 +629,7 @@ export function ConnectionsModal({ isOpen, onClose, initialApp }: ConnectionsMod
             </div>
 
             {/* Main Content Pane */}
-            <div className="flex-1 p-8 overflow-y-auto">
+            <div className="flex-1 p-4 sm:p-8 overflow-y-auto min-w-0">
               <h2 className="text-2xl font-bold text-white mb-2">Connections</h2>
               <p className="text-xs text-zinc-400 max-w-2xl leading-relaxed mb-4">
                 Connect apps to use in OrbaAgent. Let OrbaAgent and OrbaAgent AI search, sync, and
@@ -713,6 +750,26 @@ export function ConnectionsModal({ isOpen, onClose, initialApp }: ConnectionsMod
             </div>
           </div>
         )}
+
+        <GitHubConnectionModal
+          isOpen={isGitHubModalOpen}
+          onClose={() => setIsGitHubModalOpen(false)}
+          isConnected={Boolean(connections.github?.connected)}
+          connectedAccount={connections.github?.accountName}
+          onConnectedChange={(connected, account) => {
+            setConnections((prev) => ({
+              ...prev,
+              github: {
+                name: "github",
+                displayName: "GitHub",
+                connected,
+                accountName: account,
+                lastSyncedAt: connected ? new Date().toISOString() : undefined,
+              },
+            }));
+            setIsGitHubModalOpen(false);
+          }}
+        />
       </div>
     </div>
   );

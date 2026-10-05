@@ -302,7 +302,8 @@ export class LangdockAdapter implements IModelProviderAdapter {
                       toolCallAccumulator[idx].name += incoming;
                     }
                   }
-                  if (tc.function?.arguments) toolCallAccumulator[idx].args += tc.function.arguments;
+                  if (tc.function?.arguments)
+                    toolCallAccumulator[idx].args += tc.function.arguments;
                 }
               }
 
@@ -342,7 +343,11 @@ export class LangdockAdapter implements IModelProviderAdapter {
         };
       }
 
-      yield { type: "done", traceId: request.trace.traceId, finishReason: Object.keys(toolCallAccumulator).length > 0 ? "tool_calls" : "stop" };
+      yield {
+        type: "done",
+        traceId: request.trace.traceId,
+        finishReason: Object.keys(toolCallAccumulator).length > 0 ? "tool_calls" : "stop",
+      };
     } finally {
       if (streamTimer) clearTimeout(streamTimer);
       try {
