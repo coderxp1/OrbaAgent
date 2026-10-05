@@ -1,4 +1,4 @@
-import type { ToolDefinition, ToolExecutionResult } from "@orbaagent/shared";
+import type { ToolDefinition, ToolExecutionResult, ToolMetadata } from "@orbaagent/shared";
 
 export interface ToolExecutionContext {
   workspaceDir: string;
@@ -7,10 +7,13 @@ export interface ToolExecutionContext {
   agentRunId: string;
   githubToken?: string;
   env?: Record<string, string>;
+  traceId?: string;
+  isPreApproved?: boolean;
 }
 
 export interface ITool {
   readonly definition: ToolDefinition;
+  readonly metadata?: ToolMetadata;
   execute(
     args: Record<string, unknown>,
     context: ToolExecutionContext,

@@ -69,6 +69,41 @@ export const ModelSpecSchema = z.object({
 export type ModelSpec = z.infer<typeof ModelSpecSchema>;
 
 // Tool & Message Schemas
+export const ToolCategorySchema = z.enum([
+  "system",
+  "filesystem",
+  "process",
+  "git",
+  "github",
+  "browser",
+  "http",
+  "runtime",
+  "package",
+  "testing",
+  "docker",
+  "database",
+  "cloud",
+  "communication",
+  "calendar",
+  "knowledge",
+  "documents",
+  "media",
+  "mcp",
+]);
+export type ToolCategory = z.infer<typeof ToolCategorySchema>;
+
+export const ToolProviderTypeSchema = z.enum(["native", "mcp", "connector"]);
+export type ToolProviderType = z.infer<typeof ToolProviderTypeSchema>;
+
+export const PermissionTierSchema = z.enum([
+  "TIER_0_READ",
+  "TIER_1_WRITE",
+  "TIER_2_EXEC",
+  "TIER_3_EXTERNAL",
+  "TIER_4_DESTRUCTIVE",
+]);
+export type PermissionTier = z.infer<typeof PermissionTierSchema>;
+
 export const ToolCallSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -82,6 +117,41 @@ export const ToolDefinitionSchema = z.object({
   parameters: z.record(z.unknown()),
 });
 export type ToolDefinition = z.infer<typeof ToolDefinitionSchema>;
+
+export const ToolMetadataSchema = z.object({
+  name: z.string(),
+  description: z.string(),
+  category: ToolCategorySchema,
+  provider: ToolProviderTypeSchema,
+  riskTier: PermissionTierSchema,
+  keywords: z.array(z.string()).default([]),
+  requiredConnection: z.string().optional(),
+  requiredRuntime: z.string().optional(),
+  requiresApproval: z.boolean().default(false).optional(),
+  parameters: z.record(z.unknown()),
+  version: z.string().default("1.0.0").optional(),
+  isCore: z.boolean().default(false).optional(),
+});
+export type ToolMetadata = z.infer<typeof ToolMetadataSchema>;
+
+export const AuditEventSchema = z.object({
+  id: z.string(),
+  timestamp: z.string(),
+  traceId: z.string(),
+  tenantId: z.string(),
+  userId: z.string(),
+  agentRunId: z.string(),
+  toolName: z.string(),
+  category: ToolCategorySchema.optional(),
+  riskTier: PermissionTierSchema,
+  action: z.string(),
+  approved: z.boolean(),
+  reason: z.string().optional(),
+  redactedArgs: z.record(z.unknown()).optional(),
+  success: z.boolean().optional(),
+  executionTimeMs: z.number().optional(),
+});
+export type AuditEvent = z.infer<typeof AuditEventSchema>;
 
 export const ToolExecutionResultSchema = z.object({
   toolCallId: z.string(),
@@ -230,6 +300,11 @@ export const NormalizedEventTypeSchema = z.enum([
   "terminal_stderr",
   "terminal_exit",
   "file_changes_detected",
+  "tools_discovered",
+  "permission_requested",
+  "permission_granted",
+  "permission_denied",
+  "audit_logged",
 ]);
 export type NormalizedEventType = z.infer<typeof NormalizedEventTypeSchema>;
 
@@ -253,6 +328,16 @@ export const NormalizedEventSchema = z.object({
   command: z.string().optional(),
   exitCode: z.number().optional(),
   changes: z.array(AgentFileChangeSchema).optional(),
+  discoveredTools: z.array(z.string()).optional(),
+  auditEvent: AuditEventSchema.optional(),
+  permissionDetails: z
+    .object({
+      toolName: z.string(),
+      riskTier: PermissionTierSchema,
+      action: z.string(),
+      reason: z.string().optional(),
+    })
+    .optional(),
   error: z
     .object({
       code: z.string(),

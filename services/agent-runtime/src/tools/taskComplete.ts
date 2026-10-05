@@ -1,4 +1,8 @@
-import type { ToolDefinition, ToolExecutionResult } from "@orbaagent/shared";
+import type {
+  ToolDefinition,
+  ToolExecutionResult,
+  ToolMetadata,
+} from "@orbaagent/shared";
 import type { ITool, ToolExecutionContext } from "./base.js";
 
 export class TaskCompleteTool implements ITool {
@@ -20,6 +24,18 @@ export class TaskCompleteTool implements ITool {
       },
       required: ["summary"],
     },
+  };
+
+  public readonly metadata: ToolMetadata = {
+    name: "task_complete",
+    description: "Mark agent objective as finished with verified summary",
+    category: "system",
+    provider: "native",
+    riskTier: "TIER_0_READ",
+    keywords: ["complete", "finish", "done", "objective", "task"],
+    parameters: this.definition.parameters,
+    version: "1.0.0",
+    isCore: true,
   };
 
   async execute(

@@ -52,4 +52,44 @@ describe("Shared Package Tests", () => {
     expect(err.code).toBe("UNAUTHORIZED");
     expect(err.statusCode).toBe(401);
   });
+
+  it("validates ToolMetadataSchema and PermissionTierSchema", async () => {
+    const { ToolMetadataSchema } = await import("./index.js");
+    const validMeta = {
+      name: "filesystem_search",
+      description: "Search workspace files using regex or glob",
+      category: "filesystem",
+      provider: "native",
+      riskTier: "TIER_0_READ",
+      keywords: ["grep", "find", "search", "glob"],
+      parameters: { query: { type: "string" } },
+      isCore: false,
+    };
+    const parsed = ToolMetadataSchema.safeParse(validMeta);
+    expect(parsed.success).toBe(true);
+  });
+
+  it("validates AuditEventSchema", async () => {
+    const { AuditEventSchema } = await import("./index.js");
+    const validAudit = {
+      id: "audit-123",
+      timestamp: new Date().toISOString(),
+      traceId: "trace-456",
+      tenantId: "tenant-1",
+      userId: "user-1",
+      agentRunId: "run-1",
+      toolName: "filesystem_delete",
+      category: "filesystem",
+      riskTier: "TIER_4_DESTRUCTIVE",
+      action: "delete_file",
+      approved: true,
+      reason: "User requested cleanup",
+      redactedArgs: { path: "temp.txt" },
+      success: true,
+      executionTimeMs: 15,
+    };
+    const parsed = AuditEventSchema.safeParse(validAudit);
+    expect(parsed.success).toBe(true);
+  });
 });
+

@@ -1,6 +1,10 @@
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
-import type { ToolDefinition, ToolExecutionResult } from "@orbaagent/shared";
+import type {
+  ToolDefinition,
+  ToolExecutionResult,
+  ToolMetadata,
+} from "@orbaagent/shared";
 import type { ITool, ToolExecutionContext } from "./base.js";
 
 const execAsync = promisify(exec);
@@ -9,7 +13,7 @@ export class GitTool implements ITool {
   public readonly definition: ToolDefinition = {
     name: "execute_git",
     description:
-      "Execute Git operations (clone, status, diff, log, branch, checkout, add, commit, push, pull) inside workspace.",
+      "Execute Git operations (clone, status, diff, log, branch, checkout, add, commit, push, pull, fetch, switch, merge, rebase, tag, blame, worktree) inside workspace.",
     parameters: {
       type: "object",
       properties: {
@@ -26,6 +30,13 @@ export class GitTool implements ITool {
             "commit",
             "push",
             "pull",
+            "fetch",
+            "switch",
+            "merge",
+            "rebase",
+            "tag",
+            "blame",
+            "worktree",
           ],
           description: "Git subcommand action to perform.",
         },
@@ -39,7 +50,7 @@ export class GitTool implements ITool {
         },
         branchName: {
           type: "string",
-          description: "Branch name (for checkout, branch, push, pull).",
+          description: "Branch name (for checkout, branch, switch, push, pull, merge, rebase).",
         },
         commitMessage: {
           type: "string",
@@ -47,11 +58,42 @@ export class GitTool implements ITool {
         },
         filePath: {
           type: "string",
-          description: "File path or pattern (for 'add'). Default '.'.",
+          description: "File path or pattern (for 'add', 'diff', 'blame'). Default '.'.",
+        },
+        extraArgs: {
+          type: "string",
+          description: "Additional safe git arguments (e.g. '--oneline', '-n 5', '--tags'). Force push flags are blocked.",
         },
       },
       required: ["action"],
     },
+  };
+
+  public readonly metadata: ToolMetadata = {
+    name: "execute_git",
+    description: "Full local and remote Git version control operations",
+    category: "git",
+    provider: "native",
+    riskTier: "TIER_1_WRITE",
+    keywords: [
+      "git",
+      "clone",
+      "commit",
+      "push",
+      "pull",
+      "branch",
+      "merge",
+      "rebase",
+      "fetch",
+      "diff",
+      "log",
+      "switch",
+      "blame",
+      "worktree",
+    ],
+    parameters: this.definition.parameters,
+    version: "2.0.0",
+    isCore: false,
   };
 
   async execute(
@@ -60,7 +102,26 @@ export class GitTool implements ITool {
   ): Promise<ToolExecutionResult> {
     const startTime = Date.now();
     const toolCallId = (args._toolCallId as string) || `tc_git_${Date.now()}`;
-    const action = String(args.action || "").toLowerCase();
+    const action = String(args.action || "").toLowerCase().trim();
+    const extraArgs = String(args.extraArgs || "").trim();
+
+    // Prevent unverified force pushes
+    if (
+      extraArgs.includes("--force") ||
+      extraArgs.includes("-f") ||
+      extraArgs.includes("--force-with-lease")
+    ) {
+      if (!context.isPreApproved) {
+        return {
+          toolCallId,
+          name: this.definition.name,
+          success: false,
+          output: "",
+          error: "Unverified force push ('--force' or '--force-with-lease') is strictly prohibited.",
+          executionTimeMs: Date.now() - startTime,
+        };
+      }
+    }
 
     let gitCmd = "";
     switch (action) {
@@ -76,22 +137,24 @@ export class GitTool implements ITool {
             executionTimeMs: Date.now() - startTime,
           };
         }
-        const targetDir = args.targetDir ? ` ${args.targetDir}` : "";
+        const targetDir = args.targetDir ? ` "${args.targetDir}"` : "";
         gitCmd = `git clone "${repoUrl}"${targetDir}`;
         break;
       }
       case "status":
         gitCmd = "git status";
         break;
-      case "diff":
-        gitCmd = "git diff";
+      case "diff": {
+        const filePath = args.filePath ? ` "${args.filePath}"` : "";
+        gitCmd = `git diff ${extraArgs}${filePath}`.trim();
         break;
+      }
       case "log":
-        gitCmd = "git log -n 10 --oneline";
+        gitCmd = `git log ${extraArgs || "-n 10 --oneline"}`.trim();
         break;
       case "branch": {
         const branchName = args.branchName ? ` "${args.branchName}"` : "";
-        gitCmd = `git branch${branchName}`;
+        gitCmd = `git branch ${extraArgs}${branchName}`.trim();
         break;
       }
       case "checkout": {
@@ -106,7 +169,22 @@ export class GitTool implements ITool {
             executionTimeMs: Date.now() - startTime,
           };
         }
-        gitCmd = `git checkout -b "${branchName}" || git checkout "${branchName}"`;
+        gitCmd = `git checkout "${branchName}"`;
+        break;
+      }
+      case "switch": {
+        const branchName = String(args.branchName || "").trim();
+        if (!branchName) {
+          return {
+            toolCallId,
+            name: this.definition.name,
+            success: false,
+            output: "",
+            error: "branchName is required for git switch",
+            executionTimeMs: Date.now() - startTime,
+          };
+        }
+        gitCmd = `git switch "${branchName}"`;
         break;
       }
       case "add": {
@@ -129,8 +207,71 @@ export class GitTool implements ITool {
         gitCmd = `git commit -m "${msg.replace(/"/g, '\\"')}"`;
         break;
       }
-      case "status_all":
-        gitCmd = "git status -s";
+      case "push": {
+        const branchName = args.branchName ? ` origin "${args.branchName}"` : "";
+        gitCmd = `git push${branchName} ${extraArgs}`.trim();
+        break;
+      }
+      case "pull": {
+        const branchName = args.branchName ? ` origin "${args.branchName}"` : "";
+        gitCmd = `git pull${branchName} ${extraArgs}`.trim();
+        break;
+      }
+      case "fetch":
+        gitCmd = `git fetch ${extraArgs}`.trim();
+        break;
+      case "merge": {
+        const branchName = String(args.branchName || "").trim();
+        if (!branchName) {
+          return {
+            toolCallId,
+            name: this.definition.name,
+            success: false,
+            output: "",
+            error: "branchName is required for git merge",
+            executionTimeMs: Date.now() - startTime,
+          };
+        }
+        gitCmd = `git merge "${branchName}" ${extraArgs}`.trim();
+        break;
+      }
+      case "rebase": {
+        const branchName = String(args.branchName || "").trim();
+        if (!branchName) {
+          return {
+            toolCallId,
+            name: this.definition.name,
+            success: false,
+            output: "",
+            error: "branchName is required for git rebase",
+            executionTimeMs: Date.now() - startTime,
+          };
+        }
+        gitCmd = `git rebase "${branchName}" ${extraArgs}`.trim();
+        break;
+      }
+      case "tag": {
+        const tagName = args.branchName ? ` "${args.branchName}"` : "";
+        gitCmd = `git tag ${extraArgs}${tagName}`.trim();
+        break;
+      }
+      case "blame": {
+        const filePath = String(args.filePath || "").trim();
+        if (!filePath) {
+          return {
+            toolCallId,
+            name: this.definition.name,
+            success: false,
+            output: "",
+            error: "filePath is required for git blame",
+            executionTimeMs: Date.now() - startTime,
+          };
+        }
+        gitCmd = `git blame "${filePath}" ${extraArgs}`.trim();
+        break;
+      }
+      case "worktree":
+        gitCmd = `git worktree ${extraArgs || "list"}`.trim();
         break;
       default:
         return {

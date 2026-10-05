@@ -1,4 +1,9 @@
-import type { ToolDefinition, ToolExecutionResult } from "@orbaagent/shared";
+import type {
+  ToolDefinition,
+  ToolExecutionResult,
+  ToolMetadata,
+} from "@orbaagent/shared";
+import { SecretManager } from "../secrets.js";
 import type { ITool, ToolExecutionContext } from "./base.js";
 
 export class GitHubTool implements ITool {
@@ -38,6 +43,19 @@ export class GitHubTool implements ITool {
     },
   };
 
+  public readonly metadata: ToolMetadata = {
+    name: "github_inspect",
+    description: "Inspect GitHub repositories, branches, commits, and user repos via GitHub API",
+    category: "github",
+    provider: "native",
+    riskTier: "TIER_3_EXTERNAL",
+    requiredConnection: "github",
+    keywords: ["github", "repo", "commits", "branches", "pulls", "issues"],
+    parameters: this.definition.parameters,
+    version: "1.0.0",
+    isCore: false,
+  };
+
   private parseOwnerRepo(input: string): { owner: string; repo: string } {
     let clean = input.trim();
     clean = clean.replace(/^https?:\/\/github\.com\//i, "");
@@ -63,6 +81,9 @@ export class GitHubTool implements ITool {
 
     try {
       const token = context.githubToken || process.env.GITHUB_TOKEN;
+      if (token) {
+        SecretManager.getInstance().registerSecret(token, "GITHUB_TOKEN");
+      }
 
       const headers: Record<string, string> = {
         "User-Agent": "OrbaAgent-Runtime/0.1.0",

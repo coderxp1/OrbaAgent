@@ -1,6 +1,6 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import type { ToolDefinition, ToolExecutionResult } from "@orbaagent/shared";
+import type { ToolDefinition, ToolExecutionResult, ToolMetadata } from "@orbaagent/shared";
 import { ChangeReviewManager } from "../changes.js";
 import type { ITool, ToolExecutionContext } from "./base.js";
 
@@ -26,6 +26,18 @@ export class ListFilesTool implements ITool {
         },
       },
     },
+  };
+
+  public readonly metadata: ToolMetadata = {
+    name: "list_files",
+    description: "List directory contents in the workspace",
+    category: "filesystem",
+    provider: "native",
+    riskTier: "TIER_0_READ",
+    keywords: ["list", "files", "directory", "ls", "dir", "browse"],
+    parameters: this.definition.parameters,
+    version: "1.0.0",
+    isCore: false,
   };
 
   async execute(
@@ -81,6 +93,18 @@ export class ReadFileTool implements ITool {
     },
   };
 
+  public readonly metadata: ToolMetadata = {
+    name: "read_file",
+    description: "Read full contents of a file in the workspace",
+    category: "filesystem",
+    provider: "native",
+    riskTier: "TIER_0_READ",
+    keywords: ["read", "file", "view", "cat", "open", "inspect"],
+    parameters: this.definition.parameters,
+    version: "1.0.0",
+    isCore: false,
+  };
+
   async execute(
     args: Record<string, unknown>,
     context: ToolExecutionContext,
@@ -133,6 +157,18 @@ export class WriteFileTool implements ITool {
       },
       required: ["filePath", "content"],
     },
+  };
+
+  public readonly metadata: ToolMetadata = {
+    name: "write_file",
+    description: "Create or overwrite file in the workspace",
+    category: "filesystem",
+    provider: "native",
+    riskTier: "TIER_1_WRITE",
+    keywords: ["write", "file", "create", "save", "overwrite"],
+    parameters: this.definition.parameters,
+    version: "1.0.0",
+    isCore: false,
   };
 
   async execute(
@@ -197,6 +233,18 @@ export class EditFileTool implements ITool {
       },
       required: ["filePath", "targetContent", "replacementContent"],
     },
+  };
+
+  public readonly metadata: ToolMetadata = {
+    name: "edit_file",
+    description: "Replace exact content snippet in a file with new content",
+    category: "filesystem",
+    provider: "native",
+    riskTier: "TIER_1_WRITE",
+    keywords: ["edit", "replace", "patch", "modify", "update"],
+    parameters: this.definition.parameters,
+    version: "1.0.0",
+    isCore: false,
   };
 
   async execute(

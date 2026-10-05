@@ -3,6 +3,7 @@ import {
   ChangeReviewManager,
   IntegrationsManager,
   ToolRegistry,
+  ToolRouter,
 } from "@orbaagent/agent-runtime";
 import { ModelGateway } from "@orbaagent/model-gateway";
 import type {
@@ -15,6 +16,7 @@ import type {
 export interface AgentOrchestratorOptions {
   gateway?: ModelGateway;
   registry?: ToolRegistry;
+  router?: ToolRouter;
   maxIterations?: number;
   workspacePath?: string;
 }
@@ -58,18 +60,24 @@ function indicatesPendingAction(text: string): boolean {
 export class AgentOrchestrator {
   private readonly gateway: ModelGateway;
   private readonly registry: ToolRegistry;
+  private readonly router: ToolRouter;
   private readonly maxIterations: number;
   private readonly workspacePath: string;
 
   constructor(options?: AgentOrchestratorOptions) {
     this.gateway = options?.gateway || new ModelGateway();
     this.registry = options?.registry || new ToolRegistry();
+    this.router = options?.router || new ToolRouter({ registry: this.registry });
     this.maxIterations = options?.maxIterations || 12;
     this.workspacePath = options?.workspacePath || process.env.ORBA_WORKSPACE_PATH || process.cwd();
   }
 
   getToolRegistry(): ToolRegistry {
     return this.registry;
+  }
+
+  getToolRouter(): ToolRouter {
+    return this.router;
   }
 
   async *executeAgentLoop(
@@ -96,11 +104,18 @@ export class AgentOrchestrator {
       });
     }
 
-    // Build tool definitions and dynamic capability prompt
-    const toolDefinitions = this.registry.getToolDefinitions();
-    const capabilityPrompt = this.registry.generateCapabilityPrompt(workspaceId, userId);
+    // Initialize dynamic tool state: start with core tools on turn 0
+    this.registry.resetActiveToolsToCore();
+    const activeToolDefinitions = this.registry.getActiveToolDefinitions();
+    const totalToolsCount = this.registry.getAllToolDefinitions().length;
+    const initialToolsCount = activeToolDefinitions.length;
+    const tokenSavingsPct = (
+      ((totalToolsCount - initialToolsCount) / totalToolsCount) *
+      100
+    ).toFixed(1);
 
-    // Retrieve persistent memory of past work & decisions for this workspace
+    // Build dynamic capability prompt and persistent memory context
+    const capabilityPrompt = this.registry.generateCapabilityPrompt(workspaceId, userId);
     const memoryManager = AgentMemoryManager.getInstance();
     const memoryPrompt = memoryManager.generateMemoryPrompt(workspaceId, userId);
 
@@ -129,9 +144,9 @@ export class AgentOrchestrator {
       type: "agent_activity",
       traceId: trace.traceId,
       activity: {
-        step: "Initializing autonomous session",
+        step: "Initializing dynamic tool discovery runtime",
         status: "in_progress",
-        details: `Tools: ${toolDefinitions.length} registered, State: RUNNING`,
+        details: `Core tools: ${initialToolsCount}/${totalToolsCount} active (${tokenSavingsPct}% context token savings), State: RUNNING`,
       },
     };
 
@@ -142,10 +157,13 @@ export class AgentOrchestrator {
     while (iteration < this.maxIterations && !isExplicitlyCompleted) {
       iteration++;
 
+      // Dynamically inject only currently active tools into the model context
+      const currentTools = this.registry.getActiveToolDefinitions();
+
       const stepRequest: ChatCompletionRequest = {
         ...rawRequest,
         messages: currentMessages,
-        tools: toolDefinitions,
+        tools: currentTools,
       };
 
       const pendingToolCalls: ToolCall[] = [];
@@ -174,8 +192,6 @@ export class AgentOrchestrator {
 
       // Case 1: No tool calls were produced in this turn
       if (pendingToolCalls.length === 0) {
-        // If tools were already executed in earlier iterations and the model emitted transitional text
-        // (e.g. "Dependencies installed. Now let me run the type checker and linter."), auto-continue!
         if (hasExecutedAnyTools && indicatesPendingAction(stepText) && iteration < this.maxIterations) {
           currentMessages.push({
             role: "assistant",
@@ -201,7 +217,7 @@ export class AgentOrchestrator {
           continue;
         }
 
-        // Otherwise, the assistant provided its final conversational answer or report
+        // Final response delivered
         break;
       }
 
@@ -214,8 +230,21 @@ export class AgentOrchestrator {
 
       hasExecutedAnyTools = true;
 
-      // Execute each tool call autonomously
+      // Execute each tool call autonomously with permission and secret isolation
       for (const call of pendingToolCalls) {
+        const toolMeta = this.registry.getToolMetadata(call.name);
+        const riskTier = toolMeta?.riskTier || "TIER_0_READ";
+
+        yield {
+          type: "permission_requested",
+          traceId: trace.traceId,
+          permissionDetails: {
+            toolName: call.name,
+            riskTier,
+            action: call.name,
+          },
+        };
+
         yield {
           type: "agent_activity",
           traceId: trace.traceId,
@@ -237,13 +266,63 @@ export class AgentOrchestrator {
           };
         }
 
-        const result = await this.registry.executeToolCall(call.id, call.name, call.arguments, {
-          workspaceDir: this.workspacePath,
-          tenantId: trace.tenantId || "default-tenant",
-          userId: trace.userId || "default-user",
-          agentRunId: trace.agentRunId || "default-run",
-          githubToken,
-        });
+        const { result, auditEvent } = await this.router.routeAndExecute(
+          call.id,
+          call.name,
+          call.arguments,
+          {
+            workspaceDir: this.workspacePath,
+            tenantId: trace.tenantId || "default-tenant",
+            userId: trace.userId || "default-user",
+            agentRunId: trace.agentRunId || "default-run",
+            githubToken,
+            traceId: trace.traceId,
+            isPreApproved: false,
+          },
+        );
+
+        if (auditEvent?.approved) {
+          yield {
+            type: "permission_granted",
+            traceId: trace.traceId,
+            permissionDetails: {
+              toolName: call.name,
+              riskTier: auditEvent.riskTier,
+              action: call.name,
+            },
+          };
+        } else {
+          yield {
+            type: "permission_denied",
+            traceId: trace.traceId,
+            permissionDetails: {
+              toolName: call.name,
+              riskTier: auditEvent?.riskTier || riskTier,
+              action: call.name,
+              reason: auditEvent?.reason || result.error,
+            },
+          };
+        }
+
+        if (auditEvent) {
+          yield {
+            type: "audit_logged",
+            traceId: trace.traceId,
+            auditEvent,
+          };
+        }
+
+        if (
+          call.name === "tools_search" &&
+          result.success &&
+          (result.metadata as any)?.discoveredTools
+        ) {
+          yield {
+            type: "tools_discovered",
+            traceId: trace.traceId,
+            discoveredTools: (result.metadata as any).discoveredTools as string[],
+          };
+        }
 
         if (call.name === "execute_shell") {
           if (result.output) {

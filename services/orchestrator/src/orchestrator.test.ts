@@ -202,4 +202,91 @@ describe("AgentOrchestrator State Machine & Autonomous Execution", () => {
     const toolResults = events.filter((e) => e.type === "tool_call_result");
     expect(toolResults.length).toBe(2);
   });
+
+  it("initiates turn 0 with ONLY core tools, emits permission and audit events, and dynamically discovers tools", async () => {
+    const mockGateway = new ModelGateway();
+    let turn = 0;
+    const toolsInEachTurn: number[] = [];
+
+    vi.spyOn(mockGateway, "streamChat").mockImplementation(async function* (req) {
+      turn++;
+      toolsInEachTurn.push(req.tools?.length || 0);
+
+      if (turn === 1) {
+        // Turn 1: Model uses tools_search to find git tools
+        yield {
+          type: "tool_call_start",
+          traceId: req.trace.traceId,
+          toolCall: {
+            id: "call_search_tools",
+            name: "tools_search",
+            arguments: { query: "git status commit" },
+          },
+        };
+      } else if (turn === 2) {
+        // Turn 2: Discovered execute_git is now active! Model uses execute_git
+        yield {
+          type: "tool_call_start",
+          traceId: req.trace.traceId,
+          toolCall: {
+            id: "call_git_status",
+            name: "execute_git",
+            arguments: { action: "status" },
+          },
+        };
+      } else {
+        yield {
+          type: "tool_call_start",
+          traceId: req.trace.traceId,
+          toolCall: {
+            id: "call_complete",
+            name: "task_complete",
+            arguments: { summary: "Git status completed", verified: true },
+          },
+        };
+      }
+    });
+
+    const orchestrator = new AgentOrchestrator({ gateway: mockGateway, maxIterations: 5 });
+    const request: ChatCompletionRequest = {
+      modelId: "auto",
+      messages: [{ role: "user", content: "Check git status" }],
+      stream: true,
+      trace: {
+        traceId: "test_dynamic_discovery",
+        tenantId: "tenant_dyn",
+        userId: "user_dyn",
+        conversationId: "conv_dyn",
+        agentRunId: "run_dyn",
+      },
+    };
+
+    const events: NormalizedEvent[] = [];
+    for await (const event of orchestrator.executeAgentLoop(request)) {
+      events.push(event);
+    }
+
+    expect(turn).toBe(3);
+
+    // Turn 1 had ONLY 3 core tools injected
+    expect(toolsInEachTurn[0]).toBe(3);
+
+    // Turn 2 had dynamically expanded active tools including execute_git
+    expect(toolsInEachTurn[1]).toBeGreaterThan(3);
+
+    // Events emitted include permission_requested, permission_granted, audit_logged, tools_discovered
+    const permReqEvents = events.filter((e) => e.type === "permission_requested");
+    expect(permReqEvents.length).toBeGreaterThanOrEqual(2);
+
+    const permGrantEvents = events.filter((e) => e.type === "permission_granted");
+    expect(permGrantEvents.length).toBeGreaterThanOrEqual(2);
+
+    const auditEvents = events.filter((e) => e.type === "audit_logged");
+    expect(auditEvents.length).toBeGreaterThanOrEqual(2);
+
+    const discoveredEvents = events.filter((e) => e.type === "tools_discovered");
+    expect(discoveredEvents.length).toBe(1);
+    expect(discoveredEvents[0].discoveredTools).toContain("execute_git");
+  });
 });
+

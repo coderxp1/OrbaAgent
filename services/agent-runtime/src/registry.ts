@@ -1,51 +1,206 @@
-import type { ToolDefinition, ToolExecutionResult, ToolManifest } from "@orbaagent/shared";
+import type {
+  ToolDefinition,
+  ToolExecutionResult,
+  ToolManifest,
+  ToolMetadata,
+} from "@orbaagent/shared";
 import { IntegrationsManager } from "./integrations.js";
+import { PermissionEngine } from "./permissions.js";
+import { SecretManager } from "./secrets.js";
 import type { ITool, ToolExecutionContext } from "./tools/base.js";
-import { EditFileTool, ListFilesTool, ReadFileTool, WriteFileTool } from "./tools/filesystem.js";
+import { EnvironmentInspectTool } from "./tools/environment.js";
+import {
+  EditFileTool,
+  ListFilesTool,
+  ReadFileTool,
+  WriteFileTool,
+} from "./tools/filesystem.js";
+import {
+  FilesystemCopyTool,
+  FilesystemDeleteTool,
+  FilesystemMoveTool,
+  FilesystemSearchTool,
+  FilesystemStatTool,
+} from "./tools/filesystemExtended.js";
 import { GitTool } from "./tools/git.js";
 import { GitHubTool } from "./tools/github.js";
+import { ProcessManagerTool } from "./tools/processManager.js";
 import { ShellTool } from "./tools/shell.js";
 import { TaskCompleteTool } from "./tools/taskComplete.js";
+import { IToolSearchableRegistry, ToolsSearchTool } from "./tools/toolsSearch.js";
 import { WebFetchTool } from "./tools/web.js";
 
-export class ToolRegistry {
+export class ToolRegistry implements IToolSearchableRegistry {
   private readonly tools: Map<string, ITool> = new Map();
+  private readonly coreToolNames: Set<string> = new Set([
+    "tools_search",
+    "environment_inspect",
+    "task_complete",
+  ]);
+  private readonly activeToolNames: Set<string> = new Set();
+  private readonly permissionEngine: PermissionEngine;
+  private readonly secretManager: SecretManager;
 
   constructor() {
+    this.permissionEngine = PermissionEngine.getInstance();
+    this.secretManager = SecretManager.getInstance();
     this.registerDefaultTools();
+    this.resetActiveToolsToCore();
   }
 
   private registerDefaultTools(): void {
+    const searchTool = new ToolsSearchTool(this);
+
     const defaultTools: ITool[] = [
+      searchTool,
+      new EnvironmentInspectTool(),
+      new TaskCompleteTool(),
       new ShellTool(),
       new ListFilesTool(),
       new ReadFileTool(),
       new WriteFileTool(),
       new EditFileTool(),
+      new FilesystemSearchTool(),
+      new FilesystemStatTool(),
+      new FilesystemCopyTool(),
+      new FilesystemMoveTool(),
+      new FilesystemDeleteTool(),
       new GitTool(),
       new GitHubTool(),
+      new ProcessManagerTool(),
       new WebFetchTool(),
-      new TaskCompleteTool(),
     ];
 
     for (const tool of defaultTools) {
-      this.tools.set(tool.definition.name, tool);
+      this.registerTool(tool);
     }
   }
 
-  registerTool(tool: ITool): void {
+  public registerTool(tool: ITool): void {
     this.tools.set(tool.definition.name, tool);
+    if (tool.metadata?.isCore) {
+      this.coreToolNames.add(tool.definition.name);
+      this.activeToolNames.add(tool.definition.name);
+    }
   }
 
-  getTool(name: string): ITool | undefined {
+  public getTool(name: string): ITool | undefined {
     return this.tools.get(name);
   }
 
-  getToolDefinitions(): ToolDefinition[] {
+  public getToolMetadata(name: string): ToolMetadata | undefined {
+    const tool = this.tools.get(name);
+    return tool?.metadata;
+  }
+
+  public resetActiveToolsToCore(): void {
+    this.activeToolNames.clear();
+    for (const name of this.coreToolNames) {
+      if (this.tools.has(name)) {
+        this.activeToolNames.add(name);
+      }
+    }
+  }
+
+  public activateTools(names: string[]): void {
+    for (const name of names) {
+      if (this.tools.has(name)) {
+        this.activeToolNames.add(name);
+      }
+    }
+  }
+
+  public pruneTools(names?: string[]): void {
+    if (!names) {
+      this.resetActiveToolsToCore();
+      return;
+    }
+    for (const name of names) {
+      // Never prune core tools
+      if (!this.coreToolNames.has(name)) {
+        this.activeToolNames.delete(name);
+      }
+    }
+  }
+
+  public getActiveToolNames(): string[] {
+    return Array.from(this.activeToolNames);
+  }
+
+  public getActiveToolDefinitions(): ToolDefinition[] {
+    const definitions: ToolDefinition[] = [];
+    for (const name of this.activeToolNames) {
+      const tool = this.tools.get(name);
+      if (tool) {
+        definitions.push(tool.definition);
+      }
+    }
+    return definitions;
+  }
+
+  public getAllToolDefinitions(): ToolDefinition[] {
     return Array.from(this.tools.values()).map((t) => t.definition);
   }
 
-  getToolManifest(workspaceId: string, userId: string): ToolManifest {
+  /**
+   * For orchestrator: returns active tool definitions by default,
+   * or all tool definitions if all is explicitly true.
+   */
+  public getToolDefinitions(all = false): ToolDefinition[] {
+    return all ? this.getAllToolDefinitions() : this.getActiveToolDefinitions();
+  }
+
+  public searchTools(query: string, category?: string, limit = 10): ToolMetadata[] {
+    const queryTokens = query
+      .toLowerCase()
+      .split(/\s+/)
+      .filter((t) => t.length > 1);
+
+    const scoredTools: Array<{ metadata: ToolMetadata; score: number }> = [];
+
+    for (const tool of this.tools.values()) {
+      const meta = tool.metadata || {
+        name: tool.definition.name,
+        description: tool.definition.description,
+        category: "system",
+        provider: "native",
+        riskTier: "TIER_0_READ",
+        keywords: [],
+        parameters: tool.definition.parameters,
+        version: "1.0.0",
+        isCore: false,
+      };
+
+      if (category && meta.category.toLowerCase() !== category.toLowerCase()) {
+        continue;
+      }
+
+      let score = 0;
+      const lowerName = meta.name.toLowerCase();
+      const lowerDesc = meta.description.toLowerCase();
+      const lowerKeywords = meta.keywords.map((k) => k.toLowerCase());
+
+      for (const token of queryTokens) {
+        if (lowerName === token) score += 10;
+        else if (lowerName.includes(token)) score += 5;
+
+        if (lowerKeywords.includes(token)) score += 6;
+        else if (lowerKeywords.some((k) => k.includes(token))) score += 3;
+
+        if (lowerDesc.includes(token)) score += 2;
+        if (meta.category.toLowerCase().includes(token)) score += 4;
+      }
+
+      if (queryTokens.length === 0 || score > 0) {
+        scoredTools.push({ metadata: meta, score });
+      }
+    }
+
+    scoredTools.sort((a, b) => b.score - a.score);
+    return scoredTools.slice(0, limit).map((s) => s.metadata);
+  }
+
+  public getToolManifest(workspaceId: string, userId: string): ToolManifest {
     const integrationsManager = IntegrationsManager.getInstance();
     const connectedServices = integrationsManager.getIntegrations(userId);
 
@@ -58,6 +213,7 @@ export class ToolRegistry {
       "git.operations": true,
       "github.read": connectedServices.some((s) => s.name === "github" && s.connected),
       "web.fetch": true,
+      "process.manage": true,
     };
 
     return {
@@ -69,36 +225,38 @@ export class ToolRegistry {
   }
 
   /**
-   * Generates dynamic capability system prompt text based on connected vs disconnected services.
-   * Enforces honesty: model MUST NEVER claim capabilities for disconnected integrations!
+   * Generates dynamic capability system prompt text.
    */
-  generateCapabilityPrompt(workspaceId: string, userId: string): string {
+  public generateCapabilityPrompt(workspaceId: string, userId: string): string {
     const manifest = this.getToolManifest(workspaceId, userId);
 
     const connectedSummary = manifest.connectedServices
       .map((s) => `- ${s.displayName}: ${s.connected ? "CONNECTED (Active)" : "NOT CONNECTED"}`)
       .join("\n");
 
-    const toolsSummary = manifest.availableTools.map((t) => `- ${t}`).join("\n");
+    const coreToolsList = Array.from(this.coreToolNames).map((t) => `- ${t}`).join("\n");
 
-    return `ACTIVE WORKSPACE & INTEGRATIONS MANIFEST:
+    return `ACTIVE WORKSPACE & CAPABILITY RUNTIME MANIFEST:
 
-AVAILABLE REAL EXECUTABLE TOOLS:
-${toolsSummary}
+CORE INITIAL DISCOVERY & CONTROL TOOLS:
+${coreToolsList}
+
+TOTAL REGISTERED CAPABILITIES IN REGISTRY:
+${manifest.availableTools.length} tools available across categories: system, filesystem, process, git, github, http.
+To discover and activate any specialized tool (e.g. filesystem search, stat, copy, move, delete, git operations, process manager, shell execution), CALL 'tools_search' with your intent!
 
 CONNECTED SERVICES & INTEGRATIONS:
 ${connectedSummary}
 
 STRICT CAPABILITY & HONESTY DIRECTIVES:
-1. You have REAL EXECUTABLE TOOLS available for shell execution, filesystem reading/writing/editing, git operations, and web fetching.
-2. When asked to inspect a repository, execute shell commands, run tests, or modify files, DO NOT ask the user to run commands manually. Use your tools to DO the work!
-3. For connected services marked 'CONNECTED (Active)', you CAN perform actions directly using your tools.
-4. For services marked 'NOT CONNECTED' (such as Slack, Notion, Email, Jira, or unconnected GitHub accounts), YOU DO NOT HAVE ACCESS. You MUST state clearly to the user that the service is not connected yet, and NEVER pretend or claim you can access them until connected.
-5. Maintain a natural, direct conversation style. Do NOT introduce yourself with "Hi — OrbaAgent here" or repeat "OrbaAgent can..." in every response. Simply answer naturally.
-6. CONTINUOUS AUTONOMOUS EXECUTION: When executing a multi-step workflow (e.g. clone repo -> inspect files -> install dependencies -> run linter -> run tests), DO NOT stop after one step to say "Now let me run the type checker and linter". ALWAYS execute the next tool immediately in the same response. Only provide your final response or call task_complete when all steps have been executed and verified.`;
+1. Dynamic Tool Discovery: You begin turns with core discovery tools (tools_search, environment_inspect, task_complete). Call 'tools_search' immediately when you require filesystem, git, process, or execution tools. They will be dynamically activated for you.
+2. Real Executable Tools: Use your tools to DO the work directly. Never ask the user to run commands manually.
+3. Connected Services: For connected services marked 'CONNECTED (Active)', you CAN perform actions directly using your tools.
+4. Disconnected Services: For services marked 'NOT CONNECTED', YOU DO NOT HAVE ACCESS. You MUST state clearly that the service is not connected yet, and NEVER claim access.
+5. Continuous Autonomous Execution: When executing multi-step workflows, DO NOT stop to say "Now let me run...". Continue executing tools until completed. Call task_complete when finished.`;
   }
 
-  async executeToolCall(
+  public async executeToolCall(
     toolCallId: string,
     name: string,
     args: Record<string, unknown>,

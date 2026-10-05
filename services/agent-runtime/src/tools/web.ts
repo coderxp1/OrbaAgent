@@ -1,4 +1,9 @@
-import type { ToolDefinition, ToolExecutionResult } from "@orbaagent/shared";
+import type {
+  ToolDefinition,
+  ToolExecutionResult,
+  ToolMetadata,
+} from "@orbaagent/shared";
+import { SecretManager } from "../secrets.js";
 import type { ITool, ToolExecutionContext } from "./base.js";
 
 export class WebFetchTool implements ITool {
@@ -17,9 +22,21 @@ export class WebFetchTool implements ITool {
     },
   };
 
+  public readonly metadata: ToolMetadata = {
+    name: "fetch_web_page",
+    description: "Fetch web content, documentation, or HTTP resources",
+    category: "http",
+    provider: "native",
+    riskTier: "TIER_3_EXTERNAL",
+    keywords: ["web", "http", "fetch", "url", "scrape", "documentation", "download"],
+    parameters: this.definition.parameters,
+    version: "1.0.0",
+    isCore: false,
+  };
+
   async execute(
     args: Record<string, unknown>,
-    context: ToolExecutionContext,
+    _context: ToolExecutionContext,
   ): Promise<ToolExecutionResult> {
     const startTime = Date.now();
     const toolCallId = (args._toolCallId as string) || `tc_web_${Date.now()}`;
@@ -59,11 +76,14 @@ export class WebFetchTool implements ITool {
         .replace(/\s+/g, " ")
         .slice(0, 5000);
 
+      const secretManager = SecretManager.getInstance();
+      const output = secretManager.redact(cleaned || "(empty page content)");
+
       return {
         toolCallId,
         name: this.definition.name,
         success: true,
-        output: cleaned || "(empty page content)",
+        output,
         executionTimeMs: Date.now() - startTime,
       };
     } catch (err: unknown) {
