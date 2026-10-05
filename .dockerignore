@@ -1,9 +1,13 @@
 node_modules
+**/node_modules
 .git
 .pnpm-store
 dist
+**/dist
 build
+**/build
 .next
+**/.next
 target
 *.log
 .env*
