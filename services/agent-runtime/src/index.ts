@@ -5,5 +5,8 @@ export * from "./tools/git.js";
 export * from "./tools/github.js";
 export * from "./tools/web.js";
 export * from "./tools/taskComplete.js";
+export * from "./memory.js";
+export * from "./changes.js";
 export * from "./integrations.js";
 export * from "./registry.js";
+

@@ -149,6 +149,14 @@ export function useAgentChat() {
                   );
                 } else if (event.type === "agent_activity" && event.activity) {
                   setActiveActivity(event.activity);
+                } else if (event.type === "file_changes_detected" && event.changes) {
+                  const detectedChanges = event.changes;
+                  setMessages((prev) =>
+                    prev.map((msg) => {
+                      if (msg.id !== assistantMsgId) return msg;
+                      return { ...msg, fileChanges: detectedChanges };
+                    }),
+                  );
                 } else if (event.type === "usage" && event.usage) {
                   setLatestUsage(event.usage);
                 } else if (event.type === "error" && event.error) {
@@ -174,6 +182,50 @@ export function useAgentChat() {
       }
     },
     [isGenerating, messages],
+  );
+
+  const reviewFileChange = useCallback(
+    async (
+      action: "accept" | "reject" | "accept_all" | "reject_all",
+      changeId?: string,
+      agentRunId?: string,
+    ) => {
+      try {
+        await fetch("/api/changes/review", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action, changeId, agentRunId }),
+        });
+
+        // Optimistically update local message state
+        setMessages((prev) =>
+          prev.map((msg) => {
+            if (!msg.fileChanges || msg.fileChanges.length === 0) return msg;
+            const updated = msg.fileChanges.map((change) => {
+              if (action === "accept_all") {
+                return { ...change, reviewStatus: "accepted" as const };
+              }
+              if (action === "reject_all") {
+                return { ...change, reviewStatus: "rejected" as const };
+              }
+              if (change.changeId === changeId) {
+                return {
+                  ...change,
+                  reviewStatus: (action === "accept" ? "accepted" : "rejected") as
+                    | "accepted"
+                    | "rejected",
+                };
+              }
+              return change;
+            });
+            return { ...msg, fileChanges: updated };
+          }),
+        );
+      } catch (err) {
+        console.error("Failed to review file change:", err);
+      }
+    },
+    [],
   );
 
   const retryLastMessage = useCallback(() => {
@@ -204,5 +256,6 @@ export function useAgentChat() {
     cancelGeneration,
     retryLastMessage,
     clearChat,
+    reviewFileChange,
   };
 }

@@ -103,3 +103,4 @@ export function LibraryModal({ isOpen, onClose, onSelectPrompt }: LibraryModalPr
     </div>
   );
 }
+

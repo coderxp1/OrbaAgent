@@ -193,3 +193,4 @@ export function AttachmentMenu({ onAttachFiles, onInsertSnippet }: AttachmentMen
     </div>
   );
 }
+

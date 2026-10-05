@@ -139,3 +139,4 @@ export function AgentsModal({ isOpen, onClose, onSelectAgent }: AgentsModalProps
     </div>
   );
 }
+

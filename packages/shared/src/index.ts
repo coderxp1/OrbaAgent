@@ -94,6 +94,31 @@ export const ToolExecutionResultSchema = z.object({
 });
 export type ToolExecutionResult = z.infer<typeof ToolExecutionResultSchema>;
 
+export const AgentFileChangeStatusSchema = z.enum([
+  "created",
+  "modified",
+  "deleted",
+  "renamed",
+]);
+export type AgentFileChangeStatus = z.infer<typeof AgentFileChangeStatusSchema>;
+
+export const AgentFileChangeSchema = z.object({
+  changeId: z.string(),
+  agentRunId: z.string(),
+  messageId: z.string().optional(),
+  workspaceId: z.string(),
+  path: z.string(),
+  filename: z.string(),
+  status: AgentFileChangeStatusSchema,
+  previousPath: z.string().optional(),
+  additions: z.number().int().nonnegative(),
+  deletions: z.number().int().nonnegative(),
+  diff: z.string().optional(),
+  reviewStatus: z.enum(["pending", "accepted", "rejected"]).default("pending"),
+  timestamp: z.string().optional(),
+});
+export type AgentFileChange = z.infer<typeof AgentFileChangeSchema>;
+
 export const ChatMessageRoleSchema = z.enum(["system", "user", "assistant", "tool"]);
 export type ChatMessageRole = z.infer<typeof ChatMessageRoleSchema>;
 
@@ -107,6 +132,7 @@ export const ChatMessageSchema = z.object({
   toolResults: z.array(ToolExecutionResultSchema).optional(),
   thinking: z.string().optional(),
   timestamp: z.string().optional(),
+  fileChanges: z.array(AgentFileChangeSchema).optional(),
 });
 export type ChatMessage = z.infer<typeof ChatMessageSchema>;
 
@@ -116,6 +142,8 @@ export const TraceMetadataSchema = z.object({
   userId: z.string().default("default-user"),
   conversationId: z.string().default("default-conversation"),
   agentRunId: z.string().default("default-run"),
+  githubToken: z.string().optional(),
+  executionSessionId: z.string().optional(),
 });
 export type TraceMetadata = z.infer<typeof TraceMetadataSchema>;
 
@@ -197,6 +225,11 @@ export const NormalizedEventTypeSchema = z.enum([
   "error",
   "done",
   "stream_reset",
+  "terminal_command_start",
+  "terminal_stdout",
+  "terminal_stderr",
+  "terminal_exit",
+  "file_changes_detected",
 ]);
 export type NormalizedEventType = z.infer<typeof NormalizedEventTypeSchema>;
 
@@ -216,6 +249,10 @@ export const NormalizedEventSchema = z.object({
   toolResult: ToolExecutionResultSchema.optional(),
   activity: AgentActivitySchema.optional(),
   usage: UsageStatsSchema.optional(),
+  executionSessionId: z.string().optional(),
+  command: z.string().optional(),
+  exitCode: z.number().optional(),
+  changes: z.array(AgentFileChangeSchema).optional(),
   error: z
     .object({
       code: z.string(),

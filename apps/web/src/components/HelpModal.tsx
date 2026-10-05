@@ -92,3 +92,4 @@ export function HelpModal({ isOpen, onClose }: HelpModalProps) {
     </div>
   );
 }
+

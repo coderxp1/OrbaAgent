@@ -40,19 +40,60 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const verifiedUserId = process.env.ORBA_USER_ID || "authenticated-user";
-    const body = (await request.json()) as { status: IntegrationStatus };
+    const body = (await request.json()) as {
+      status: IntegrationStatus;
+      token?: string;
+    };
     if (!body || !body.status) {
       return Response.json({ error: "Missing status payload" }, { status: 400 });
     }
 
     const manager = IntegrationsManager.getInstance();
-    manager.setIntegrationStatus(verifiedUserId, body.status);
 
-    if (body.status.name === "github" && !body.status.connected) {
-      process.env.GITHUB_TOKEN = "";
-      const cookieStore = await cookies();
-      cookieStore.delete("orba_github_token");
+    if (body.status.name === "github") {
+      if (body.status.connected && body.token) {
+        // Verify GitHub token validity
+        let username = body.status.accountName || "GitHub User";
+        try {
+          const userRes = await fetch("https://api.github.com/user", {
+            headers: {
+              Authorization: `Bearer ${body.token.trim()}`,
+              Accept: "application/vnd.github.v3+json",
+              "User-Agent": "OrbaAgent-App",
+            },
+          });
+          if (userRes.ok) {
+            const userData = await userRes.json();
+            username = userData.login || userData.name || username;
+          } else {
+            return Response.json(
+              { error: "Invalid GitHub token: GitHub API returned unauthorized" },
+              { status: 401 },
+            );
+          }
+        } catch (fetchErr) {
+          console.warn("Could not verify GitHub token online:", fetchErr);
+        }
+
+        body.status.accountName = username;
+        process.env.GITHUB_TOKEN = body.token.trim();
+
+        const cookieStore = await cookies();
+        cookieStore.set("orba_github_token", body.token.trim(), {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === "production",
+          sameSite: "lax",
+          maxAge: 60 * 60 * 24 * 30, // 30 days
+          path: "/",
+        });
+      } else if (!body.status.connected) {
+        process.env.GITHUB_TOKEN = "";
+        const cookieStore = await cookies();
+        cookieStore.delete("orba_github_token");
+      }
     }
+
+    manager.setIntegrationStatus(verifiedUserId, body.status);
 
     return Response.json({ success: true, updated: body.status });
   } catch (err: unknown) {

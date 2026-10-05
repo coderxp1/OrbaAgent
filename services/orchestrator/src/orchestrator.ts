@@ -1,4 +1,9 @@
-import { ToolRegistry } from "@orbaagent/agent-runtime";
+import {
+  AgentMemoryManager,
+  ChangeReviewManager,
+  IntegrationsManager,
+  ToolRegistry,
+} from "@orbaagent/agent-runtime";
 import { ModelGateway } from "@orbaagent/model-gateway";
 import type {
   ChatCompletionRequest,
@@ -17,11 +22,14 @@ export interface AgentOrchestratorOptions {
 export type OrchestratorLoopState =
   | "QUEUED"
   | "RUNNING"
+  | "WAITING_TOOL"
   | "TOOL_RUNNING"
   | "TOOL_RESULT"
   | "VERIFYING"
   | "COMPLETED"
-  | "FAILED";
+  | "FAILED"
+  | "CANCELLED"
+  | "WAITING_FOR_USER";
 
 function indicatesPendingAction(text: string): boolean {
   if (!text || text.trim().length === 0) return false;
@@ -56,7 +64,7 @@ export class AgentOrchestrator {
   constructor(options?: AgentOrchestratorOptions) {
     this.gateway = options?.gateway || new ModelGateway();
     this.registry = options?.registry || new ToolRegistry();
-    this.maxIterations = options?.maxIterations || 10;
+    this.maxIterations = options?.maxIterations || 12;
     this.workspacePath = options?.workspacePath || process.env.ORBA_WORKSPACE_PATH || process.cwd();
   }
 
@@ -70,25 +78,50 @@ export class AgentOrchestrator {
     const trace = rawRequest.trace;
     const userId = trace.userId || "default-user";
     const workspaceId = trace.tenantId || "default-workspace";
+    const githubToken = trace.githubToken || process.env.GITHUB_TOKEN;
+    const executionSessionId = trace.executionSessionId || `exec_${Date.now()}`;
 
-    // Build tool definitions and capability prompt
+    // Ensure GitHub token is synchronized in IntegrationsManager and process.env
+    if (githubToken) {
+      process.env.GITHUB_TOKEN = githubToken;
+      const manager = IntegrationsManager.getInstance();
+      const current = manager.getIntegrations(userId).find((i) => i.name === "github");
+      manager.setIntegrationStatus(userId, {
+        name: "github",
+        displayName: "GitHub",
+        connected: true,
+        accountName: current?.accountName || "GitHub User",
+        lastSyncedAt: new Date().toISOString(),
+        scopes: ["repo", "read:user", "user:email"],
+      });
+    }
+
+    // Build tool definitions and dynamic capability prompt
     const toolDefinitions = this.registry.getToolDefinitions();
     const capabilityPrompt = this.registry.generateCapabilityPrompt(workspaceId, userId);
+
+    // Retrieve persistent memory of past work & decisions for this workspace
+    const memoryManager = AgentMemoryManager.getInstance();
+    const memoryPrompt = memoryManager.generateMemoryPrompt(workspaceId, userId);
+
+    const systemContext = memoryPrompt
+      ? `${capabilityPrompt}\n\n${memoryPrompt}`
+      : capabilityPrompt;
 
     // Prepare current messages history
     const currentMessages: ChatMessage[] = [...rawRequest.messages];
 
-    // Inject capability prompt into first message or prepend
+    // Inject system context into first message or prepend
     const hasSystem = currentMessages.length > 0 && currentMessages[0].role === "system";
     if (!hasSystem) {
       currentMessages.unshift({
         role: "system",
-        content: capabilityPrompt,
+        content: systemContext,
       });
     } else {
       currentMessages[0] = {
         ...currentMessages[0],
-        content: `${currentMessages[0].content}\n\n${capabilityPrompt}`,
+        content: `${currentMessages[0].content}\n\n${systemContext}`,
       };
     }
 
@@ -98,7 +131,7 @@ export class AgentOrchestrator {
       activity: {
         step: "Initializing autonomous session",
         status: "in_progress",
-        details: `Tools: ${toolDefinitions.length} registered`,
+        details: `Tools: ${toolDefinitions.length} registered, State: RUNNING`,
       },
     };
 
@@ -126,7 +159,7 @@ export class AgentOrchestrator {
           stepText += event.textDelta;
           yield event;
         } else if (event.type === "done") {
-          // Never emit done inside the loop; only emit done when the orchestrator finishes
+          // Never emit done inside the loop; only emit done when the orchestrator state machine completes
           continue;
         } else {
           yield event;
@@ -139,10 +172,10 @@ export class AgentOrchestrator {
         isExplicitlyCompleted = true;
       }
 
-      // Case 1: No tool calls were produced
+      // Case 1: No tool calls were produced in this turn
       if (pendingToolCalls.length === 0) {
         // If tools were already executed in earlier iterations and the model emitted transitional text
-        // like "Dependencies installed. Now let me run the type checker and linter.", auto-continue!
+        // (e.g. "Dependencies installed. Now let me run the type checker and linter."), auto-continue!
         if (hasExecutedAnyTools && indicatesPendingAction(stepText) && iteration < this.maxIterations) {
           currentMessages.push({
             role: "assistant",
@@ -193,13 +226,49 @@ export class AgentOrchestrator {
           },
         };
 
+        // If shell execution, stream dedicated terminal session events
+        if (call.name === "execute_shell") {
+          const cmd = String((call.arguments as Record<string, unknown>)?.command || "");
+          yield {
+            type: "terminal_command_start",
+            traceId: trace.traceId,
+            executionSessionId,
+            command: cmd,
+          };
+        }
+
         const result = await this.registry.executeToolCall(call.id, call.name, call.arguments, {
           workspaceDir: this.workspacePath,
           tenantId: trace.tenantId || "default-tenant",
           userId: trace.userId || "default-user",
           agentRunId: trace.agentRunId || "default-run",
-          githubToken: process.env.GITHUB_TOKEN,
+          githubToken,
         });
+
+        if (call.name === "execute_shell") {
+          if (result.output) {
+            yield {
+              type: "terminal_stdout",
+              traceId: trace.traceId,
+              executionSessionId,
+              textDelta: result.output,
+            };
+          }
+          if (result.error) {
+            yield {
+              type: "terminal_stderr",
+              traceId: trace.traceId,
+              executionSessionId,
+              textDelta: result.error,
+            };
+          }
+          yield {
+            type: "terminal_exit",
+            traceId: trace.traceId,
+            executionSessionId,
+            exitCode: result.success ? 0 : 1,
+          };
+        }
 
         yield {
           type: "tool_call_result",
@@ -233,8 +302,38 @@ export class AgentOrchestrator {
       if (isExplicitlyCompleted) {
         break;
       }
+    }
 
-      // Continue to next iteration: the model will observe the tool results and either call another tool or give the final answer!
+    // Capture and yield any filesystem changes made by this agent run
+    try {
+      const changeManager = ChangeReviewManager.getInstance();
+      const changes = await changeManager.detectChanges(
+        trace.agentRunId,
+        this.workspacePath,
+        workspaceId,
+      );
+      if (changes.length > 0) {
+        yield {
+          type: "file_changes_detected",
+          traceId: trace.traceId,
+          changes,
+        };
+      }
+    } catch (e) {
+      console.warn("Failed to detect agent changes:", e);
+    }
+
+    // Persist memory of completed work for subsequent agent runs
+    if (hasExecutedAnyTools || isExplicitlyCompleted) {
+      const summaryMsg = currentMessages[currentMessages.length - 1]?.content || "";
+      if (summaryMsg.length > 20) {
+        memoryManager.addMemory(
+          workspaceId,
+          userId,
+          "past_work",
+          `Completed run (${trace.agentRunId}): ${summaryMsg.slice(0, 240)}`,
+        );
+      }
     }
 
     yield {

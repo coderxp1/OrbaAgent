@@ -3,13 +3,24 @@
 import type { ChatMessage } from "@orbaagent/shared";
 import { Brain, Check, Copy, User } from "lucide-react";
 import { useState } from "react";
+import { FileChangesReview } from "./FileChangesReview";
 import { TerminalSession } from "./TerminalSession";
 
 interface MessageItemProps {
   message: ChatMessage;
+  onAcceptChange?: (changeId: string, runId?: string) => void;
+  onRejectChange?: (changeId: string, runId?: string) => void;
+  onAcceptAllChanges?: (runId?: string) => void;
+  onRejectAllChanges?: (runId?: string) => void;
 }
 
-export function MessageItem({ message }: MessageItemProps) {
+export function MessageItem({
+  message,
+  onAcceptChange,
+  onRejectChange,
+  onAcceptAllChanges,
+  onRejectAllChanges,
+}: MessageItemProps) {
   const isUser = message.role === "user";
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
   const [showThinking, setShowThinking] = useState<boolean>(true);
@@ -85,6 +96,17 @@ export function MessageItem({ message }: MessageItemProps) {
             toolCalls={message.toolCalls}
             toolResults={message.toolResults}
             isLive={false}
+          />
+        )}
+
+        {/* Agent File Changes Review Panel */}
+        {message.fileChanges && message.fileChanges.length > 0 && (
+          <FileChangesReview
+            changes={message.fileChanges}
+            onAccept={onAcceptChange ? (id) => onAcceptChange(id) : undefined}
+            onReject={onRejectChange ? (id) => onRejectChange(id) : undefined}
+            onAcceptAll={onAcceptAllChanges ? () => onAcceptAllChanges() : undefined}
+            onRejectAll={onRejectAllChanges ? () => onRejectAllChanges() : undefined}
           />
         )}
 
@@ -174,3 +196,4 @@ function FormattedContent({
     </div>
   );
 }
+

@@ -1,6 +1,7 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { ToolDefinition, ToolExecutionResult } from "@orbaagent/shared";
+import { ChangeReviewManager } from "../changes.js";
 import type { ITool, ToolExecutionContext } from "./base.js";
 
 function resolveSafePath(workspaceDir: string, relativePath: string): string {
@@ -145,6 +146,11 @@ export class WriteFileTool implements ITool {
 
     try {
       const targetPath = resolveSafePath(context.workspaceDir, filePath);
+      await ChangeReviewManager.getInstance().recordPreModification(
+        context.agentRunId,
+        context.workspaceDir,
+        filePath,
+      );
       await fs.mkdir(path.dirname(targetPath), { recursive: true });
       await fs.writeFile(targetPath, content, "utf-8");
 
@@ -218,6 +224,11 @@ export class EditFileTool implements ITool {
         };
       }
 
+      await ChangeReviewManager.getInstance().recordPreModification(
+        context.agentRunId,
+        context.workspaceDir,
+        filePath,
+      );
       const updated = original.replace(targetContent, replacementContent);
       await fs.writeFile(targetPath, updated, "utf-8");
 

@@ -66,6 +66,7 @@ export default function WorkspacePage() {
     cancelGeneration,
     retryLastMessage,
     clearChat,
+    reviewFileChange,
   } = useAgentChat();
 
   const [inputPrompt, setInputPrompt] = useState<string>("");
@@ -814,7 +815,14 @@ export default function WorkspacePage() {
           ) : (
             <div className="max-w-3xl mx-auto flex flex-col gap-4 pb-28">
               {messages.map((msg: ChatMessage) => (
-                <MessageItem key={msg.id || Math.random().toString()} message={msg} />
+                <MessageItem
+                  key={msg.id || Math.random().toString()}
+                  message={msg}
+                  onAcceptChange={(changeId, runId) => reviewFileChange("accept", changeId, runId)}
+                  onRejectChange={(changeId, runId) => reviewFileChange("reject", changeId, runId)}
+                  onAcceptAllChanges={(runId) => reviewFileChange("accept_all", undefined, runId)}
+                  onRejectAllChanges={(runId) => reviewFileChange("reject_all", undefined, runId)}
+                />
               ))}
 
               {/* Active Agent Activity Pill */}

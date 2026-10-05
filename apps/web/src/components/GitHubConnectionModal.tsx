@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import {
   ArrowUpRight,
@@ -33,6 +33,10 @@ export function GitHubConnectionModal({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [showGuide, setShowGuide] = useState(false);
 
+  const [showPatInput, setShowPatInput] = useState(false);
+  const [patToken, setPatToken] = useState("");
+  const [savingPat, setSavingPat] = useState(false);
+
   useEffect(() => {
     if (!isOpen) return;
     setErrorMsg(null);
@@ -64,31 +68,94 @@ export function GitHubConnectionModal({
     const left = window.screenX + (window.outerWidth - width) / 2;
     const top = window.screenY + (window.outerHeight - height) / 2;
 
-    const popup = window.open(
-      "/api/auth/github",
-      "orba_gh_oauth",
-      `width=${width},height=${height},left=${left},top=${top},status=yes,toolbar=no,menubar=no`,
-    );
+    let popup: Window | null = null;
+    try {
+      popup = window.open(
+        "/api/auth/github",
+        "orba_gh_oauth",
+        `width=${width},height=${height},left=${left},top=${top},status=yes,toolbar=no,menubar=no`,
+      );
+    } catch (openErr) {
+      console.warn("Failed to open popup:", openErr);
+    }
 
-    // Fallback: poll popup closure if popup was closed without postMessage
-    const timer = setInterval(() => {
-      if (popup?.closed) {
-        clearInterval(timer);
-        // Refresh connection state in background
-        fetch("/api/connections")
-          .then((res) => res.json())
-          .then((data) => {
-            const gh = data.integrations?.find((i: { name: string }) => i.name === "github");
-            if (gh?.connected) {
-              onConnectedChange?.(true, gh.accountName || "GitHub User");
-            }
-          })
-          .catch(() => {})
-          .finally(() => {
+    let pollAttempts = 0;
+    const maxAttempts = 40; // 60 seconds (1500ms * 40)
+
+    const pollTimer = setInterval(async () => {
+      pollAttempts++;
+
+      // Active verification via /api/connections endpoint
+      try {
+        const res = await fetch("/api/connections");
+        if (res.ok) {
+          const data = await res.json();
+          const gh = data.integrations?.find((i: { name: string }) => i.name === "github");
+          if (gh?.connected) {
+            clearInterval(pollTimer);
             setConnecting(false);
-          });
+            onConnectedChange?.(true, gh.accountName || "GitHub User");
+            if (popup && !popup.closed) {
+              try {
+                popup.close();
+              } catch {}
+            }
+            return;
+          }
+        }
+      } catch {}
+
+      // Safe check for popup closure
+      let isPopupClosed = false;
+      try {
+        isPopupClosed = popup ? popup.closed : false;
+      } catch {
+        isPopupClosed = false;
       }
-    }, 1000);
+
+      if (isPopupClosed || pollAttempts >= maxAttempts) {
+        clearInterval(pollTimer);
+        setConnecting(false);
+      }
+    }, 1500);
+  };
+
+  const handleConnectWithPat = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!patToken.trim()) return;
+
+    setSavingPat(true);
+    setErrorMsg(null);
+
+    try {
+      const res = await fetch("/api/connections", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          token: patToken.trim(),
+          status: {
+            name: "github",
+            displayName: "GitHub",
+            connected: true,
+          },
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to authorize GitHub token");
+      }
+
+      const account = data.updated?.accountName || "GitHub User";
+      onConnectedChange?.(true, account);
+      setShowPatInput(false);
+      setPatToken("");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setErrorMsg(msg);
+    } finally {
+      setSavingPat(false);
+    }
   };
 
   const handleDisconnect = async () => {
@@ -231,6 +298,64 @@ export function GitHubConnectionModal({
               <li>Select your organization or personal repositories to grant access.</li>
               <li>Click &ldquo;Authorize OrbaAgent&rdquo; to complete integration.</li>
             </ol>
+          </div>
+        )}
+
+        {/* Alternative PAT Form */}
+        {!isConnected && (
+          <div className="mb-4">
+            <button
+              onClick={() => setShowPatInput(!showPatInput)}
+              type="button"
+              className="text-xs text-zinc-400 hover:text-zinc-200 underline underline-offset-4 transition-colors flex items-center gap-1.5"
+            >
+              <Key className="w-3.5 h-3.5 text-zinc-400" />
+              <span>
+                {showPatInput
+                  ? "Hide Personal Access Token input"
+                  : "Or connect using Personal Access Token (PAT)"}
+              </span>
+            </button>
+
+            {showPatInput && (
+              <form
+                onSubmit={handleConnectWithPat}
+                className="mt-2.5 p-3 rounded-xl bg-[#202020] border border-[#333] space-y-2.5 animate-in fade-in duration-150"
+              >
+                <div className="text-[11px] text-zinc-400 leading-snug">
+                  Paste a Personal Access Token with{" "}
+                  <code className="text-zinc-300 bg-zinc-800 px-1 py-0.5 rounded font-mono">
+                    repo
+                  </code>{" "}
+                  and{" "}
+                  <code className="text-zinc-300 bg-zinc-800 px-1 py-0.5 rounded font-mono">
+                    read:user
+                  </code>{" "}
+                  scopes.
+                </div>
+                <input
+                  type="password"
+                  value={patToken}
+                  onChange={(e) => setPatToken(e.target.value)}
+                  placeholder="ghp_... or github_pat_..."
+                  className="w-full px-3 py-2 rounded-lg bg-[#141414] border border-[#383838] text-xs font-mono text-white placeholder-zinc-500 focus:outline-none focus:border-blue-500"
+                />
+                <button
+                  type="submit"
+                  disabled={savingPat || !patToken.trim()}
+                  className="w-full py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-medium text-xs transition-colors flex items-center justify-center gap-2"
+                >
+                  {savingPat ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Verifying token...</span>
+                    </>
+                  ) : (
+                    <span>Save and Connect Token</span>
+                  )}
+                </button>
+              </form>
+            )}
           </div>
         )}
 
