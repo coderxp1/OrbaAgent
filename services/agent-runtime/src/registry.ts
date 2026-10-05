@@ -38,12 +38,14 @@ import { ConnectorProvider } from "./connectors/provider.js";
 import type { IConnector } from "./connectors/types.js";
 import { MCPProvider } from "./mcp/provider.js";
 import type { McpServerConfig } from "./mcp/transport.js";
+import { CapabilityManager } from "./capabilities.js";
 
 export class ToolRegistry implements IToolSearchableRegistry {
   private readonly tools: Map<string, ITool> = new Map();
   private readonly coreToolNames: Set<string> = new Set([
     "tools_search",
     "environment_inspect",
+    "capabilities_inspect",
     "task_complete",
   ]);
   private readonly activeToolNames: Set<string> = new Set();
@@ -257,32 +259,7 @@ export class ToolRegistry implements IToolSearchableRegistry {
    * Generates dynamic capability system prompt text.
    */
   public generateCapabilityPrompt(workspaceId: string, userId: string): string {
-    const manifest = this.getToolManifest(workspaceId, userId);
-
-    const connectedSummary = manifest.connectedServices
-      .map((s) => `- ${s.displayName}: ${s.connected ? "CONNECTED (Active)" : "NOT CONNECTED"}`)
-      .join("\n");
-
-    const coreToolsList = Array.from(this.coreToolNames).map((t) => `- ${t}`).join("\n");
-
-    return `ACTIVE WORKSPACE & CAPABILITY RUNTIME MANIFEST:
-
-CORE INITIAL DISCOVERY & CONTROL TOOLS:
-${coreToolsList}
-
-TOTAL REGISTERED CAPABILITIES IN REGISTRY:
-${manifest.availableTools.length} tools available across categories: system, filesystem, process, git, github, http.
-To discover and activate any specialized tool (e.g. filesystem search, stat, copy, move, delete, git operations, process manager, shell execution), CALL 'tools_search' with your intent!
-
-CONNECTED SERVICES & INTEGRATIONS:
-${connectedSummary}
-
-STRICT CAPABILITY & HONESTY DIRECTIVES:
-1. Dynamic Tool Discovery: You begin turns with core discovery tools (tools_search, environment_inspect, task_complete). Call 'tools_search' immediately when you require filesystem, git, process, or execution tools. They will be dynamically activated for you.
-2. Real Executable Tools: Use your tools to DO the work directly. Never ask the user to run commands manually.
-3. Connected Services: For connected services marked 'CONNECTED (Active)', you CAN perform actions directly using your tools.
-4. Disconnected Services: For services marked 'NOT CONNECTED', YOU DO NOT HAVE ACCESS. You MUST state clearly that the service is not connected yet, and NEVER claim access.
-5. Continuous Autonomous Execution: When executing multi-step workflows, DO NOT stop to say "Now let me run...". Continue executing tools until completed. Call task_complete when finished.`;
+    return CapabilityManager.getInstance().generateCapabilityPrompt(this, workspaceId, userId);
   }
 
   public async executeToolCall(

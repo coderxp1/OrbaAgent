@@ -30,6 +30,7 @@ import { DeploymentTool } from "../tools/deployment.js";
 import { BackgroundJobTool } from "../tools/jobManager.js";
 import type { IToolSearchableRegistry } from "../tools/toolsSearch.js";
 import { ToolsSearchTool } from "../tools/toolsSearch.js";
+import { CapabilitiesInspectTool } from "../capabilities.js";
 
 export class NativeProvider {
   private readonly tools: ITool[] = [];
@@ -39,6 +40,7 @@ export class NativeProvider {
       this.tools.push(new ToolsSearchTool(registry));
     }
     this.tools.push(
+      new CapabilitiesInspectTool(registry as any),
       new EnvironmentInspectTool(),
       new TaskCompleteTool(),
       new ShellTool(),

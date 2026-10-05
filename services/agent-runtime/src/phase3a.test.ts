@@ -481,6 +481,7 @@ rl.on('line', (line) => {
       expect(registry.getActiveToolNames()).toEqual([
         "tools_search",
         "environment_inspect",
+        "capabilities_inspect",
         "task_complete",
       ]);
 

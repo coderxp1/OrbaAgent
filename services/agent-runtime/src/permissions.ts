@@ -46,14 +46,17 @@ export class PermissionEngine {
    * Validates whether a file/directory path is strictly within the allowed workspaceDir.
    * Throws or returns false if traversal escapes the workspace.
    */
-  public isPathWithinWorkspace(targetPath: string, workspaceDir: string): boolean {
+  public isPathWithinWorkspace(
+    targetPath: string,
+    workspaceDir: string,
+    allowRoot: boolean = false,
+  ): boolean {
     if (!targetPath || !workspaceDir) return false;
     const resolvedTarget = path.resolve(workspaceDir, targetPath);
     const resolvedWorkspace = path.resolve(workspaceDir);
 
-    // Exact root check - cannot delete entire root directory
     if (resolvedTarget === resolvedWorkspace) {
-      return false;
+      return allowRoot;
     }
 
     // Must start with resolved workspace path
@@ -74,7 +77,13 @@ export class PermissionEngine {
     for (const key of pathKeys) {
       const val = args[key];
       if (typeof val === "string" && val.length > 0) {
-        if (!this.isPathWithinWorkspace(val, context.workspaceDir)) {
+        // Disallow root for destructive deletion operations
+        const isDeleteAction =
+          toolName === "filesystem_delete" ||
+          (toolName === "execute_git" && args.action === "clean") ||
+          (toolName === "package_manager" && args.action === "remove");
+        const allowRoot = !isDeleteAction;
+        if (!this.isPathWithinWorkspace(val, context.workspaceDir, allowRoot)) {
           allowed = false;
           denialReason = `Path '${val}' resolves outside the allowed workspace boundaries or attempts root manipulation.`;
           break;
@@ -189,7 +198,7 @@ export class PermissionEngine {
           } else {
             hostPath = String(v).split(":")[0]?.trim() || "";
           }
-          if (hostPath && !this.isPathWithinWorkspace(hostPath, context.workspaceDir)) {
+          if (hostPath && !this.isPathWithinWorkspace(hostPath, context.workspaceDir, true)) {
             allowed = false;
             denialReason = `Container volume mount '${hostPath}' resolves outside workspace boundary.`;
             break;

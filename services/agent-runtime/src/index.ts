@@ -33,3 +33,4 @@ export * from "./native/provider.js";
 export * from "./permissions.js";
 export * from "./router.js";
 export * from "./registry.js";
+export * from "./capabilities.js";

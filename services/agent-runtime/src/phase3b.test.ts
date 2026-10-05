@@ -1052,7 +1052,7 @@ describe("Phase 3B: Autonomous Infrastructure, Databases, CI/CD, Connectors & Jo
       // 1. Start with core tool definitions only
       registry.resetActiveToolsToCore();
       const initialActive = registry.getActiveToolNames();
-      expect(initialActive).toHaveLength(3);
+      expect(initialActive).toHaveLength(4);
       expect(initialActive).toContain("tools_search");
 
       // 2. Discover filesystem, database, git, github, ci tools

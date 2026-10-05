@@ -5,6 +5,7 @@ import { Brain, Check, Copy, User } from "lucide-react";
 import { useState } from "react";
 import { FileChangesReview } from "./FileChangesReview";
 import { TerminalSession } from "./TerminalSession";
+import { CopyMessageButton } from "./CopyMessageButton";
 
 interface MessageItemProps {
   message: ChatMessage;
@@ -60,11 +61,16 @@ export function MessageItem({
 
       <div className="flex flex-1 flex-col gap-3 overflow-hidden text-sm">
         <div className="flex items-center justify-between font-semibold text-xs text-zinc-400">
-          <span>{isUser ? "You" : "OrbaAgent"}</span>
-          {message.timestamp && (
-            <time className="font-mono text-zinc-500">
-              {new Date(message.timestamp).toLocaleTimeString()}
-            </time>
+          <div className="flex items-center gap-2">
+            <span>{isUser ? "You" : "OrbaAgent"}</span>
+            {message.timestamp && (
+              <time className="font-mono text-zinc-500 font-normal">
+                {new Date(message.timestamp).toLocaleTimeString()}
+              </time>
+            )}
+          </div>
+          {!isUser && message.content && (
+            <CopyMessageButton message={message.content} />
           )}
         </div>
 

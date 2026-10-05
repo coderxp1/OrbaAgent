@@ -188,8 +188,8 @@ export class GitTool implements ITool {
         break;
       }
       case "add": {
-        const filePath = String(args.filePath || ".");
-        gitCmd = `git add "${filePath}"`;
+        const filePath = String(args.filePath || ".").trim();
+        gitCmd = filePath === "." || filePath === "-A" || !filePath ? "git add -A" : `git add "${filePath}"`;
         break;
       }
       case "commit": {
