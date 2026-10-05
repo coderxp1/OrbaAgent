@@ -101,6 +101,31 @@ export class IntegrationsManager {
         displayName: "SharePoint & OneDrive",
         connected: false,
       },
+      google_workspace: {
+        name: "google_workspace",
+        displayName: "Google Workspace",
+        connected: false,
+      },
+      microsoft_365: {
+        name: "microsoft_365",
+        displayName: "Microsoft 365",
+        connected: false,
+      },
+      vercel: {
+        name: "vercel",
+        displayName: "Vercel",
+        connected: false,
+      },
+      cloudflare: {
+        name: "cloudflare",
+        displayName: "Cloudflare",
+        connected: false,
+      },
+      supabase: {
+        name: "supabase",
+        displayName: "Supabase",
+        connected: false,
+      },
     };
 
     if (!userMap) {

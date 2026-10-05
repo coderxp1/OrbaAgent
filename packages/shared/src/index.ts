@@ -89,6 +89,8 @@ export const ToolCategorySchema = z.enum([
   "documents",
   "media",
   "mcp",
+  "ci",
+  "jobs",
 ]);
 export type ToolCategory = z.infer<typeof ToolCategorySchema>;
 
@@ -255,8 +257,37 @@ export const IntegrationNameSchema = z.enum([
   "box",
   "google_drive",
   "sharepoint",
+  "google_workspace",
+  "microsoft_365",
+  "vercel",
+  "cloudflare",
+  "supabase",
 ]);
 export type IntegrationName = z.infer<typeof IntegrationNameSchema>;
+
+export const JobStatusSchema = z.enum([
+  "QUEUED",
+  "RUNNING",
+  "WAITING",
+  "COMPLETED",
+  "FAILED",
+  "CANCELLED",
+  "PAUSED",
+]);
+export type JobStatus = z.infer<typeof JobStatusSchema>;
+
+export const JobRecordSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  status: JobStatusSchema,
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  progress: z.number().min(0).max(100).optional(),
+  payload: z.record(z.unknown()).optional(),
+  result: z.unknown().optional(),
+  error: z.string().optional(),
+});
+export type JobRecord = z.infer<typeof JobRecordSchema>;
 
 export const IntegrationStatusSchema = z.object({
   name: IntegrationNameSchema,

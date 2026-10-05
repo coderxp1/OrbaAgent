@@ -160,7 +160,78 @@ export class PermissionEngine {
       }
     }
 
-    // 7. Tier 4 Destructive action policy check
+    // 7. Container sandbox & volume boundary checks
+    if (allowed && toolName === "container_action") {
+      const extraArgs = String(args.extraArgs || "");
+      const blockedPatterns = [
+        /--privileged/i,
+        /--pid\s*=\s*host/i,
+        /--ipc\s*=\s*host/i,
+        /--net\s*=\s*host/i,
+        /--network\s*=\s*host/i,
+        /-v\s+\/:\//i,
+        /-v\s+[A-Za-z]:\\/i,
+      ];
+      for (const pattern of blockedPatterns) {
+        if (pattern.test(extraArgs)) {
+          allowed = false;
+          denialReason = `Container flag '${extraArgs}' is blocked by sandbox security policy.`;
+          break;
+        }
+      }
+
+      if (allowed && Array.isArray(args.volumes)) {
+        for (const v of args.volumes as string[]) {
+          let hostPath = "";
+          const winMatch = String(v).match(/^([a-zA-Z]:[^:]+):(.*)$/);
+          if (winMatch) {
+            hostPath = winMatch[1].trim();
+          } else {
+            hostPath = String(v).split(":")[0]?.trim() || "";
+          }
+          if (hostPath && !this.isPathWithinWorkspace(hostPath, context.workspaceDir)) {
+            allowed = false;
+            denialReason = `Container volume mount '${hostPath}' resolves outside workspace boundary.`;
+            break;
+          }
+        }
+      }
+    }
+
+    // 8. Database query safety & path checks
+    if (allowed && toolName === "database_action") {
+      const dbPath = String(args.databasePath || "");
+      if (dbPath && dbPath !== ":memory:" && !this.isPathWithinWorkspace(dbPath, context.workspaceDir)) {
+        allowed = false;
+        denialReason = `SQLite database path '${dbPath}' resolves outside workspace boundary.`;
+      }
+      if (allowed && args.migrationPath) {
+        if (!this.isPathWithinWorkspace(String(args.migrationPath), context.workspaceDir)) {
+          allowed = false;
+          denialReason = `Database migration path '${args.migrationPath}' resolves outside workspace boundary.`;
+        }
+      }
+      if (allowed && args.backupPath) {
+        if (!this.isPathWithinWorkspace(String(args.backupPath), context.workspaceDir)) {
+          allowed = false;
+          denialReason = `Database backup path '${args.backupPath}' resolves outside workspace boundary.`;
+        }
+      }
+      if (allowed && args.action === "query" && args.query) {
+        const q = String(args.query).trim().toUpperCase();
+        const isDestructive =
+          q.startsWith("DROP TABLE") ||
+          q.startsWith("DROP DATABASE") ||
+          q.startsWith("TRUNCATE") ||
+          (q.startsWith("DELETE FROM") && !q.includes("WHERE"));
+        if (isDestructive && !isPreApproved) {
+          allowed = false;
+          denialReason = `Destructive database query requires explicit pre-approval: '${String(args.query).slice(0, 40)}...'`;
+        }
+      }
+    }
+
+    // 9. Tier 4 Destructive action policy check
     if (allowed && riskTier === "TIER_4_DESTRUCTIVE") {
       if (requiresApproval && !isPreApproved) {
         allowed = false;

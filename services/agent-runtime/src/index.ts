@@ -20,7 +20,16 @@ export * from "./memory.js";
 export * from "./changes.js";
 export * from "./integrations.js";
 export * from "./secrets.js";
+export * from "./tools/container.js";
+export * from "./tools/database.js";
+export * from "./tools/ci.js";
+export * from "./tools/deployment.js";
+export * from "./tools/jobManager.js";
+export * from "./jobs/manager.js";
+export * from "./connectors/types.js";
+export * from "./connectors/services.js";
+export * from "./connectors/provider.js";
+export * from "./native/provider.js";
 export * from "./permissions.js";
 export * from "./router.js";
 export * from "./registry.js";
-

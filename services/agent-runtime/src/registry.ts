@@ -33,6 +33,9 @@ import { BrowserTool } from "./tools/browser.js";
 import { PackageManagerTool } from "./tools/packageManager.js";
 import { TestRunnerTool } from "./tools/testRunner.js";
 import { CodeQualityTool } from "./tools/lintTypecheck.js";
+import { NativeProvider } from "./native/provider.js";
+import { ConnectorProvider } from "./connectors/provider.js";
+import type { IConnector } from "./connectors/types.js";
 import { MCPProvider } from "./mcp/provider.js";
 import type { McpServerConfig } from "./mcp/transport.js";
 
@@ -46,17 +49,36 @@ export class ToolRegistry implements IToolSearchableRegistry {
   private readonly activeToolNames: Set<string> = new Set();
   private readonly permissionEngine: PermissionEngine;
   private readonly secretManager: SecretManager;
+  private readonly nativeProvider: NativeProvider;
   private readonly mcpProvider: MCPProvider = new MCPProvider();
+  private readonly connectorProvider: ConnectorProvider = new ConnectorProvider();
 
   constructor() {
     this.permissionEngine = PermissionEngine.getInstance();
     this.secretManager = SecretManager.getInstance();
+    this.nativeProvider = new NativeProvider(this);
     this.registerDefaultTools();
     this.resetActiveToolsToCore();
   }
 
+  public getNativeProvider(): NativeProvider {
+    return this.nativeProvider;
+  }
+
   public getMcpProvider(): MCPProvider {
     return this.mcpProvider;
+  }
+
+  public getConnectorProvider(): ConnectorProvider {
+    return this.connectorProvider;
+  }
+
+  public registerConnector(connector: IConnector): ITool[] {
+    const tools = this.connectorProvider.registerConnector(connector);
+    for (const tool of tools) {
+      this.registerTool(tool);
+    }
+    return tools;
   }
 
   public async registerMcpServer(config: McpServerConfig): Promise<ITool[]> {
@@ -68,33 +90,13 @@ export class ToolRegistry implements IToolSearchableRegistry {
   }
 
   private registerDefaultTools(): void {
-    const searchTool = new ToolsSearchTool(this);
+    // 1. Register all native tools
+    for (const tool of this.nativeProvider.getTools()) {
+      this.registerTool(tool);
+    }
 
-    const defaultTools: ITool[] = [
-      searchTool,
-      new EnvironmentInspectTool(),
-      new TaskCompleteTool(),
-      new ShellTool(),
-      new ListFilesTool(),
-      new ReadFileTool(),
-      new WriteFileTool(),
-      new EditFileTool(),
-      new FilesystemSearchTool(),
-      new FilesystemStatTool(),
-      new FilesystemCopyTool(),
-      new FilesystemMoveTool(),
-      new FilesystemDeleteTool(),
-      new GitTool(),
-      new GitHubTool(),
-      new ProcessManagerTool(),
-      new WebFetchTool(),
-      new BrowserTool(),
-      new PackageManagerTool(),
-      new TestRunnerTool(),
-      new CodeQualityTool(),
-    ];
-
-    for (const tool of defaultTools) {
+    // 2. Register all connector tools
+    for (const tool of this.connectorProvider.getTools()) {
       this.registerTool(tool);
     }
   }
