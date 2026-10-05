@@ -26,6 +26,7 @@ import {
   Trash2,
   Wand2,
   X,
+  Paperclip,
 } from "lucide-react";
 import type React from "react";
 import { useEffect, useRef, useState } from "react";
@@ -45,9 +46,13 @@ import {
   SlackIcon,
   TeamsIcon,
 } from "../../components/AppIcons";
+import { AgentsModal } from "../../components/AgentsModal";
+import { AttachmentMenu, type AttachedFile } from "../../components/AttachmentMenu";
 import { ConnectionsModal } from "../../components/ConnectionsModal";
 import { ErrorBanner } from "../../components/ErrorBanner";
 import { GitHubConnectionModal } from "../../components/GitHubConnectionModal";
+import { HelpModal } from "../../components/HelpModal";
+import { LibraryModal } from "../../components/LibraryModal";
 import { MessageItem } from "../../components/MessageItem";
 import { useAgentChat } from "../../components/useAgentChat";
 
@@ -73,6 +78,16 @@ export default function WorkspacePage() {
   const [isGitHubModalOpen, setIsGitHubModalOpen] = useState<boolean>(false);
   const [gitHubConnected, setGitHubConnected] = useState<boolean>(false);
   const [gitHubAccount, setGitHubAccount] = useState<string | undefined>();
+
+  // Modals state
+  const [isHelpOpen, setIsHelpOpen] = useState<boolean>(false);
+  const [isAgentsOpen, setIsAgentsOpen] = useState<boolean>(false);
+  const [isLibraryOpen, setIsLibraryOpen] = useState<boolean>(false);
+
+  // Attachments & Speech state
+  const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
+  const [isListening, setIsListening] = useState<boolean>(false);
+  const speechRecognitionRef = useRef<any>(null);
 
   // Mobile sidebar state
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState<boolean>(false);
@@ -119,16 +134,77 @@ export default function WorkspacePage() {
         e.preventDefault();
         clearChat();
         setInputPrompt("");
+        setAttachedFiles([]);
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [clearChat]);
 
+  const toggleListening = () => {
+    if (isListening) {
+      if (speechRecognitionRef.current) {
+        try {
+          speechRecognitionRef.current.stop();
+        } catch {}
+      }
+      setIsListening(false);
+      return;
+    }
+
+    const SpeechRec =
+      (window as unknown as { SpeechRecognition?: any }).SpeechRecognition ||
+      (window as unknown as { webkitSpeechRecognition?: any }).webkitSpeechRecognition;
+
+    if (!SpeechRec) {
+      alert("Speech recognition is not supported in this browser. Please use Chrome or Edge.");
+      return;
+    }
+
+    try {
+      const recognition = new SpeechRec();
+      recognition.continuous = false;
+      recognition.interimResults = false;
+      recognition.lang = "en-US";
+
+      recognition.onresult = (event: any) => {
+        const transcript = event.results[0]?.[0]?.transcript;
+        if (transcript) {
+          setInputPrompt((prev) => (prev ? `${prev} ${transcript.trim()}` : transcript.trim()));
+        }
+      };
+
+      recognition.onerror = () => {
+        setIsListening(false);
+      };
+
+      recognition.onend = () => {
+        setIsListening(false);
+      };
+
+      recognition.start();
+      speechRecognitionRef.current = recognition;
+      setIsListening(true);
+    } catch (e) {
+      console.error(e);
+      setIsListening(false);
+    }
+  };
+
   const handleSend = () => {
-    if (!inputPrompt.trim() || isGenerating) return;
-    const text = inputPrompt;
+    if ((!inputPrompt.trim() && attachedFiles.length === 0) || isGenerating) return;
+    let text = inputPrompt.trim();
+    if (attachedFiles.length > 0) {
+      const contextPrefix = attachedFiles
+        .map(
+          (f) =>
+            `[Attachment: ${f.name}]\n${f.content ? f.content : `File size: ${f.size} bytes`}`,
+        )
+        .join("\n\n");
+      text = text ? `${contextPrefix}\n\n${text}` : contextPrefix;
+    }
     setInputPrompt("");
+    setAttachedFiles([]);
     sendMessage(text);
   };
 
@@ -192,7 +268,11 @@ export default function WorkspacePage() {
           {/* Top Quick Actions Row */}
           <div className="flex items-center justify-between px-1">
             <button
-              onClick={clearChat}
+              onClick={() => {
+                clearChat();
+                setInputPrompt("");
+                setAttachedFiles([]);
+              }}
               type="button"
               className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#242424] text-xs font-medium text-white shadow-sm"
             >
@@ -201,30 +281,38 @@ export default function WorkspacePage() {
             </button>
             <div className="flex items-center gap-1 text-zinc-400">
               <button
+                onClick={() => textareaRef.current?.focus()}
                 type="button"
                 className="p-1.5 hover:text-white rounded-md hover:bg-zinc-800 transition-colors"
-                title="Chat"
+                title="Focus Chat"
               >
                 <MessageSquare className="w-3.5 h-3.5" />
               </button>
               <button
+                onClick={toggleListening}
                 type="button"
-                className="p-1.5 hover:text-white rounded-md hover:bg-zinc-800 transition-colors"
-                title="Voice"
+                className={`p-1.5 rounded-md transition-colors ${
+                  isListening
+                    ? "text-red-400 bg-red-950/80 animate-pulse"
+                    : "hover:text-white hover:bg-zinc-800"
+                }`}
+                title={isListening ? "Stop listening" : "Voice input (Auto-detect)"}
               >
                 <Mic className="w-3.5 h-3.5" />
               </button>
               <button
+                onClick={() => setIsLibraryOpen(true)}
                 type="button"
                 className="p-1.5 hover:text-white rounded-md hover:bg-zinc-800 transition-colors"
-                title="Discover"
+                title="Discover Templates"
               >
                 <Compass className="w-3.5 h-3.5" />
               </button>
               <button
+                onClick={() => setIsLibraryOpen(true)}
                 type="button"
                 className="p-1.5 hover:text-white rounded-md hover:bg-zinc-800 transition-colors"
-                title="Search"
+                title="Search Library"
               >
                 <Search className="w-3.5 h-3.5" />
               </button>
@@ -260,6 +348,8 @@ export default function WorkspacePage() {
             <button
               onClick={() => {
                 clearChat();
+                setInputPrompt("");
+                setAttachedFiles([]);
                 textareaRef.current?.focus();
               }}
               type="button"
@@ -273,6 +363,7 @@ export default function WorkspacePage() {
           {/* Navigation Items */}
           <div className="flex flex-col gap-0.5">
             <button
+              onClick={() => setIsAgentsOpen(true)}
               type="button"
               className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-xs text-zinc-300 hover:text-white hover:bg-[#1f1f1f] transition-colors"
             >
@@ -281,6 +372,12 @@ export default function WorkspacePage() {
             </button>
 
             <button
+              onClick={() => {
+                setInputPrompt(
+                  "Draft executive AI Meeting Notes for our project status sync: Include Agenda, Key Decisions, Action Items with Owners, and Next Milestones.",
+                );
+                textareaRef.current?.focus();
+              }}
               type="button"
               className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-xs text-zinc-300 hover:text-white hover:bg-[#1f1f1f] transition-colors"
             >
@@ -289,6 +386,7 @@ export default function WorkspacePage() {
             </button>
 
             <button
+              onClick={() => setIsLibraryOpen(true)}
               type="button"
               className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-xs text-zinc-300 hover:text-white hover:bg-[#1f1f1f] transition-colors"
             >
@@ -309,6 +407,7 @@ export default function WorkspacePage() {
             </button>
 
             <button
+              onClick={() => setIsHelpOpen(true)}
               type="button"
               className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-xs text-zinc-300 hover:text-white hover:bg-[#1f1f1f] transition-colors"
             >
@@ -317,6 +416,13 @@ export default function WorkspacePage() {
             </button>
 
             <button
+              onClick={() => {
+                if (window.confirm("Clear this workspace conversation?")) {
+                  clearChat();
+                  setInputPrompt("");
+                  setAttachedFiles([]);
+                }
+              }}
               type="button"
               className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-xs text-zinc-300 hover:text-white hover:bg-[#1f1f1f] transition-colors"
             >
@@ -332,6 +438,7 @@ export default function WorkspacePage() {
             onClick={() => {
               clearChat();
               setInputPrompt("");
+              setAttachedFiles([]);
               textareaRef.current?.focus();
             }}
             type="button"
@@ -341,16 +448,18 @@ export default function WorkspacePage() {
             <span className="text-[10px] text-zinc-500 font-mono">Ctrl+O</span>
           </button>
           <button
+            onClick={() => textareaRef.current?.focus()}
             type="button"
             className="p-1.5 text-zinc-400 hover:text-white rounded-lg hover:bg-zinc-800 transition-colors"
-            title="Edit"
+            title="Focus input"
           >
             <PenSquare className="w-4 h-4" />
           </button>
           <button
+            onClick={() => setIsAgentsOpen(true)}
             type="button"
             className="p-1.5 text-zinc-400 hover:text-white rounded-lg hover:bg-zinc-800 transition-colors"
-            title="AI Features"
+            title="Workforce Agents"
           >
             <Sparkles className="w-4 h-4" />
           </button>
@@ -411,6 +520,30 @@ export default function WorkspacePage() {
               {/* Center Input Card (Matching Mockup) */}
               <div className="w-full rounded-2xl bg-[#1e1e1e] border border-[#2e2e2e] shadow-xl overflow-hidden text-left mb-6">
                 <div className="p-4 flex flex-col gap-3">
+                  {/* Attached Files Badges */}
+                  {attachedFiles.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 pb-2 border-b border-[#292929]">
+                      {attachedFiles.map((file) => (
+                        <div
+                          key={file.id}
+                          className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-[#28282c] text-[11px] text-zinc-300 border border-[#38383c]"
+                        >
+                          <Paperclip className="w-3 h-3 text-blue-400" />
+                          <span className="truncate max-w-[140px]">{file.name}</span>
+                          <button
+                            onClick={() =>
+                              setAttachedFiles(attachedFiles.filter((f) => f.id !== file.id))
+                            }
+                            type="button"
+                            className="text-zinc-500 hover:text-white"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
                   <textarea
                     ref={textareaRef}
                     rows={2}
@@ -422,34 +555,58 @@ export default function WorkspacePage() {
                   />
 
                   <div className="flex items-center justify-between pt-1">
-                    {/* Action Pill: + Review for me */}
-                    <button
-                      onClick={() =>
-                        setInputPrompt(
-                          "Review the current codebase and let me know if all is correct so far.",
-                        )
-                      }
-                      type="button"
-                      className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#2a2a2a] hover:bg-[#333333] text-xs font-medium text-zinc-300 transition-colors"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>Review for me</span>
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <AttachmentMenu
+                        onAttachFiles={(files) => setAttachedFiles((prev) => [...prev, ...files])}
+                        onInsertSnippet={(s) =>
+                          setInputPrompt((prev) => (prev ? `${prev}\n${s}` : s))
+                        }
+                      />
+                      {/* Action Pill: + Review for me */}
+                      <button
+                        onClick={() =>
+                          setInputPrompt(
+                            "Review the current codebase and let me know if all is correct so far.",
+                          )
+                        }
+                        type="button"
+                        className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#2a2a2a] hover:bg-[#333333] text-xs font-medium text-zinc-300 transition-colors"
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-blue-400" />
+                        <span>Review for me</span>
+                      </button>
+                    </div>
 
                     <div className="flex items-center gap-2">
                       <button
+                        onClick={toggleListening}
                         type="button"
-                        className="p-1.5 text-zinc-400 hover:text-white rounded-lg hover:bg-zinc-800 transition-colors"
-                        title="Voice dictation"
+                        className={`p-1.5 rounded-lg transition-colors flex items-center gap-1.5 ${
+                          isListening
+                            ? "bg-red-950/80 border border-red-500/50 text-red-400 animate-pulse"
+                            : "text-zinc-400 hover:text-white hover:bg-zinc-800"
+                        }`}
+                        title={
+                          isListening
+                            ? "Listening... click to stop"
+                            : "Voice dictation (Auto-detect)"
+                        }
                       >
                         <Mic className="w-4 h-4" />
+                        {isListening && (
+                          <span className="text-[10px] font-mono uppercase tracking-wider text-red-300">
+                            REC
+                          </span>
+                        )}
                       </button>
                       <button
                         onClick={handleSend}
-                        disabled={!inputPrompt.trim() || isGenerating}
+                        disabled={
+                          (!inputPrompt.trim() && attachedFiles.length === 0) || isGenerating
+                        }
                         type="button"
                         className={`w-7 h-7 rounded-full flex items-center justify-center transition-all ${
-                          inputPrompt.trim() && !isGenerating
+                          (inputPrompt.trim() || attachedFiles.length > 0) && !isGenerating
                             ? "bg-white text-black hover:bg-zinc-200"
                             : "bg-[#2a2a2a] text-zinc-600 cursor-not-allowed"
                         }`}
@@ -685,6 +842,30 @@ export default function WorkspacePage() {
             <div className="max-w-3xl mx-auto">
               <div className="w-full rounded-2xl bg-[#1e1e1e] border border-[#2e2e2e] shadow-xl overflow-hidden">
                 <div className="p-3.5 flex flex-col gap-2">
+                  {/* Attached Files Badges */}
+                  {attachedFiles.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 pb-2 border-b border-[#292929]">
+                      {attachedFiles.map((file) => (
+                        <div
+                          key={file.id}
+                          className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-[#28282c] text-[11px] text-zinc-300 border border-[#38383c]"
+                        >
+                          <Paperclip className="w-3 h-3 text-blue-400" />
+                          <span className="truncate max-w-[140px]">{file.name}</span>
+                          <button
+                            onClick={() =>
+                              setAttachedFiles(attachedFiles.filter((f) => f.id !== file.id))
+                            }
+                            type="button"
+                            className="text-zinc-500 hover:text-white"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
                   <textarea
                     rows={2}
                     value={inputPrompt}
@@ -695,20 +876,50 @@ export default function WorkspacePage() {
                   />
 
                   <div className="flex items-center justify-between pt-1">
-                    <button
-                      onClick={() =>
-                        setInputPrompt(
-                          "Review the repository changes and verify if tests pass cleanly.",
-                        )
-                      }
-                      type="button"
-                      className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#2a2a2a] hover:bg-[#333333] text-xs font-medium text-zinc-300 transition-colors"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>Review for me</span>
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <AttachmentMenu
+                        onAttachFiles={(files) => setAttachedFiles((prev) => [...prev, ...files])}
+                        onInsertSnippet={(s) =>
+                          setInputPrompt((prev) => (prev ? `${prev}\n${s}` : s))
+                        }
+                      />
+                      <button
+                        onClick={() =>
+                          setInputPrompt(
+                            "Review the repository changes and verify if tests pass cleanly.",
+                          )
+                        }
+                        type="button"
+                        className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#2a2a2a] hover:bg-[#333333] text-xs font-medium text-zinc-300 transition-colors"
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-blue-400" />
+                        <span>Review for me</span>
+                      </button>
+                    </div>
 
                     <div className="flex items-center gap-2">
+                      <button
+                        onClick={toggleListening}
+                        type="button"
+                        className={`p-1.5 rounded-lg transition-colors flex items-center gap-1.5 ${
+                          isListening
+                            ? "bg-red-950/80 border border-red-500/50 text-red-400 animate-pulse"
+                            : "text-zinc-400 hover:text-white hover:bg-zinc-800"
+                        }`}
+                        title={
+                          isListening
+                            ? "Listening... click to stop"
+                            : "Voice dictation (Auto-detect)"
+                        }
+                      >
+                        <Mic className="w-4 h-4" />
+                        {isListening && (
+                          <span className="text-[10px] font-mono uppercase tracking-wider text-red-300">
+                            REC
+                          </span>
+                        )}
+                      </button>
+
                       {isGenerating ? (
                         <button
                           onClick={cancelGeneration}
@@ -720,10 +931,12 @@ export default function WorkspacePage() {
                       ) : (
                         <button
                           onClick={handleSend}
-                          disabled={!inputPrompt.trim()}
+                          disabled={
+                            (!inputPrompt.trim() && attachedFiles.length === 0) || isGenerating
+                          }
                           type="button"
                           className={`w-7 h-7 rounded-full flex items-center justify-center transition-all ${
-                            inputPrompt.trim()
+                            (inputPrompt.trim() || attachedFiles.length > 0) && !isGenerating
                               ? "bg-white text-black hover:bg-zinc-200"
                               : "bg-[#2a2a2a] text-zinc-600 cursor-not-allowed"
                           }`}
@@ -818,6 +1031,35 @@ export default function WorkspacePage() {
         onConnectedChange={(connected, account) => {
           setGitHubConnected(connected);
           setGitHubAccount(account);
+        }}
+      />
+
+      {/* =========================================================================
+          WORKFORCE HELP & SHORTCUTS MODAL
+      ========================================================================= */}
+      <HelpModal isOpen={isHelpOpen} onClose={() => setIsHelpOpen(false)} />
+
+      {/* =========================================================================
+          MULTI-AGENT WORKFORCE ROSTER MODAL
+      ========================================================================= */}
+      <AgentsModal
+        isOpen={isAgentsOpen}
+        onClose={() => setIsAgentsOpen(false)}
+        onSelectAgent={(agentName) => {
+          setInputPrompt(`[Delegating to ${agentName}]: `);
+          textareaRef.current?.focus();
+        }}
+      />
+
+      {/* =========================================================================
+          WORKFLOW TEMPLATES LIBRARY MODAL
+      ========================================================================= */}
+      <LibraryModal
+        isOpen={isLibraryOpen}
+        onClose={() => setIsLibraryOpen(false)}
+        onSelectPrompt={(prompt) => {
+          setInputPrompt(prompt);
+          textareaRef.current?.focus();
         }}
       />
     </div>

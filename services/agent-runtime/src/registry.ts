@@ -5,6 +5,7 @@ import { EditFileTool, ListFilesTool, ReadFileTool, WriteFileTool } from "./tool
 import { GitTool } from "./tools/git.js";
 import { GitHubTool } from "./tools/github.js";
 import { ShellTool } from "./tools/shell.js";
+import { TaskCompleteTool } from "./tools/taskComplete.js";
 import { WebFetchTool } from "./tools/web.js";
 
 export class ToolRegistry {
@@ -24,6 +25,7 @@ export class ToolRegistry {
       new GitTool(),
       new GitHubTool(),
       new WebFetchTool(),
+      new TaskCompleteTool(),
     ];
 
     for (const tool of defaultTools) {
@@ -92,7 +94,8 @@ STRICT CAPABILITY & HONESTY DIRECTIVES:
 2. When asked to inspect a repository, execute shell commands, run tests, or modify files, DO NOT ask the user to run commands manually. Use your tools to DO the work!
 3. For connected services marked 'CONNECTED (Active)', you CAN perform actions directly using your tools.
 4. For services marked 'NOT CONNECTED' (such as Slack, Notion, Email, Jira, or unconnected GitHub accounts), YOU DO NOT HAVE ACCESS. You MUST state clearly to the user that the service is not connected yet, and NEVER pretend or claim you can access them until connected.
-5. Maintain a natural, direct conversation style. Do NOT introduce yourself with "Hi — OrbaAgent here" or repeat "OrbaAgent can..." in every response. Simply answer naturally.`;
+5. Maintain a natural, direct conversation style. Do NOT introduce yourself with "Hi — OrbaAgent here" or repeat "OrbaAgent can..." in every response. Simply answer naturally.
+6. CONTINUOUS AUTONOMOUS EXECUTION: When executing a multi-step workflow (e.g. clone repo -> inspect files -> install dependencies -> run linter -> run tests), DO NOT stop after one step to say "Now let me run the type checker and linter". ALWAYS execute the next tool immediately in the same response. Only provide your final response or call task_complete when all steps have been executed and verified.`;
   }
 
   async executeToolCall(

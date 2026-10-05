@@ -5,18 +5,25 @@ export class GitHubTool implements ITool {
   public readonly definition: ToolDefinition = {
     name: "github_inspect",
     description:
-      "Inspect a GitHub repository, branches, commits, or files directly via GitHub REST API.",
+      "Inspect a GitHub repository, branches, commits, files, or list authenticated user repositories directly via GitHub REST API.",
     parameters: {
       type: "object",
       properties: {
         action: {
           type: "string",
-          enum: ["inspect_repo", "list_branches", "list_commits", "read_file_content"],
+          enum: [
+            "inspect_repo",
+            "list_branches",
+            "list_commits",
+            "read_file_content",
+            "list_user_repos",
+          ],
           description: "GitHub API inspection action.",
         },
         ownerRepo: {
           type: "string",
-          description: "Repository owner/name (e.g. 'coderxp1/the-infected' or GitHub URL).",
+          description:
+            "Repository owner/name (e.g. 'coderxp1/the-infected' or GitHub URL). Required for repo-specific actions.",
         },
         filePath: {
           type: "string",
@@ -27,7 +34,7 @@ export class GitHubTool implements ITool {
           description: "Branch or commit ref (default 'main' or 'master').",
         },
       },
-      required: ["action", "ownerRepo"],
+      required: ["action"],
     },
   };
 
@@ -55,7 +62,6 @@ export class GitHubTool implements ITool {
     const ownerRepoStr = String(args.ownerRepo || "");
 
     try {
-      const { owner, repo } = this.parseOwnerRepo(ownerRepoStr);
       const token = context.githubToken || process.env.GITHUB_TOKEN;
 
       const headers: Record<string, string> = {
@@ -67,17 +73,49 @@ export class GitHubTool implements ITool {
       }
 
       let apiUrl = "";
+      let owner = "";
+      let repo = "";
+
       switch (action) {
-        case "inspect_repo":
+        case "list_user_repos":
+          if (!token) {
+            return {
+              toolCallId,
+              name: this.definition.name,
+              success: false,
+              output: "",
+              error:
+                "GitHub is not connected. User must connect their GitHub account in the workspace connections before listing authenticated user repositories.",
+              executionTimeMs: Date.now() - startTime,
+            };
+          }
+          apiUrl = "https://api.github.com/user/repos?sort=updated&per_page=15";
+          break;
+        case "inspect_repo": {
+          const parsed = this.parseOwnerRepo(ownerRepoStr);
+          owner = parsed.owner;
+          repo = parsed.repo;
           apiUrl = `https://api.github.com/repos/${owner}/${repo}`;
           break;
-        case "list_branches":
+        }
+        case "list_branches": {
+          const parsed = this.parseOwnerRepo(ownerRepoStr);
+          owner = parsed.owner;
+          repo = parsed.repo;
           apiUrl = `https://api.github.com/repos/${owner}/${repo}/branches`;
           break;
-        case "list_commits":
+        }
+        case "list_commits": {
+          const parsed = this.parseOwnerRepo(ownerRepoStr);
+          owner = parsed.owner;
+          repo = parsed.repo;
           apiUrl = `https://api.github.com/repos/${owner}/${repo}/commits?per_page=10`;
           break;
+        }
         case "read_file_content": {
+          const parsed = this.parseOwnerRepo(ownerRepoStr);
+          owner = parsed.owner;
+          repo = parsed.repo;
           const pathStr = String(args.filePath || "");
           const ref = args.ref ? `?ref=${args.ref}` : "";
           apiUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${pathStr}${ref}`;
@@ -95,7 +133,7 @@ export class GitHubTool implements ITool {
           name: this.definition.name,
           success: false,
           output: "",
-          error: `GitHub API error (${response.status}) for ${owner}/${repo}: ${errText}`,
+          error: `GitHub API error (${response.status}) ${owner && repo ? `for ${owner}/${repo}` : ""}: ${errText}`,
           executionTimeMs: Date.now() - startTime,
         };
       }
@@ -103,7 +141,27 @@ export class GitHubTool implements ITool {
       const data = await response.json();
 
       let summary = "";
-      if (action === "inspect_repo") {
+      if (action === "list_user_repos") {
+        if (!Array.isArray(data) || data.length === 0) {
+          summary = "No repositories found for authenticated user.";
+        } else {
+          summary =
+            `Authenticated User Repositories (${data.length} found):\n` +
+            data
+              .map(
+                (r: {
+                  full_name: string;
+                  private: boolean;
+                  html_url: string;
+                  description: string;
+                }) =>
+                  `- ${r.full_name} (${r.private ? "Private" : "Public"})${
+                    r.description ? `: ${r.description}` : ""
+                  }\n  URL: ${r.html_url}`,
+              )
+              .join("\n");
+        }
+      } else if (action === "inspect_repo") {
         summary = `Repository: ${data.full_name}\nDescription: ${data.description || "N/A"}\nDefault Branch: ${data.default_branch}\nStars: ${data.stargazers_count}\nOpen Issues: ${data.open_issues_count}\nURL: ${data.html_url}`;
       } else if (action === "list_branches") {
         summary = `Branches for ${owner}/${repo}:\n${data.map((b: { name: string }) => `- ${b.name}`).join("\n")}`;

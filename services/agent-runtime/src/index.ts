@@ -4,5 +4,6 @@ export * from "./tools/filesystem.js";
 export * from "./tools/git.js";
 export * from "./tools/github.js";
 export * from "./tools/web.js";
+export * from "./tools/taskComplete.js";
 export * from "./integrations.js";
 export * from "./registry.js";
