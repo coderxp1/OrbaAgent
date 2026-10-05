@@ -7,16 +7,17 @@ export async function GET(request: Request) {
       {
         error: "GitHub OAuth is not configured. Please set GITHUB_CLIENT_ID in server environment.",
       },
-      { status: 500 },
+      { status: 500 }
     );
   }
 
   const { searchParams } = new URL(request.url);
   const customRedirect = searchParams.get("redirect_uri");
 
-  const url = new URL(request.url);
-  const origin = url.origin;
-  const redirectUri = customRedirect || `${origin}/api/auth/github/callback`;
+  const forwardedHost = request.headers.get("x-forwarded-host") || request.headers.get("host");
+  const forwardedProto = request.headers.get("x-forwarded-proto") || "https";
+  const baseUrl = process.env.NEXT_PUBLIC_API_URL || (forwardedHost ? `${forwardedProto}://${forwardedHost}` : "https://orbaagent.dev");
+  const redirectUri = customRedirect || `${baseUrl}/api/auth/github/callback`;
   const state = Math.random().toString(36).substring(2) + Date.now().toString(36);
 
   const githubAuthUrl = new URL("https://github.com/login/oauth/authorize");

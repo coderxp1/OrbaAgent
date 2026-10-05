@@ -117,6 +117,8 @@ services:
       LANGDOCK_API_KEY: ${LANGDOCK_API_KEY}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
       ORBA_ADMIN_TOKEN: ${ORBA_ADMIN_TOKEN}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID}
+      GITHUB_SECRET_ID: ${GITHUB_SECRET_ID}
       ALLOWED_ORIGINS: "https://orbaagent.dev,https://www.orbaagent.dev"
     depends_on:
       api:
