@@ -29,6 +29,12 @@ import { ShellTool } from "./tools/shell.js";
 import { TaskCompleteTool } from "./tools/taskComplete.js";
 import { IToolSearchableRegistry, ToolsSearchTool } from "./tools/toolsSearch.js";
 import { WebFetchTool } from "./tools/web.js";
+import { BrowserTool } from "./tools/browser.js";
+import { PackageManagerTool } from "./tools/packageManager.js";
+import { TestRunnerTool } from "./tools/testRunner.js";
+import { CodeQualityTool } from "./tools/lintTypecheck.js";
+import { MCPProvider } from "./mcp/provider.js";
+import type { McpServerConfig } from "./mcp/transport.js";
 
 export class ToolRegistry implements IToolSearchableRegistry {
   private readonly tools: Map<string, ITool> = new Map();
@@ -40,12 +46,25 @@ export class ToolRegistry implements IToolSearchableRegistry {
   private readonly activeToolNames: Set<string> = new Set();
   private readonly permissionEngine: PermissionEngine;
   private readonly secretManager: SecretManager;
+  private readonly mcpProvider: MCPProvider = new MCPProvider();
 
   constructor() {
     this.permissionEngine = PermissionEngine.getInstance();
     this.secretManager = SecretManager.getInstance();
     this.registerDefaultTools();
     this.resetActiveToolsToCore();
+  }
+
+  public getMcpProvider(): MCPProvider {
+    return this.mcpProvider;
+  }
+
+  public async registerMcpServer(config: McpServerConfig): Promise<ITool[]> {
+    const tools = await this.mcpProvider.registerServer(config);
+    for (const tool of tools) {
+      this.registerTool(tool);
+    }
+    return tools;
   }
 
   private registerDefaultTools(): void {
@@ -69,6 +88,10 @@ export class ToolRegistry implements IToolSearchableRegistry {
       new GitHubTool(),
       new ProcessManagerTool(),
       new WebFetchTool(),
+      new BrowserTool(),
+      new PackageManagerTool(),
+      new TestRunnerTool(),
+      new CodeQualityTool(),
     ];
 
     for (const tool of defaultTools) {
@@ -82,6 +105,10 @@ export class ToolRegistry implements IToolSearchableRegistry {
       this.coreToolNames.add(tool.definition.name);
       this.activeToolNames.add(tool.definition.name);
     }
+  }
+
+  public register(tool: ITool): void {
+    this.registerTool(tool);
   }
 
   public getTool(name: string): ITool | undefined {

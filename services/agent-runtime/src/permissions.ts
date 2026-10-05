@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import type {
   AuditEvent,
   PermissionTier,
@@ -114,7 +115,52 @@ export class PermissionEngine {
       }
     }
 
-    // 4. Tier 4 Destructive action policy check
+    // 4. Browser safety checks
+    if (allowed && toolName === "browser_action") {
+      const url = String(args.url || "");
+      if (url.startsWith("file://")) {
+        let filePath = url;
+        try {
+          filePath = fileURLToPath(url);
+        } catch {
+          filePath = url.replace(/^file:\/\/\/?/, "");
+        }
+        if (!this.isPathWithinWorkspace(filePath, context.workspaceDir)) {
+          allowed = false;
+          denialReason = `Browser cannot access local path outside workspace scope: '${url}'.`;
+        }
+      }
+      if (args.action === "upload" && args.filePath) {
+        if (!this.isPathWithinWorkspace(String(args.filePath), context.workspaceDir)) {
+          allowed = false;
+          denialReason = `Browser upload denied: file '${args.filePath}' is outside workspace scope.`;
+        }
+      }
+    }
+
+    // 5. Package manager policy checks
+    if (allowed && toolName === "package_manager") {
+      const extraArgs = String(args.extraArgs || "");
+      if (extraArgs.includes("-g") || extraArgs.includes("--global")) {
+        allowed = false;
+        denialReason = "Global package installation ('-g' / '--global') is strictly prohibited.";
+      }
+      const action = String(args.action || "");
+      if ((action === "install" || action === "remove") && !isPreApproved) {
+        allowed = false;
+        denialReason = `Package ${action} requires explicit user approval.`;
+      }
+    }
+
+    // 6. Test runner file boundary check
+    if (allowed && toolName === "test_runner" && args.file) {
+      if (!this.isPathWithinWorkspace(String(args.file), context.workspaceDir)) {
+        allowed = false;
+        denialReason = `Test file '${args.file}' resolves outside the allowed workspace boundary.`;
+      }
+    }
+
+    // 7. Tier 4 Destructive action policy check
     if (allowed && riskTier === "TIER_4_DESTRUCTIVE") {
       if (requiresApproval && !isPreApproved) {
         allowed = false;

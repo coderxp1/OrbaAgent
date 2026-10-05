@@ -17,7 +17,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@orbaagent/shared": "workspace:*"
+    "@orbaagent/shared": "workspace:*",
+    "playwright": "^1.63.0"
   },
   "devDependencies": {
     "@types/node": "^22.13.5",

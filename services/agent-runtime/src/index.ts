@@ -10,6 +10,12 @@ export * from "./tools/toolsSearch.js";
 export * from "./tools/environment.js";
 export * from "./tools/processManager.js";
 export * from "./tools/terminalSession.js";
+export * from "./tools/browser.js";
+export * from "./tools/packageManager.js";
+export * from "./tools/testRunner.js";
+export * from "./tools/lintTypecheck.js";
+export * from "./mcp/transport.js";
+export * from "./mcp/provider.js";
 export * from "./memory.js";
 export * from "./changes.js";
 export * from "./integrations.js";
@@ -17,3 +23,4 @@ export * from "./secrets.js";
 export * from "./permissions.js";
 export * from "./router.js";
 export * from "./registry.js";
+

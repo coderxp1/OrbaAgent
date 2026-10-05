@@ -5,6 +5,7 @@ export default defineConfig({
   test: {
     include: ["packages/*/src/**/*.test.ts", "services/*/src/**/*.test.ts"],
     exclude: ["node_modules/**", "dist/**", ".kilo/**"],
+    testTimeout: 30000,
   },
   resolve: {
     alias: {
