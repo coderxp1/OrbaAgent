@@ -120,6 +120,17 @@ services:
       GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID}
       GITHUB_SECRET_ID: ${GITHUB_SECRET_ID}
       ALLOWED_ORIGINS: "https://orbaagent.dev,https://www.orbaagent.dev"
+      # Persistent artifact/upload storage. Explicitly set so the code never
+      # falls back to <cwd>/.uploads inside the read-only image layer.
+      ORBA_UPLOAD_DIR: /data/uploads
+      # Workspace identity for upload/artifact paths. Optional; the application
+      # defaults to "default-tenant" when unset.
+      ORBA_TENANT_ID: ${ORBA_TENANT_ID:-}
+    volumes:
+      # Named volume (not a bind mount): survives container recreation, restart,
+      # and image rebuild. Seeded with node:node ownership from the image layer
+      # at apps/web/Dockerfile.
+      - orba_uploads_data:/data/uploads
     depends_on:
       api:
         condition: service_healthy
@@ -138,6 +149,8 @@ volumes:
   postgres_data:
   redis_data:
   minio_data:
+  # Persistent artifact/upload storage mounted into orba-web at /data/uploads.
+  orba_uploads_data:
 
 networks:
   app-net:

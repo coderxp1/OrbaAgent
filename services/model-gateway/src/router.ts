@@ -1,6 +1,6 @@
 import type { ChatCompletionRequest, ModelSpec, ProviderId } from "@orbaagent/shared";
 import { MODEL_CATALOG, type ModelDefinition, toModelSpec } from "./catalog.js";
-import { ModelHealthTracker, type ModelHealthStatus } from "./health.js";
+import { type ModelHealthStatus, ModelHealthTracker } from "./health.js";
 import { hasConfirmedCapability, isLocalQuotaExhausted } from "./registry.js";
 
 export type TaskComplexity = "high_reasoning" | "coding" | "vision" | "fast_response" | "general";
@@ -208,12 +208,9 @@ export class IntelligenceRouter {
     const isLangdockAvailable =
       langdockHealth.isHealthy && langdockHealth.isAuthenticated && isLangdockConfigured;
 
-    const isOpenRouterConfigured =
-      this.isProviderConfigured("openrouter") || this.isMockAllowed();
+    const isOpenRouterConfigured = this.isProviderConfigured("openrouter") || this.isMockAllowed();
     const isOpenRouterAvailable =
-      openrouterHealth.isHealthy &&
-      openrouterHealth.isAuthenticated &&
-      isOpenRouterConfigured;
+      openrouterHealth.isHealthy && openrouterHealth.isAuthenticated && isOpenRouterConfigured;
 
     // Filter eligible Langdock models from the Model Catalog
     const allLangdockDefs = Object.values(MODEL_CATALOG).filter(
@@ -295,17 +292,29 @@ export class IntelligenceRouter {
       );
     }
 
+    // Human-readable reason ONLY. Internal provider/model identifiers must not
+    // appear here: this string is part of the RoutingDecision contract and could
+    // be surfaced in UI or diagnostics. Detailed IDs stay on primaryModel /
+    // fallbackChain and in the server-side gateway audit log.
+    const langdockFallbacks = fallbackChain.filter((m) => m.provider === "langdock").length;
+    const openrouterFallbacks = fallbackChain.filter((m) => m.provider === "openrouter").length;
+
+    const primaryProviderLabel = primaryModel.provider === "langdock" ? "Langdock" : "OpenRouter";
+    const backupSummary =
+      openrouterFallbacks > 0
+        ? ` and OpenRouter backup (${openrouterFallbacks} route${
+            openrouterFallbacks === 1 ? "" : "s"
+          })`
+        : "";
+
     return {
       primaryModel,
       fallbackChain,
       complexity,
-      reason: `Execution route selected (complexity: ${complexity}, langdockHealth: ${
-        langdockHealth.isHealthy ? "healthy" : "cooldown"
-      }, openrouterHealth: ${
-        openrouterHealth.isHealthy ? "healthy" : "cooldown"
-      }). Selected primary: ${primaryModel.id}, fallbacks: ${fallbackChain
-        .map((m) => m.id)
-        .join(", ")}.`,
+      reason:
+        `Execution route selected: ${primaryProviderLabel} primary with ` +
+        `${langdockFallbacks + openrouterFallbacks} eligible fallback` +
+        `${langdockFallbacks + openrouterFallbacks === 1 ? "" : "s"}${backupSummary}.`,
     };
   }
 
@@ -318,8 +327,6 @@ export class IntelligenceRouter {
     if (isProd) {
       return false; // NEVER allow mocks in production
     }
-    return (
-      process.env.USE_MOCK_PROVIDERS === "true" || process.env.ALLOW_MOCK_PROVIDERS === "true"
-    );
+    return process.env.USE_MOCK_PROVIDERS === "true" || process.env.ALLOW_MOCK_PROVIDERS === "true";
   }
 }

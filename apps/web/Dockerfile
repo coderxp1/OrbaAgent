@@ -31,6 +31,15 @@ COPY --from=build /app/apps/web/public ./apps/web/public
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/apps/web/node_modules ./apps/web/node_modules
 
+# Persistent upload/artifact storage mount point.
+#
+# Created as node:node (uid/gid 1000) so the application user can write to it.
+# When the named volume `orba_uploads_data` is first mounted here, Docker seeds
+# the empty volume with this directory's contents AND ownership, which is what
+# makes the volume writable by uid 1000 without any privileged init container or
+# a blanket chmod of /app. Runs while still root, before USER node below.
+RUN mkdir -p /data/uploads && chown -R node:node /data
+
 WORKDIR /app/apps/web
 USER node
 EXPOSE 3000
