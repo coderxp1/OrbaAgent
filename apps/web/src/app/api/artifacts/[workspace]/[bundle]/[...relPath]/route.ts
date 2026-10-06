@@ -1,5 +1,5 @@
 import { readFile, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { currentWorkspace, inferContentType, uploadBaseDir } from "@/lib/media";
 import { PathContainmentError, resolveWithinBase } from "@orbaagent/shared";
 
 /**
@@ -9,30 +9,6 @@ import { PathContainmentError, resolveWithinBase } from "@orbaagent/shared";
  * where `workspace` is `ORBA_TENANT_ID || "default-tenant"`. This route reuses that
  * same server-side workspace identity rather than introducing a second auth system.
  */
-function currentWorkspace(): string {
-  return process.env.ORBA_TENANT_ID || "default-tenant";
-}
-
-function uploadBaseDir(): string {
-  return process.env.ORBA_UPLOAD_DIR || join(process.cwd(), ".uploads");
-}
-
-function inferContentType(filename: string): string {
-  const lower = filename.toLowerCase();
-  if (lower.endsWith(".png")) return "image/png";
-  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
-  if (lower.endsWith(".gif")) return "image/gif";
-  if (lower.endsWith(".webp")) return "image/webp";
-  if (lower.endsWith(".svg")) return "image/svg+xml";
-  if (lower.endsWith(".txt") || lower.endsWith(".url.txt")) return "text/plain; charset=utf-8";
-  if (lower.endsWith(".json")) return "application/json";
-  if (lower.endsWith(".md")) return "text/markdown; charset=utf-8";
-  if (lower.endsWith(".csv")) return "text/csv; charset=utf-8";
-  if (lower.endsWith(".mp4")) return "video/mp4";
-  if (lower.endsWith(".mov")) return "video/quicktime";
-  if (lower.endsWith(".webm")) return "video/webm";
-  return "application/octet-stream";
-}
 
 export async function GET(
   _req: Request,

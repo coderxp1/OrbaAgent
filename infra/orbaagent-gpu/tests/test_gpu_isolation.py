@@ -1,0 +1,202 @@
+"""Tests that GPU isolation is enforced by configuration, not by luck.
+
+GPU 1 is currently idle, but that is not a safety mechanism. These tests assert
+that the deployment configuration itself makes GPU 0 unreachable from the worker.
+"""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+import pytest
+
+import yaml
+
+GPU_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = GPU_ROOT.parent.parent
+
+COMPOSE_PATH = GPU_ROOT / "compose.yaml"
+DOCKERFILE_PATH = GPU_ROOT / "Dockerfile"
+PROD_COMPOSE_PATH = REPO_ROOT / "docker-compose.prod.yml"
+
+GPU1_UUID = "GPU-82e03c6c-8c27-c076-eb42-7e37e9a5a878"
+GPU0_UUID = "GPU-4634107e-3bae-d5d5-ff97-2355d0b92ce4"
+
+
+@pytest.fixture(scope="module")
+def compose_text() -> str:
+    return COMPOSE_PATH.read_text(encoding="utf-8")
+
+
+@pytest.fixture(scope="module")
+def compose() -> dict:
+    return yaml.safe_load(COMPOSE_PATH.read_text(encoding="utf-8"))
+
+
+@pytest.fixture(scope="module")
+def worker_service(compose) -> dict:
+    return compose["services"]["orbaagent-gpu-worker"]
+
+
+class TestComposePinsGpu1:
+    def test_pins_the_orbaagent_gpu_uuid_in_env(self, worker_service):
+        env = worker_service["environment"]
+        visible = next(e for e in env if str(e).startswith("NVIDIA_VISIBLE_DEVICES="))
+        assert visible.split("=", 1)[1] == GPU1_UUID
+
+    def test_pins_the_orbaagent_gpu_uuid_in_device_reservation(self, worker_service):
+        devices = worker_service["deploy"]["resources"]["reservations"]["devices"]
+        assert len(devices) == 1
+        assert devices[0]["driver"] == "nvidia"
+        assert devices[0]["device_ids"] == [GPU1_UUID]
+        assert devices[0]["capabilities"] == ["gpu"]
+
+    def test_sets_cuda_visible_devices_to_the_single_visible_gpu(self, worker_service):
+        env = worker_service["environment"]
+        assert "CUDA_VISIBLE_DEVICES=0" in env
+
+    def test_gpu0_uuid_never_appears(self, compose_text):
+        assert GPU0_UUID not in compose_text
+
+    def test_the_two_uuid_pins_agree(self, worker_service):
+        """The env pin and the device reservation must name the same GPU."""
+        env = worker_service["environment"]
+        env_uuid = next(
+            str(e).split("=", 1)[1] for e in env if str(e).startswith("NVIDIA_VISIBLE_DEVICES=")
+        )
+        device_uuid = worker_service["deploy"]["resources"]["reservations"]["devices"][0][
+            "device_ids"
+        ][0]
+        assert env_uuid == device_uuid == GPU1_UUID
+
+
+class TestComposeRefusesBroadGpuAccess:
+    def test_no_gpus_all(self, compose_text):
+        # Inspect executable lines only; a comment warning against `--gpus` is not a use.
+        code_lines = [line.split("#", 1)[0] for line in compose_text.splitlines()]
+        code = "\n".join(code_lines)
+        assert "--gpus" not in code
+        assert not re.search(r"^\s*gpus\s*:", code, re.MULTILINE)
+        assert "count: all" not in code
+
+    def test_not_privileged(self, worker_service):
+        assert worker_service.get("privileged") is not True
+
+    def test_no_host_nvidia_device_mounts(self, worker_service):
+        for volume in worker_service.get("volumes", []):
+            assert "/dev/nvidia" not in str(volume)
+
+    def test_no_gpu_capabilities_beyond_gpu(self, worker_service):
+        devices = worker_service["deploy"]["resources"]["reservations"]["devices"]
+        for device in devices:
+            assert device["capabilities"] == ["gpu"]
+
+    def test_no_host_pid_or_ipc_namespace_sharing(self, worker_service):
+        assert worker_service.get("pid") is None
+        assert worker_service.get("ipc") is None
+        assert worker_service.get("network_mode") != "host"
+
+    def test_worker_port_is_loopback_bound_only(self, worker_service):
+        for mapping in worker_service["ports"]:
+            assert str(mapping).startswith("127.0.0.1:"), (
+                "port 8190 must not be published on a public interface"
+            )
+
+
+class TestComposeDoesNotContainSecrets:
+    def test_token_is_supplied_via_a_docker_secret_not_a_literal(self, compose):
+        """The token comes from a secret file; no value is written in compose."""
+        worker = compose["services"]["orbaagent-gpu-worker"]
+        env = [str(e) for e in worker["environment"]]
+        assert "MEDIA_WORKER_TOKEN_FILE=/run/secrets/media_worker_token" in env
+        # No direct value assignment anywhere.
+        assert not any(e.startswith("MEDIA_WORKER_TOKEN=") for e in env)
+        assert "media_worker_token" in [s for s in worker["secrets"]]
+        assert "media_worker_token" in compose["secrets"]
+
+    def test_ingest_token_also_comes_from_a_secret(self, compose):
+        worker = compose["services"]["orbaagent-gpu-worker"]
+        env = [str(e) for e in worker["environment"]]
+        assert "MEDIA_INGEST_TOKEN_FILE=/run/secrets/media_ingest_token" in env
+        assert not any(e.startswith("MEDIA_INGEST_TOKEN=") for e in env)
+
+    def test_legacy_hardcoded_token_is_absent(self, compose_text):
+        assert "orbaagent-gpu-worker-auth" not in compose_text
+
+    def test_no_hardcoded_media_ip(self, compose_text):
+        # The loopback binding is fine; a routable hardcoded IP is not.
+        assert "45.84.65.76" not in compose_text
+
+
+class TestDockerfile:
+    def test_no_privileged_or_gpu_flags(self):
+        text = DOCKERFILE_PATH.read_text(encoding="utf-8")
+        assert "--gpus" not in text
+
+    def test_does_not_bake_a_token(self):
+        text = DOCKERFILE_PATH.read_text(encoding="utf-8")
+        assert "MEDIA_WORKER_TOKEN=" not in text
+        assert "orbaagent-gpu-worker-auth" not in text
+
+    def test_installs_the_real_generation_dependencies(self):
+        """The diffusers backend needs these at runtime, not just torch."""
+        text = DOCKERFILE_PATH.read_text(encoding="utf-8")
+        for package in ("fastapi", "uvicorn", "pydantic", "diffusers", "transformers", "accelerate"):
+            assert package in text, f"{package} must be installed for the real backend"
+        assert "ffmpeg" in text, "ffmpeg/ffprobe is required for video validation"
+
+
+class TestProductionComposeUnaffected:
+    def test_production_compose_has_no_gpu_references(self):
+        text = PROD_COMPOSE_PATH.read_text(encoding="utf-8")
+        lowered = text.lower()
+        assert "nvidia" not in lowered
+        assert "device_ids" not in lowered
+        assert "gpu" not in lowered
+
+    def test_production_compose_does_not_reference_either_gpu_uuid(self):
+        text = PROD_COMPOSE_PATH.read_text(encoding="utf-8")
+        assert GPU0_UUID not in text
+        assert GPU1_UUID not in text
+
+    def test_production_compose_does_not_enable_media_generation(self):
+        text = PROD_COMPOSE_PATH.read_text(encoding="utf-8")
+        assert "MEDIA_WORKER_ENABLED" not in text
+        assert "MEDIA_GENERATION_BACKEND" not in text
+
+
+class TestWorkerSourceHygiene:
+    """The worker source must not contain the GPU 0 UUID or a hardcoded token."""
+
+    def test_no_gpu0_uuid_in_executable_code(self):
+        """GPU 0's UUID may appear only in explanatory comments, never in code.
+
+        Referencing it in a comment documents what must not be touched; referencing
+        it in executable code would mean something could actually select it.
+        """
+        for path in (GPU_ROOT / "orba_gpu").rglob("*.py"):
+            for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+                code = line.split("#", 1)[0]
+                assert GPU0_UUID not in code, (
+                    f"{path.name}:{lineno} references GPU 0 in executable code"
+                )
+
+    def test_no_hardcoded_token_in_worker_package(self):
+        for path in (GPU_ROOT / "orba_gpu").rglob("*.py"):
+            text = path.read_text(encoding="utf-8")
+            assert "orbaagent-gpu-worker-auth" not in text, f"{path.name} contains the old literal"
+
+    def test_default_target_uuid_is_gpu1(self):
+        from orba_gpu.config import DEFAULT_TARGET_GPU_UUID
+
+        assert DEFAULT_TARGET_GPU_UUID == GPU1_UUID
+
+    def test_no_committed_model_weights(self):
+        """Model files are never committed; only code and config."""
+        bad = [
+            p
+            for p in GPU_ROOT.rglob("*")
+            if p.is_file() and p.suffix.lower() in (".safetensors", ".ckpt", ".bin", ".pt", ".pth")
+        ]
+        assert bad == [], f"model weights must not be committed: {bad}"
