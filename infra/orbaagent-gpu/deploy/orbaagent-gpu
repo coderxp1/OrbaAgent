@@ -1,0 +1,192 @@
+#!/bin/sh
+# OrbaAgent GPU worker lifecycle wrapper  —  /usr/local/sbin/orbaagent-gpu
+#
+# PURPOSE
+#   Give the developer account (klaus) the minimum ability to manage ONLY the
+#   OrbaAgent GPU worker, without Docker socket access, Docker API access, or
+#   membership of the `docker` group.
+#
+# THREAT MODEL
+#   `docker` group membership is root-equivalent: a member can mount the host
+#   root filesystem into a container (`docker run -v /:/host`), run privileged
+#   containers, or talk to /var/run/docker.sock directly. On this host that would
+#   allow reading /srv/projects/coderxp and running `--gpus all`, which would
+#   seize GPU 0 and disrupt the CoderXP/ComfyUI workload. This wrapper exists
+#   specifically to avoid granting any of that.
+#
+# WHAT THIS SCRIPT PERMITS (the complete list)
+#   orbaagent-gpu up              start (idempotent)
+#   orbaagent-gpu down            stop and remove the worker container
+#   orbaagent-gpu restart         restart the worker container
+#   orbaagent-gpu status          `docker compose ps` for this project only
+#   orbaagent-gpu logs [N]        last N (default 100) log lines, N in 1..2000
+#   orbaagent-gpu build           build the worker image from the fixed context
+#   orbaagent-gpu validate        assert the running config still pins GPU 1
+#   orbaagent-gpu health          curl the worker's own /health on loopback
+#   orbaagent-gpu help            usage
+#
+# WHAT THIS SCRIPT CANNOT DO
+#   * No arbitrary `docker run`, `docker exec`, `docker build`, `docker pull`
+#   * No raw Docker API / socket access (the caller has neither)
+#   * No `--privileged`, no volume creation, no device flags, no host mounts
+#   * No way to change the compose file, the env file, or the GPU allowlist
+#   * No shell, no command substitution from caller input, no path arguments
+#
+# WHY THE GPU ALLOWLIST CANNOT BE CHANGED BY THE CALLER
+#   1. The compose file path is a literal in this script, which is root-owned
+#      mode 0755 — the caller cannot edit it.
+#   2. The compose file itself is root-owned mode 0644 in a root-owned directory.
+#   3. The environment file is root-owned mode 0600 and is passed with
+#      `--env-file`; the caller's environment is discarded with `env -i`, so no
+#      variable can be injected to override the GPU selection.
+#   4. `validate` re-reads the *rendered* compose config and fails loudly if the
+#      device reservation or NVIDIA_VISIBLE_DEVICES is not the expected UUID.
+#   5. No subcommand forwards extra arguments to docker.
+#
+# EXIT CODES
+#   0 success · 2 usage error · 3 precondition failure · 4 validation failure
+#   otherwise the underlying docker exit status
+
+set -u
+
+# --- fixed, root-owned configuration ---------------------------------------
+COMPOSE_FILE="/etc/orbaagent/gpu-worker/compose.yaml"
+ENV_FILE="/etc/orbaagent/gpu-worker/worker.env"
+PROJECT_NAME="orbaagent-gpu"
+WORKER_CONTAINER="orbaagent-gpu-worker"
+EXPECTED_GPU_UUID="GPU-82e03c6c-8c27-c076-eb42-7e37e9a5a878"
+FORBIDDEN_GPU_UUID="GPU-4634107e-3bae-d5d5-ff97-2355d0b92ce4"
+HEALTH_URL="http://127.0.0.1:8190/health"
+DOCKER="/usr/bin/docker"
+
+# A hardened environment. The caller's variables never reach docker.
+docker_compose() {
+    env -i \
+        PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+        HOME=/root \
+        "$DOCKER" compose \
+        --project-name "$PROJECT_NAME" \
+        --env-file "$ENV_FILE" \
+        -f "$COMPOSE_FILE" \
+        "$@"
+}
+
+die() {
+    printf 'orbaagent-gpu: %s\n' "$1" >&2
+    exit "${2:-3}"
+}
+
+preconditions() {
+    [ -r "$COMPOSE_FILE" ] || die "compose file missing or unreadable: $COMPOSE_FILE"
+    [ -r "$ENV_FILE" ] || die "env file missing or unreadable: $ENV_FILE"
+    [ -x "$DOCKER" ] || die "docker not found at $DOCKER"
+
+    # Refuse to operate if the compose file is writable by anyone but root.
+    if [ "$(stat -c '%U' "$COMPOSE_FILE" 2>/dev/null)" != "root" ]; then
+        die "refusing to run: $COMPOSE_FILE is not owned by root"
+    fi
+    if [ "$(stat -c '%a' "$COMPOSE_FILE" 2>/dev/null)" != "644" ]; then
+        die "refusing to run: $COMPOSE_FILE must be mode 644"
+    fi
+    if [ "$(stat -c '%U' "$ENV_FILE" 2>/dev/null)" != "root" ]; then
+        die "refusing to run: $ENV_FILE is not owned by root"
+    fi
+}
+
+# Post-condition check: the RENDERED configuration must still pin GPU 1 exactly
+# and must not mention GPU 0 anywhere.
+validate_isolation() {
+    rendered="$(docker_compose config 2>/dev/null)" || die "cannot render compose config" 4
+
+    if ! printf '%s' "$rendered" | grep -q "device_ids:"; then
+        die "validation failed: no device reservation in rendered config" 4
+    fi
+    if ! printf '%s' "$rendered" | grep -q -- "$EXPECTED_GPU_UUID"; then
+        die "validation failed: expected GPU $EXPECTED_GPU_UUID not present" 4
+    fi
+    if printf '%s' "$rendered" | grep -q -- "$FORBIDDEN_GPU_UUID"; then
+        die "validation failed: GPU 0 ($FORBIDDEN_GPU_UUID) appears in the config" 4
+    fi
+    if printf '%s' "$rendered" | grep -qiE 'privileged:[[:space:]]*true'; then
+        die "validation failed: privileged mode enabled" 4
+    fi
+    if printf '%s' "$rendered" | grep -qiE '/dev/nvidia'; then
+        die "validation failed: host NVIDIA device mount present" 4
+    fi
+    if printf '%s' "$rendered" | grep -qiE 'count:[[:space:]]*all|driver:[[:space:]]*nvidia[[:space:]]*$'; then
+        die "validation failed: a broad-GPU selector is present" 4
+    fi
+
+    printf 'isolation OK: worker is pinned to %s and GPU 0 is absent\n' "$EXPECTED_GPU_UUID"
+}
+
+usage() {
+    cat <<'USAGE'
+OrbaAgent GPU worker control
+
+Usage: orbaagent-gpu <command> [args]
+
+  up                 start the worker (idempotent), then validate isolation
+  down               stop and remove the worker container
+  restart            restart the worker container
+  status             show container status for this project
+  logs [lines]       show the last N log lines (default 100, max 2000)
+  build              build the worker image from the fixed build context
+  validate           assert the rendered config still pins GPU 1 only
+  health             query the worker /health endpoint on loopback
+  help               this message
+
+This wrapper deliberately cannot perform arbitrary Docker operations.
+USAGE
+}
+
+preconditions
+
+case "${1:-}" in
+    up)
+        docker_compose up -d || exit $?
+        validate_isolation || exit $?
+        ;;
+    down)
+        docker_compose down || exit $?
+        ;;
+    restart)
+        docker_compose restart || exit $?
+        validate_isolation || exit $?
+        ;;
+    status)
+        docker_compose ps || exit $?
+        ;;
+    logs)
+        lines="${2:-100}"
+        # Strictly numeric, bounded. No flags, no service names, no injection.
+        case "$lines" in
+            ''|*[!0-9]*) die "logs argument must be a positive integer" 2 ;;
+        esac
+        if [ "$lines" -lt 1 ] || [ "$lines" -gt 2000 ]; then
+            die "logs argument must be between 1 and 2000" 2
+        fi
+        docker_compose logs --tail "$lines" || exit $?
+        ;;
+    build)
+        docker_compose build || exit $?
+        validate_isolation || exit $?
+        ;;
+    validate)
+        validate_isolation || exit $?
+        ;;
+    health)
+        # Loopback only; the caller never supplies the URL.
+        if command -v curl >/dev/null 2>&1; then
+            curl -fsS --max-time 5 "$HEALTH_URL" || die "worker /health did not respond" 3
+        else
+            die "curl not available" 3
+        fi
+        ;;
+    help|--help|-h|"")
+        usage
+        ;;
+    *)
+        die "unknown command: $1 (see 'orbaagent-gpu help')" 2
+        ;;
+esac

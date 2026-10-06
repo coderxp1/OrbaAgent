@@ -170,17 +170,33 @@ class TestWorkerSourceHygiene:
     """The worker source must not contain the GPU 0 UUID or a hardcoded token."""
 
     def test_no_gpu0_uuid_in_executable_code(self):
-        """GPU 0's UUID may appear only in explanatory comments, never in code.
+        """GPU 0's UUID may appear only in comments or in the isolation validator.
 
-        Referencing it in a comment documents what must not be touched; referencing
-        it in executable code would mean something could actually select it.
+        Referencing it in a comment documents what must not be touched. The
+        validator must name it in code because rejecting that UUID is its entire
+        purpose. Anything else referencing GPU 0 in code would mean something
+        could actually select it.
         """
+        allowed = {"deploy_validation.py"}
         for path in (GPU_ROOT / "orba_gpu").rglob("*.py"):
+            if path.name in allowed:
+                continue
             for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
                 code = line.split("#", 1)[0]
                 assert GPU0_UUID not in code, (
                     f"{path.name}:{lineno} references GPU 0 in executable code"
                 )
+
+    def test_validator_is_the_only_module_naming_gpu0_in_code(self):
+        """Guard the exception above so it cannot silently spread."""
+        namers = set()
+        for path in (GPU_ROOT / "orba_gpu").rglob("*.py"):
+            code = "\n".join(
+                line.split("#", 1)[0] for line in path.read_text(encoding="utf-8").splitlines()
+            )
+            if GPU0_UUID in code:
+                namers.add(path.name)
+        assert namers <= {"deploy_validation.py"}, f"unexpected GPU 0 references: {namers}"
 
     def test_no_hardcoded_token_in_worker_package(self):
         for path in (GPU_ROOT / "orba_gpu").rglob("*.py"):

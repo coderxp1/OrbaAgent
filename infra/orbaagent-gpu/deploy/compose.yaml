@@ -1,0 +1,82 @@
+version: '3.8'
+
+# OrbaAgent GPU media worker — DEPLOYMENT COPY
+#
+# Installed to /etc/orbaagent/gpu-worker/compose.yaml, root:root 0644, by
+# provision-gpu-host.sh. It is deliberately NOT the copy inside the working
+# repository, so editing the repository cannot change what runs.
+#
+# GPU ISOLATION IS ENFORCED BY CONFIGURATION
+# ------------------------------------------
+# This worker may only ever use GPU 1 (GPU-82e03c6c-8c27-c076-eb42-7e37e9a5a878).
+# GPU 0 (GPU-4634107e-...) runs the CoderXP/ComfyUI workload and must never be
+# selected. Three independent layers:
+#
+#   1. deploy.resources.reservations.devices.device_ids -> the NVIDIA container
+#      runtime mounts ONLY that device's nodes, so GPU 0 is not in the
+#      container's device namespace at all.
+#   2. NVIDIA_VISIBLE_DEVICES -> restricts the runtime device set to the UUID.
+#   3. CUDA_VISIBLE_DEVICES=0 -> renumbers the single visible device to index 0.
+#
+# The worker also queries nvidia-smi by explicit UUID, never by index.
+#
+# DO NOT add `--gpus all`, `privileged: true`, /dev/nvidia* host mounts, or host
+# networking. deploy/check_compose_isolation.py asserts all of this, and the
+# root-owned wrapper re-validates it before and after every start.
+
+services:
+  orbaagent-gpu-worker:
+    container_name: orbaagent-gpu-worker
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      # Loopback only. Production reaches the worker over the WireGuard tunnel by
+      # dialling 10.77.0.2:8190, which terminates here; 8190 is never published
+      # on eth0 and never reachable from the public internet.
+      - "127.0.0.1:8190:8190"
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=GPU-82e03c6c-8c27-c076-eb42-7e37e9a5a878
+      - CUDA_VISIBLE_DEVICES=0
+      - MEDIA_WORKER_PORT=8190
+      - MEDIA_WORKER_GPU_UUID=GPU-82e03c6c-8c27-c076-eb42-7e37e9a5a878
+      # Backend and models come from the root-owned worker.env so that a change
+      # to the repository cannot silently enable generation.
+      - MEDIA_GENERATION_BACKEND=${MEDIA_GENERATION_BACKEND:-}
+      - MEDIA_GENERATION_IMAGE_MODEL=${MEDIA_GENERATION_IMAGE_MODEL:-black-forest-labs/FLUX.1-schnell}
+      - MEDIA_GENERATION_VIDEO_MODEL=${MEDIA_GENERATION_VIDEO_MODEL:-Wan-AI/Wan2.1-T2V-1.3B}
+      - MEDIA_MODELS_DIR=/models
+      - MEDIA_OUTPUT_DIR=/output
+      - MEDIA_MAX_CONCURRENT_GENERATIONS=${MEDIA_MAX_CONCURRENT_GENERATIONS:-1}
+      # Secrets are files, never values. They do not appear in `docker inspect`.
+      - MEDIA_WORKER_TOKEN_FILE=/run/secrets/media_worker_token
+      - MEDIA_INGEST_URL=${MEDIA_INGEST_URL:-}
+      - MEDIA_INGEST_TOKEN_FILE=/run/secrets/media_ingest_token
+      - ORBA_TENANT_ID=${ORBA_TENANT_ID:-}
+    secrets:
+      - media_worker_token
+      - media_ingest_token
+    volumes:
+      - ./models:/models
+      - ./output:/output
+      - ./data:/data
+    networks:
+      - orbaagent_media_net
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ['GPU-82e03c6c-8c27-c076-eb42-7e37e9a5a878']
+              capabilities: [gpu]
+
+secrets:
+  media_worker_token:
+    file: ./secrets/media_worker_token
+  media_ingest_token:
+    file: ./secrets/media_ingest_token
+
+networks:
+  orbaagent_media_net:
+    driver: bridge

@@ -1,0 +1,36 @@
+# OrbaAgent GPU worker delegation  —  /etc/sudoers.d/orbaagent-gpu
+#
+# Install with:
+#   sudo install -o root -g root -m 0440 \
+#     infra/orbaagent-gpu/deploy/sudoers-orbaagent-gpu \
+#     /etc/sudoers.d/orbaagent-gpu
+#   sudo visudo -c          # MUST pass before you rely on it
+#
+# This grants klaus permission to run exactly one root-owned script, with no
+# argument wildcards that could be abused. The script itself performs all
+# argument validation and cannot be edited by klaus (root:root 0755).
+#
+# DELIBERATELY ABSENT — do not add:
+#   * docker, docker-compose, dockerd, or anything that reaches the Docker socket
+#   * a `docker` group membership for klaus
+#   * systemctl, journalctl, or a shell
+#   * any wildcard such as ALL or /usr/bin/docker *
+#
+# Why no wildcard: `klaus ALL=(root) NOPASSWD: /usr/local/sbin/orbaagent-gpu *`
+# would let klaus pass arbitrary trailing arguments to the wrapper. The wrapper
+# ignores extras, but the tighter form below leaves no room for a future edit to
+# the wrapper to become exploitable.
+
+klaus ALL=(root) NOPASSWD: /usr/local/sbin/orbaagent-gpu up
+klaus ALL=(root) NOPASSWD: /usr/local/sbin/orbaagent-gpu down
+klaus ALL=(root) NOPASSWD: /usr/local/sbin/orbaagent-gpu restart
+klaus ALL=(root) NOPASSWD: /usr/local/sbin/orbaagent-gpu status
+klaus ALL=(root) NOPASSWD: /usr/local/sbin/orbaagent-gpu build
+klaus ALL=(root) NOPASSWD: /usr/local/sbin/orbaagent-gpu validate
+klaus ALL=(root) NOPASSWD: /usr/local/sbin/orbaagent-gpu health
+
+# `logs` takes one bounded numeric argument. The `[0-9]*` pattern constrains it
+# to digits only, so no flags or service names can be smuggled in.
+klaus ALL=(root) NOPASSWD: /usr/local/sbin/orbaagent-gpu logs [0-9]*
+klaus ALL=(root) NOPASSWD: /usr/local/sbin/orbaagent-gpu logs
+klaus ALL=(root) NOPASSWD: /usr/local/sbin/orbaagent-gpu help

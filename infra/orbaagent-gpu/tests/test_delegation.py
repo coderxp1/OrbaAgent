@@ -1,0 +1,357 @@
+"""Tests for the least-privilege delegation design.
+
+These are static assertions over the checked-in reference artifacts. They cannot
+prove what is installed on the host, but they do prevent the design from drifting
+into something broader than intended — which is the realistic failure mode when
+someone "just adds one more command" later.
+"""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+import pytest
+
+from orba_gpu.deploy_validation import (
+    EXPECTED_GPU_UUID,
+    FORBIDDEN_GPU_UUID,
+    IsolationError,
+    validate_isolation,
+    violations,
+)
+
+GPU_ROOT = Path(__file__).resolve().parent.parent
+DEPLOY = GPU_ROOT / "deploy"
+REPO_ROOT = GPU_ROOT.parent.parent
+
+SUDOERS = DEPLOY / "sudoers-orbaagent-gpu"
+WRAPPER = DEPLOY / "orbaagent-gpu"
+DEPLOY_COMPOSE = DEPLOY / "compose.yaml"
+WORKER_ENV = DEPLOY / "worker.env.example"
+PROVISION = DEPLOY / "provision-gpu-host.sh"
+WG_GPU = DEPLOY / "wireguard" / "wg-orba.gpu-host.conf.example"
+WG_PROD = DEPLOY / "wireguard" / "wg-orba.production.conf.example"
+
+
+# ---------------------------------------------------------------------------
+# Isolation validator
+# ---------------------------------------------------------------------------
+
+
+class TestIsolationValidator:
+    def test_accepts_the_real_deployment_compose(self):
+        validate_isolation(DEPLOY_COMPOSE.read_text(encoding="utf-8"))
+
+    def test_accepts_the_repository_compose(self):
+        validate_isolation((GPU_ROOT / "compose.yaml").read_text(encoding="utf-8"))
+
+    def test_rejects_gpu0_uuid(self):
+        text = f"device_ids: ['{FORBIDDEN_GPU_UUID}']\nNVIDIA_VISIBLE_DEVICES=all\nCUDA_VISIBLE_DEVICES=0"
+        with pytest.raises(IsolationError, match="GPU 0"):
+            validate_isolation(text)
+
+    def test_rejects_missing_device_reservation(self):
+        text = f"NVIDIA_VISIBLE_DEVICES={EXPECTED_GPU_UUID}\nCUDA_VISIBLE_DEVICES=0"
+        with pytest.raises(IsolationError, match="device reservation"):
+            validate_isolation(text)
+
+    def test_rejects_missing_nvidia_visible_devices(self):
+        text = f"device_ids: ['{EXPECTED_GPU_UUID}']\nCUDA_VISIBLE_DEVICES=0"
+        with pytest.raises(IsolationError, match="NVIDIA_VISIBLE_DEVICES"):
+            validate_isolation(text)
+
+    def test_rejects_gpus_all_flag(self):
+        text = f"device_ids: ['{EXPECTED_GPU_UUID}']\nNVIDIA_VISIBLE_DEVICES={EXPECTED_GPU_UUID}\nCUDA_VISIBLE_DEVICES=0\ncommand: --gpus all"
+        with pytest.raises(IsolationError, match="--gpus"):
+            validate_isolation(text)
+
+    def test_rejects_count_all(self):
+        text = f"device_ids: ['{EXPECTED_GPU_UUID}']\nNVIDIA_VISIBLE_DEVICES={EXPECTED_GPU_UUID}\nCUDA_VISIBLE_DEVICES=0\ncount: all"
+        with pytest.raises(IsolationError, match="count: all"):
+            validate_isolation(text)
+
+    def test_rejects_privileged(self):
+        text = f"device_ids: ['{EXPECTED_GPU_UUID}']\nNVIDIA_VISIBLE_DEVICES={EXPECTED_GPU_UUID}\nCUDA_VISIBLE_DEVICES=0\nprivileged: true"
+        with pytest.raises(IsolationError, match="privileged"):
+            validate_isolation(text)
+
+    def test_rejects_host_nvidia_mounts(self):
+        text = f"device_ids: ['{EXPECTED_GPU_UUID}']\nNVIDIA_VISIBLE_DEVICES={EXPECTED_GPU_UUID}\nCUDA_VISIBLE_DEVICES=0\n- /dev/nvidia0:/dev/nvidia0"
+        with pytest.raises(IsolationError, match="/dev/nvidia"):
+            validate_isolation(text)
+
+    def test_rejects_host_networking(self):
+        text = f"device_ids: ['{EXPECTED_GPU_UUID}']\nNVIDIA_VISIBLE_DEVICES={EXPECTED_GPU_UUID}\nCUDA_VISIBLE_DEVICES=0\nnetwork_mode: host"
+        with pytest.raises(IsolationError, match="host networking"):
+            validate_isolation(text)
+
+    def test_rejects_public_port_publication(self):
+        text = (
+            f"device_ids: ['{EXPECTED_GPU_UUID}']\n"
+            f"NVIDIA_VISIBLE_DEVICES={EXPECTED_GPU_UUID}\n"
+            f"CUDA_VISIBLE_DEVICES=0\n"
+            f"- 0.0.0.0:8190:8190"
+        )
+        with pytest.raises(IsolationError, match="8190"):
+            validate_isolation(text)
+
+    def test_rejects_empty_config(self):
+        with pytest.raises(IsolationError, match="empty"):
+            validate_isolation("   \n\n")
+
+    def test_comments_about_forbidden_settings_do_not_trip_the_check(self):
+        """Documentation explaining what NOT to do must be allowed."""
+        text = (
+            f"# never use --gpus all, privileged: true, or /dev/nvidia mounts\n"
+            f"device_ids: ['{EXPECTED_GPU_UUID}']\n"
+            f"NVIDIA_VISIBLE_DEVICES={EXPECTED_GPU_UUID}\n"
+            f"CUDA_VISIBLE_DEVICES=0\n"
+        )
+        validate_isolation(text)
+
+    def test_violations_returns_a_list(self):
+        assert violations(DEPLOY_COMPOSE.read_text(encoding="utf-8")) == []
+        assert violations("nothing here") != []
+
+
+# ---------------------------------------------------------------------------
+# Sudoers policy
+# ---------------------------------------------------------------------------
+
+
+class TestSudoersPolicy:
+    @pytest.fixture(scope="class")
+    def text(self) -> str:
+        return SUDOERS.read_text(encoding="utf-8")
+
+    @pytest.fixture(scope="class")
+    def rules(self, text) -> list[str]:
+        return [
+            line.strip()
+            for line in text.splitlines()
+            if line.strip().startswith("klaus ")
+        ]
+
+    def test_grants_only_the_wrapper(self, rules):
+        assert rules, "no rules found"
+        for rule in rules:
+            assert "/usr/local/sbin/orbaagent-gpu" in rule, rule
+
+    def test_never_grants_docker(self, text):
+        code = "\n".join(line.split("#", 1)[0] for line in text.splitlines())
+        for forbidden in ("/usr/bin/docker", "/usr/bin/dockerd", "docker-compose", "/var/run/docker.sock"):
+            assert forbidden not in code, f"sudoers must not reference {forbidden}"
+
+    def test_never_grants_a_shell_or_systemctl(self, text):
+        code = "\n".join(line.split("#", 1)[0] for line in text.splitlines())
+        for forbidden in ("/bin/sh", "/bin/bash", "systemctl", "journalctl", "su ", "visudo"):
+            assert forbidden not in code, f"sudoers must not grant {forbidden}"
+
+    def test_no_bare_all_grant(self, text):
+        code = "\n".join(line.split("#", 1)[0] for line in text.splitlines())
+        assert not re.search(r"klaus\s+ALL=\(ALL\)\s+NOPASSWD:\s*ALL", code)
+        assert "NOPASSWD: ALL" not in code
+
+    def test_no_wildcard_after_the_wrapper(self, rules):
+        """A trailing `*` would let arbitrary arguments reach the wrapper."""
+        for rule in rules:
+            assert not rule.endswith(" *"), f"wildcard rule is too broad: {rule}"
+
+    def test_logs_argument_is_numeric_only(self, rules):
+        logs_rules = [r for r in rules if "logs" in r]
+        assert logs_rules, "expected a logs rule"
+        for rule in logs_rules:
+            if rule.endswith("logs"):
+                continue
+            assert rule.endswith("logs [0-9]*"), f"logs rule must constrain digits: {rule}"
+
+    def test_covers_the_documented_commands(self, rules):
+        granted = set()
+        for rule in rules:
+            tail = rule.split("/usr/local/sbin/orbaagent-gpu", 1)[1].strip()
+            granted.add(tail or "help")
+        for expected in ("up", "down", "restart", "status", "build", "validate", "health", "help"):
+            assert expected in granted, f"{expected} should be delegable"
+        # And nothing beyond that list.
+        allowed_prefixes = {
+            "up", "down", "restart", "status", "build", "validate", "health", "help", "logs", "logs [0-9]*",
+        }
+        assert granted <= allowed_prefixes, f"unexpected grants: {granted - allowed_prefixes}"
+
+
+# ---------------------------------------------------------------------------
+# Wrapper script
+# ---------------------------------------------------------------------------
+
+
+class TestWrapperScript:
+    @pytest.fixture(scope="class")
+    def text(self) -> str:
+        return WRAPPER.read_text(encoding="utf-8")
+
+    def test_every_docker_invocation_uses_literal_arguments(self, text):
+        """The case statement must pass fixed subcommands, never raw caller input.
+
+        `docker_compose` does forward its own "$@" internally, which is correct —
+        the safety property is that every CALL SITE supplies a literal, and that
+        the only caller-derived value (`logs`) is validated to be numeric first.
+        """
+        code = "\n".join(line.split("#", 1)[0] for line in text.splitlines())
+
+        # Every call site must be a literal compose subcommand.
+        call_sites = re.findall(r"docker_compose\s+([^\n|&;]*?)\s*(?:\|\||$)", code, re.MULTILINE)
+        assert call_sites, "expected docker_compose call sites"
+        for site in call_sites:
+            assert not site.strip().startswith('"$'), f"raw caller input forwarded: {site!r}"
+            assert "$1" not in site and "$@" not in site, f"raw caller input forwarded: {site!r}"
+
+        # The one dynamic value is the log line count, and it is digit-guarded.
+        assert "logs)" in code
+        assert '[!0-9]*' in code, "logs argument must be rejected unless numeric"
+
+    def test_no_arbitrary_docker_subcommands(self, text):
+        code = "\n".join(line.split("#", 1)[0] for line in text.splitlines())
+        for forbidden in ("docker run", "docker exec", "docker create", "docker cp", "docker pull"):
+            assert forbidden not in code, f"wrapper must not perform {forbidden}"
+
+    def test_case_statement_enumerates_every_command(self, text):
+        for command in ("up)", "down)", "restart)", "status)", "logs)", "build)", "validate)", "health)", "help|"):
+            assert command in text, f"missing case branch {command}"
+
+    def test_rejects_unknown_commands(self, text):
+        assert "unknown command" in text
+
+    def test_validates_isolation_after_start(self, text):
+        assert "validate_isolation" in text
+        # `up` and `restart` must both re-validate.
+        up_block = text.split("    up)", 1)[1].split(";;", 1)[0]
+        assert "validate_isolation" in up_block
+        restart_block = text.split("    restart)", 1)[1].split(";;", 1)[0]
+        assert "validate_isolation" in restart_block
+
+    def test_uses_a_literal_compose_path(self, text):
+        assert 'COMPOSE_FILE="/etc/orbaagent/gpu-worker/compose.yaml"' in text
+
+    def test_uses_env_i_to_discard_caller_environment(self, text):
+        assert "env -i" in text
+
+    def test_refuses_when_config_is_not_root_owned(self, text):
+        assert "is not owned by root" in text
+        assert "must be mode 644" in text
+
+    def test_no_arbitrary_execution_primitives(self, text):
+        code = "\n".join(line.split("#", 1)[0] for line in text.splitlines())
+        for forbidden in ("eval ", "sh -c", "bash -c"):
+            assert forbidden not in code, f"wrapper must not use {forbidden}"
+
+    def test_has_a_usage_command(self, text):
+        assert "usage()" in text
+
+    def test_bounds_log_lines(self, text):
+        assert '"$lines" -gt 2000' in text
+        assert '[!0-9]*' in text
+
+
+# ---------------------------------------------------------------------------
+# Deployment compose and env
+# ---------------------------------------------------------------------------
+
+
+class TestDeploymentArtifacts:
+    def test_deployment_compose_pins_gpu1(self):
+        text = DEPLOY_COMPOSE.read_text(encoding="utf-8")
+        assert EXPECTED_GPU_UUID in text
+        assert FORBIDDEN_GPU_UUID not in text
+        validate_isolation(text)
+
+    def test_worker_env_contains_no_secrets(self):
+        text = WORKER_ENV.read_text(encoding="utf-8")
+        for name in ("TOKEN=", "PASSWORD=", "SECRET=", "KEY="):
+            for line in text.splitlines():
+                stripped = line.strip()
+                if stripped.startswith("#") or "=" not in stripped:
+                    continue
+                assert not stripped.startswith(name), f"secret-looking entry: {stripped}"
+
+    def test_worker_env_does_not_pin_gpu_settings(self):
+        """GPU pins must live only in the root-owned compose file."""
+        code = "\n".join(
+            line.split("#", 1)[0] for line in WORKER_ENV.read_text(encoding="utf-8").splitlines()
+        )
+        assert "NVIDIA_VISIBLE_DEVICES" not in code
+        assert "CUDA_VISIBLE_DEVICES" not in code
+        assert "device_ids" not in code
+
+    def test_worker_env_points_ingest_at_the_tunnel_not_the_internet(self):
+        text = WORKER_ENV.read_text(encoding="utf-8")
+        assert "MEDIA_INGEST_URL=http://10.77.0.1/api/internal/media/ingest" in text
+        assert "45.84.65.76" not in text
+
+    def test_provisioning_script_never_touches_coderxp_write_paths(self):
+        text = PROVISION.read_text(encoding="utf-8")
+        for line in text.splitlines():
+            code = line.split("#", 1)[0]
+            assert "chown" not in code or "coderxp" not in code
+            assert "chmod" not in code or "coderxp" not in code
+            assert not re.search(r"\brm\s+-rf\s+/srv/projects/coderxp", code)
+
+    def test_provisioning_script_does_not_add_the_docker_group(self):
+        code = "\n".join(
+            line.split("#", 1)[0] for line in PROVISION.read_text(encoding="utf-8").splitlines()
+        )
+        assert "usermod" not in code or "docker" not in code
+        assert "gpasswd" not in code
+
+    def test_provisioning_validates_sudoers_before_installing(self):
+        text = PROVISION.read_text(encoding="utf-8")
+        assert "visudo -cf" in text
+        assert text.index("visudo -cf") < text.index('install -o root -g root -m 0440 "$tmp_sudoers"')
+
+    def test_provisioning_uses_traverse_only_acl(self):
+        assert "u:${WORKER_USER}:--x" in PROVISION.read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# WireGuard design
+# ---------------------------------------------------------------------------
+
+
+class TestWireGuardDesign:
+    def test_gpu_side_listens_only_for_the_production_peer(self):
+        text = WG_GPU.read_text(encoding="utf-8")
+        assert "Address = 10.77.0.2/32" in text
+        assert "ListenPort = 51820" in text
+        assert "AllowedIPs = 10.77.0.1/32" in text
+
+    def test_production_side_is_the_initiator(self):
+        text = WG_PROD.read_text(encoding="utf-8")
+        assert "Address = 10.77.0.1/32" in text
+        assert "Endpoint = 45.84.65.76:51820" in text
+        assert "AllowedIPs = 10.77.0.2/32" in text
+        # A client side must not listen.
+        assert "ListenPort" not in "\n".join(
+            line.split("#", 1)[0] for line in text.splitlines()
+        )
+
+    def test_no_route_covers_a_public_subnet(self):
+        """AllowedIPs must be a single host, never 0.0.0.0/0 or the GPU host's /25."""
+        for path in (WG_GPU, WG_PROD):
+            for line in path.read_text(encoding="utf-8").splitlines():
+                code = line.split("#", 1)[0]
+                if "AllowedIPs" in code:
+                    assert "0.0.0.0/0" not in code
+                    assert "45.84.65.0/25" not in code
+                    assert "/32" in code
+
+    def test_no_private_keys_are_committed(self):
+        for path in (WG_GPU, WG_PROD):
+            text = path.read_text(encoding="utf-8")
+            for line in text.splitlines():
+                if line.strip().startswith("PrivateKey"):
+                    # Only placeholder form is acceptable.
+                    assert "<" in line and ">" in line, f"real key committed in {path.name}"
+
+    def test_examples_are_named_as_examples(self):
+        for path in (WG_GPU, WG_PROD):
+            assert path.name.endswith(".example")
