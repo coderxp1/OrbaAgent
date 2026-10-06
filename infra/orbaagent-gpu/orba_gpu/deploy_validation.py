@@ -103,3 +103,43 @@ def violations(config_text: str) -> list[str]:
         return []
     except IsolationError as exc:
         return [str(exc)]
+
+
+def main(argv: list[str] | None = None) -> int:
+    """CLI entry point.
+
+        docker compose config | python3 -m orba_gpu.deploy_validation -
+        python3 -m orba_gpu.deploy_validation /etc/orbaagent/gpu-worker/compose.yaml
+
+    Exit codes: 0 ok · 2 usage · 3 unreadable input · 4 isolation violation
+    """
+    import sys
+    from pathlib import Path
+
+    args = list(sys.argv if argv is None else argv)
+
+    if len(args) != 2:
+        print("usage: python3 -m orba_gpu.deploy_validation <config-file|->", file=sys.stderr)
+        return 2
+
+    if args[1] == "-":
+        text = sys.stdin.read()
+    else:
+        try:
+            text = Path(args[1]).read_text(encoding="utf-8")
+        except OSError as exc:
+            print(f"cannot read {args[1]}: {exc}", file=sys.stderr)
+            return 3
+
+    found = violations(text)
+    if found:
+        for item in found:
+            print(f"ISOLATION FAILURE: {item}", file=sys.stderr)
+        return 4
+
+    print(f"isolation OK: pinned to {EXPECTED_GPU_UUID}, GPU 0 absent")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

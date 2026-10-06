@@ -2,11 +2,28 @@
 # OrbaAgent GPU host provisioning — ONE-TIME, ROOT ONLY.
 #
 # Run as root on 45.84.65.76:
-#     sudo bash provision-gpu-host.sh
+#     sudo bash /tmp/orbaagent-provisioning-<id>/deploy/provision-gpu-host.sh
+#
+# The script locates its source bundle from its own path, so it works when run
+# from the staging directory as well as from a checkout. Override with:
+#     SOURCE_DIR=/path/to/bundle sudo -E bash .../provision-gpu-host.sh
 #
 # This script is intentionally NOT delegated to klaus. The sudoers policy grants
 # klaus only the orbaagent-gpu wrapper, so host provisioning stays a root action
 # that is run deliberately and audited.
+#
+# IMMUTABILITY MODEL
+#   /etc/orbaagent/gpu-worker/     root:root, klaus CANNOT write
+#     compose.yaml                 the GPU allowlist lives here
+#     worker.env                   backend and ingest configuration
+#     secrets/                     worker tokens, root:root 0600
+#     src/                         build context: Dockerfile + worker code
+#   /srv/projects/orbaagent-gpu/   klaus-owned working directory (no code, no
+#                                  config) — rendered artifacts and scratch only
+#
+#   Editing anything under /etc/orbaagent/gpu-worker/ requires root, so klaus
+#   cannot alter the GPU allowlist, the privileged settings, the host mounts, or
+#   the networking. This is what makes the delegation safe.
 #
 # It is idempotent and every step is guarded. It DOES NOT:
 #   * touch /srv/projects/coderxp
@@ -18,8 +35,14 @@
 
 set -euo pipefail
 
+# Locate the bundle this script came from (…/deploy/ → bundle root).
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SOURCE_DIR="${SOURCE_DIR:-$(dirname "$SCRIPT_DIR")}"
+
 REPO_DIR="${REPO_DIR:-/srv/projects/orbaagent-gpu}"
 DEPLOY_DIR="/etc/orbaagent/gpu-worker"
+SRC_DIR="$DEPLOY_DIR/src"
+SECRETS_DIR="$DEPLOY_DIR/secrets"
 WRAPPER="/usr/local/sbin/orbaagent-gpu"
 SUDOERS_FILE="/etc/sudoers.d/orbaagent-gpu"
 WORKER_USER="${WORKER_USER:-klaus}"
@@ -51,12 +74,11 @@ log "GPU 0 processes before provisioning:"
 printf '%s\n' "${GPU0_PROCS_BEFORE:-  (none)}"
 
 # ---------------------------------------------------------------------------
-# 1. Directory: dedicated to OrbaAgent, owned by the worker user.
-#    /srv/projects stays 0710 root:coderxp-media; we add a traverse-only ACL so
-#    klaus can reach this one child without being able to list its siblings.
+# 1. Data directory: klaus-owned working area. Contains NO configuration and NO
+#    build context, so ownership here cannot weaken isolation.
 # ---------------------------------------------------------------------------
 log "creating $REPO_DIR"
-mkdir -p "$REPO_DIR" "$REPO_DIR/models" "$REPO_DIR/output" "$REPO_DIR/data" "$REPO_DIR/secrets"
+mkdir -p "$REPO_DIR"
 
 if command -v setfacl >/dev/null 2>&1; then
     # Traverse-only: klaus can cd into a known path but cannot enumerate
@@ -69,33 +91,56 @@ fi
 
 chown -R "${WORKER_USER}:${WORKER_USER}" "$REPO_DIR"
 chmod 750 "$REPO_DIR"
-chmod 700 "$REPO_DIR/secrets"
-log "ownership set to ${WORKER_USER}:${WORKER_USER}"
+log "working directory owned by ${WORKER_USER}:${WORKER_USER} (no code, no config)"
 
 # ---------------------------------------------------------------------------
-# 2. Root-owned configuration. klaus can read nothing here that lets it widen
-#    GPU access, and can write nothing at all.
+# 2. Root-owned configuration and build context. klaus can read nothing here
+#    that lets it widen GPU access, and can write nothing at all.
 # ---------------------------------------------------------------------------
 log "installing root-owned configuration into $DEPLOY_DIR"
-mkdir -p "$DEPLOY_DIR"
-chown root:root "$DEPLOY_DIR"
-chmod 755 "$DEPLOY_DIR"
+mkdir -p "$DEPLOY_DIR" "$SRC_DIR" "$SECRETS_DIR"
+chown root:root /etc/orbaagent "$DEPLOY_DIR"
+chmod 755 /etc/orbaagent "$DEPLOY_DIR"
 
-[ -f "$REPO_DIR/deploy/compose.yaml" ] || die "missing $REPO_DIR/deploy/compose.yaml"
-install -o root -g root -m 0644 "$REPO_DIR/deploy/compose.yaml" "$DEPLOY_DIR/compose.yaml"
+[ -f "$SOURCE_DIR/deploy/compose.yaml" ] || die "missing $SOURCE_DIR/deploy/compose.yaml"
+install -o root -g root -m 0644 "$SOURCE_DIR/deploy/compose.yaml" "$DEPLOY_DIR/compose.yaml"
+
+# Build context: Dockerfile + worker package. Root-owned so klaus cannot modify
+# worker code or Dockerfile flags.
+log "installing build context into $SRC_DIR (root:root)"
+install -o root -g root -m 0644 "$SOURCE_DIR/Dockerfile" "$SRC_DIR/Dockerfile"
+install -o root -g root -m 0644 "$SOURCE_DIR/worker.py" "$SRC_DIR/worker.py"
+rm -rf "$SRC_DIR/orba_gpu"
+cp -r "$SOURCE_DIR/orba_gpu" "$SRC_DIR/orba_gpu"
+# cp preserves the staging user's ownership; force root everywhere and strip
+# group/other write from every file and directory.
+chown -R root:root "$SRC_DIR"
+find "$SRC_DIR" -type d -exec chmod 755 {} +
+find "$SRC_DIR" -type f -exec chmod 644 {} +
+find "$SRC_DIR" -name '*.pyc' -delete
+rm -rf "$SRC_DIR"/**/__pycache__ 2>/dev/null || true
+find "$SRC_DIR" -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+
+# Fail closed if anything in the build context is writable by a non-root user.
+if [ -n "$(find "$SRC_DIR" -perm /022 -print -quit)" ]; then
+    die "build context contains group/world-writable paths; refusing to continue"
+fi
 
 if [ ! -f "$DEPLOY_DIR/worker.env" ]; then
-    install -o root -g root -m 0600 "$REPO_DIR/deploy/worker.env.example" "$DEPLOY_DIR/worker.env"
+    install -o root -g root -m 0600 "$SOURCE_DIR/deploy/worker.env.example" "$DEPLOY_DIR/worker.env"
     log "created $DEPLOY_DIR/worker.env (root:root 0600) — review it before starting"
 else
     log "$DEPLOY_DIR/worker.env already exists; left untouched"
 fi
 
 # ---------------------------------------------------------------------------
-# 3. Secrets: generated here, never echoed, never committed.
+# 3. Secrets: generated here, never echoed, never committed. They live under the
+#    root-owned configuration directory and are mounted as Docker secrets, so
+#    their values never appear in the environment or in `docker inspect`.
 # ---------------------------------------------------------------------------
+chmod 700 "$SECRETS_DIR"
 for name in media_worker_token media_ingest_token; do
-    target="$REPO_DIR/secrets/$name"
+    target="$SECRETS_DIR/$name"
     if [ ! -s "$target" ]; then
         umask 077
         openssl rand -hex 32 > "$target"
@@ -111,7 +156,7 @@ done
 # 4. Wrapper: root-owned, not writable by the worker user.
 # ---------------------------------------------------------------------------
 log "installing wrapper $WRAPPER"
-install -o root -g root -m 0755 "$REPO_DIR/deploy/orbaagent-gpu" "$WRAPPER"
+install -o root -g root -m 0755 "$SOURCE_DIR/deploy/orbaagent-gpu" "$WRAPPER"
 [ -w "$WRAPPER" ] && die "wrapper is writable — refusing to continue"
 
 # ---------------------------------------------------------------------------
@@ -119,7 +164,7 @@ install -o root -g root -m 0755 "$REPO_DIR/deploy/orbaagent-gpu" "$WRAPPER"
 # ---------------------------------------------------------------------------
 log "validating and installing sudoers policy"
 tmp_sudoers="$(mktemp)"
-install -o root -g root -m 0440 "$REPO_DIR/deploy/sudoers-orbaagent-gpu" "$tmp_sudoers"
+install -o root -g root -m 0440 "$SOURCE_DIR/deploy/sudoers-orbaagent-gpu" "$tmp_sudoers"
 visudo -cf "$tmp_sudoers" || die "sudoers policy failed validation; not installed"
 install -o root -g root -m 0440 "$tmp_sudoers" "$SUDOERS_FILE"
 rm -f "$tmp_sudoers"
@@ -159,14 +204,22 @@ cat <<EOF
 
 Provisioning complete. Nothing has been started or downloaded.
 
+Layout
+  $DEPLOY_DIR/compose.yaml        root:root 0644   (GPU allowlist lives here)
+  $DEPLOY_DIR/worker.env          root:root 0600
+  $DEPLOY_DIR/secrets/            root:root 0700   (tokens, 0600)
+  $DEPLOY_DIR/src/                root:root        (build context: Dockerfile + orba_gpu)
+  $REPO_DIR                       ${WORKER_USER}:${WORKER_USER} 0750 (no code, no config)
+
+Docker named volumes hold models, generated artifacts, and scratch:
+  orbaagent-gpu_orbaagent_models / _output / _data
+
 Next (still requires approval):
-  1. Copy the repository worker sources into $REPO_DIR
-     (orba_gpu/, worker.py, Dockerfile, compose.yaml, deploy/)
-  2. sudo -u $WORKER_USER sudo orbaagent-gpu validate
-  3. sudo -u $WORKER_USER sudo orbaagent-gpu build
-  4. Download models into $REPO_DIR/models (see the acceptance procedure)
-  5. sudo -u $WORKER_USER sudo orbaagent-gpu up
-  6. Run the acceptance test procedure
+  1. sudo -u $WORKER_USER sudo orbaagent-gpu validate
+  2. sudo -u $WORKER_USER sudo orbaagent-gpu build
+  3. Download models into the models volume (see the acceptance procedure)
+  4. sudo -u $WORKER_USER sudo orbaagent-gpu up
+  5. Run the acceptance test procedure
 
 Rollback: see deploy/ROLLBACK.md
 EOF

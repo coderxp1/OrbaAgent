@@ -313,6 +313,104 @@ class TestDeploymentArtifacts:
 
 
 # ---------------------------------------------------------------------------
+# Immutability of the build context and configuration
+# ---------------------------------------------------------------------------
+
+
+class TestBuildContextImmutability:
+    """klaus must not be able to modify worker code, the Dockerfile, or config.
+
+    The earlier version of the provisioning script ran
+    `chown -R klaus:klaus "$REPO_DIR"` over a directory that also held the
+    Dockerfile and worker sources, which would have let the delegated account
+    change container security settings. These tests keep that closed.
+    """
+
+    @pytest.fixture(scope="class")
+    def provision(self) -> str:
+        return PROVISION.read_text(encoding="utf-8")
+
+    @pytest.fixture(scope="class")
+    def provision_code(self, provision) -> str:
+        return "\n".join(line.split("#", 1)[0] for line in provision.splitlines())
+
+    def test_build_context_lives_under_the_root_owned_config_dir(self):
+        text = DEPLOY_COMPOSE.read_text(encoding="utf-8")
+        assert "context: /etc/orbaagent/gpu-worker/src" in text
+
+    def test_build_context_is_not_the_worker_writable_dir(self):
+        text = DEPLOY_COMPOSE.read_text(encoding="utf-8")
+        for line in text.splitlines():
+            code = line.split("#", 1)[0]
+            if "context:" in code:
+                assert "/srv/projects" not in code, "build context must not be klaus-writable"
+
+    def test_provisioning_never_chowns_the_config_or_build_context_to_klaus(self, provision_code):
+        """Config and build context may be chowned TO root, never AWAY from root."""
+        for line in provision_code.splitlines():
+            if "chown" not in line:
+                continue
+            touches_protected = any(
+                token in line
+                for token in ("$DEPLOY_DIR", "$SRC_DIR", "$WRAPPER", "$SUDOERS_FILE", "/etc/orbaagent", "$SECRETS_DIR")
+            )
+            if not touches_protected:
+                continue
+            assert "root:root" in line, f"protected path must be owned by root: {line.strip()}"
+            assert "WORKER_USER" not in line, f"protected path must never go to klaus: {line.strip()}"
+
+    def test_only_the_data_dir_is_chowned_to_klaus(self, provision_code):
+        chowns = [line.strip() for line in provision_code.splitlines() if "chown" in line]
+        joined = "\n".join(chowns)
+        assert "$REPO_DIR" in joined, "the data directory should be klaus-owned"
+        assert "root:root" in joined, "config/build artifacts must be root-owned"
+
+    def test_build_context_files_are_forced_to_root(self, provision_code):
+        assert 'chown -R root:root "$SRC_DIR"' in provision_code
+        assert 'find "$SRC_DIR" -type f -exec chmod 644' in provision_code
+        assert 'find "$SRC_DIR" -type d -exec chmod 755' in provision_code
+
+    def test_provisioning_fails_closed_on_writable_build_context(self, provision_code):
+        assert 'find "$SRC_DIR" -perm /022' in provision_code
+        assert "refusing to continue" in provision_code
+
+    def test_worker_code_is_actually_copied_into_the_build_context(self, provision_code):
+        assert '"$SOURCE_DIR/Dockerfile"' in provision_code
+        assert '"$SOURCE_DIR/worker.py"' in provision_code
+        assert '"$SOURCE_DIR/orba_gpu"' in provision_code
+
+    def test_secrets_live_under_the_root_owned_config_dir(self, provision_code):
+        assert 'target="$SECRETS_DIR/$name"' in provision_code
+        assert "$REPO_DIR/secrets" not in provision_code
+
+    def test_config_files_are_sourced_from_the_bundle_not_the_data_dir(self, provision_code):
+        assert '"$SOURCE_DIR/deploy/compose.yaml"' in provision_code
+        assert '"$SOURCE_DIR/deploy/orbaagent-gpu"' in provision_code
+        assert '"$SOURCE_DIR/deploy/sudoers-orbaagent-gpu"' in provision_code
+
+    def test_docker_secrets_use_absolute_root_owned_paths(self):
+        text = DEPLOY_COMPOSE.read_text(encoding="utf-8")
+        assert "file: /etc/orbaagent/gpu-worker/secrets/media_worker_token" in text
+        assert "file: /etc/orbaagent/gpu-worker/secrets/media_ingest_token" in text
+
+    def test_volumes_are_named_not_bind_mounts(self):
+        """A bind mount would need a host path writable by the container."""
+        text = DEPLOY_COMPOSE.read_text(encoding="utf-8")
+        for line in text.splitlines():
+            code = line.split("#", 1)[0].strip()
+            if code.startswith("- ") and ":/" in code and "secrets" not in code:
+                assert not code.startswith("- ./"), f"bind mount found: {code}"
+        assert "orbaagent_models:/models" in text
+        assert "orbaagent_output:/output" in text
+        assert "orbaagent_data:/data" in text
+
+    def test_provisioning_accepts_a_source_directory(self, provision_code):
+        """The bundle is staged in /tmp, so the script cannot assume a checkout."""
+        assert "SOURCE_DIR" in provision_code
+        assert "BASH_SOURCE" in provision_code
+
+
+# ---------------------------------------------------------------------------
 # WireGuard design
 # ---------------------------------------------------------------------------
 

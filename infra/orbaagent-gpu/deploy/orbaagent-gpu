@@ -52,6 +52,7 @@ set -u
 # --- fixed, root-owned configuration ---------------------------------------
 COMPOSE_FILE="/etc/orbaagent/gpu-worker/compose.yaml"
 ENV_FILE="/etc/orbaagent/gpu-worker/worker.env"
+SRC_DIR="/etc/orbaagent/gpu-worker/src"
 PROJECT_NAME="orbaagent-gpu"
 WORKER_CONTAINER="orbaagent-gpu-worker"
 EXPECTED_GPU_UUID="GPU-82e03c6c-8c27-c076-eb42-7e37e9a5a878"
@@ -95,29 +96,21 @@ preconditions() {
 
 # Post-condition check: the RENDERED configuration must still pin GPU 1 exactly
 # and must not mention GPU 0 anywhere.
+#
+# This uses the shared Python validator (orba_gpu.deploy_validation) so the
+# runtime check and the unit tests apply the SAME rules. The source tree it lives
+# in is root-owned, so the validator cannot be weakened from the delegated account.
 validate_isolation() {
     rendered="$(docker_compose config 2>/dev/null)" || die "cannot render compose config" 4
 
-    if ! printf '%s' "$rendered" | grep -q "device_ids:"; then
-        die "validation failed: no device reservation in rendered config" 4
-    fi
-    if ! printf '%s' "$rendered" | grep -q -- "$EXPECTED_GPU_UUID"; then
-        die "validation failed: expected GPU $EXPECTED_GPU_UUID not present" 4
-    fi
-    if printf '%s' "$rendered" | grep -q -- "$FORBIDDEN_GPU_UUID"; then
-        die "validation failed: GPU 0 ($FORBIDDEN_GPU_UUID) appears in the config" 4
-    fi
-    if printf '%s' "$rendered" | grep -qiE 'privileged:[[:space:]]*true'; then
-        die "validation failed: privileged mode enabled" 4
-    fi
-    if printf '%s' "$rendered" | grep -qiE '/dev/nvidia'; then
-        die "validation failed: host NVIDIA device mount present" 4
-    fi
-    if printf '%s' "$rendered" | grep -qiE 'count:[[:space:]]*all|driver:[[:space:]]*nvidia[[:space:]]*$'; then
-        die "validation failed: a broad-GPU selector is present" 4
+    if [ ! -d "$SRC_DIR/orba_gpu" ]; then
+        die "validator source missing at $SRC_DIR/orba_gpu" 4
     fi
 
-    printf 'isolation OK: worker is pinned to %s and GPU 0 is absent\n' "$EXPECTED_GPU_UUID"
+    if printf '%s' "$rendered" | PYTHONPATH="$SRC_DIR" python3 -m orba_gpu.deploy_validation -; then
+        return 0
+    fi
+    die "isolation validation failed (see the ISOLATION FAILURE line above)" 4
 }
 
 usage() {

@@ -28,7 +28,11 @@ services:
   orbaagent-gpu-worker:
     container_name: orbaagent-gpu-worker
     build:
-      context: .
+      # Absolute, root-owned build context. The worker source and Dockerfile live
+      # under /etc/orbaagent/gpu-worker/, which klaus cannot write. If the build
+      # context were the klaus-owned data directory, klaus could alter worker
+      # code or add flags to the Dockerfile.
+      context: /etc/orbaagent/gpu-worker/src
       dockerfile: Dockerfile
     restart: unless-stopped
     ports:
@@ -58,9 +62,14 @@ services:
       - media_worker_token
       - media_ingest_token
     volumes:
-      - ./models:/models
-      - ./output:/output
-      - ./data:/data
+      # Named volumes, not bind mounts. A bind mount's host directory must be
+      # writable by the container, which would mean making a host path writable
+      # by klaus too. Named volumes are managed by Docker as root, so the
+      # configuration stays immutable and the worker (uid 0 in-container) can
+      # still read models and write artifacts.
+      - orbaagent_models:/models
+      - orbaagent_output:/output
+      - orbaagent_data:/data
     networks:
       - orbaagent_media_net
     deploy:
@@ -73,9 +82,14 @@ services:
 
 secrets:
   media_worker_token:
-    file: ./secrets/media_worker_token
+    file: /etc/orbaagent/gpu-worker/secrets/media_worker_token
   media_ingest_token:
-    file: ./secrets/media_ingest_token
+    file: /etc/orbaagent/gpu-worker/secrets/media_ingest_token
+
+volumes:
+  orbaagent_models:
+  orbaagent_output:
+  orbaagent_data:
 
 networks:
   orbaagent_media_net:
