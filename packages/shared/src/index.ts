@@ -83,6 +83,42 @@ export const ToolDefinitionSchema = z.object({
 });
 export type ToolDefinition = z.infer<typeof ToolDefinitionSchema>;
 
+export const ToolExecutionResultSchema = z.object({
+  toolCallId: z.string(),
+  name: z.string(),
+  success: z.boolean(),
+  output: z.string(),
+  error: z.string().optional(),
+  executionTimeMs: z.number().optional(),
+  metadata: z.record(z.unknown()).optional(),
+});
+export type ToolExecutionResult = z.infer<typeof ToolExecutionResultSchema>;
+
+export const AgentFileChangeStatusSchema = z.enum([
+  "created",
+  "modified",
+  "deleted",
+  "renamed",
+]);
+export type AgentFileChangeStatus = z.infer<typeof AgentFileChangeStatusSchema>;
+
+export const AgentFileChangeSchema = z.object({
+  changeId: z.string(),
+  agentRunId: z.string(),
+  messageId: z.string().optional(),
+  workspaceId: z.string(),
+  path: z.string(),
+  filename: z.string(),
+  status: AgentFileChangeStatusSchema,
+  previousPath: z.string().optional(),
+  additions: z.number().int().nonnegative(),
+  deletions: z.number().int().nonnegative(),
+  diff: z.string().optional(),
+  reviewStatus: z.enum(["pending", "accepted", "rejected"]).default("pending"),
+  timestamp: z.string().optional(),
+});
+export type AgentFileChange = z.infer<typeof AgentFileChangeSchema>;
+
 export const ChatMessageRoleSchema = z.enum(["system", "user", "assistant", "tool"]);
 export type ChatMessageRole = z.infer<typeof ChatMessageRoleSchema>;
 
@@ -93,8 +129,10 @@ export const ChatMessageSchema = z.object({
   name: z.string().optional(),
   toolCallId: z.string().optional(),
   toolCalls: z.array(ToolCallSchema).optional(),
+  toolResults: z.array(ToolExecutionResultSchema).optional(),
   thinking: z.string().optional(),
   timestamp: z.string().optional(),
+  fileChanges: z.array(AgentFileChangeSchema).optional(),
 });
 export type ChatMessage = z.infer<typeof ChatMessageSchema>;
 
@@ -104,6 +142,8 @@ export const TraceMetadataSchema = z.object({
   userId: z.string().default("default-user"),
   conversationId: z.string().default("default-conversation"),
   agentRunId: z.string().default("default-run"),
+  githubToken: z.string().optional(),
+  executionSessionId: z.string().optional(),
 });
 export type TraceMetadata = z.infer<typeof TraceMetadataSchema>;
 
@@ -128,6 +168,44 @@ export const ChatCompletionRequestSchema = z.object({
 });
 export type ChatCompletionRequest = z.infer<typeof ChatCompletionRequestSchema>;
 
+export const IntegrationNameSchema = z.enum([
+  "github",
+  "slack",
+  "notion",
+  "email",
+  "gmail",
+  "jira",
+  "atlassian",
+  "linear",
+  "google_calendar",
+  "teams",
+  "outlook",
+  "salesforce",
+  "asana",
+  "box",
+  "google_drive",
+  "sharepoint",
+]);
+export type IntegrationName = z.infer<typeof IntegrationNameSchema>;
+
+export const IntegrationStatusSchema = z.object({
+  name: IntegrationNameSchema,
+  displayName: z.string(),
+  connected: z.boolean(),
+  accountName: z.string().optional(),
+  scopes: z.array(z.string()).optional(),
+  lastSyncedAt: z.string().optional(),
+});
+export type IntegrationStatus = z.infer<typeof IntegrationStatusSchema>;
+
+export const ToolManifestSchema = z.object({
+  availableTools: z.array(z.string()),
+  connectedServices: z.array(IntegrationStatusSchema),
+  workspaceId: z.string(),
+  permissions: z.record(z.boolean()),
+});
+export type ToolManifest = z.infer<typeof ToolManifestSchema>;
+
 export const UsageStatsSchema = z.object({
   promptTokens: z.number().int().nonnegative(),
   completionTokens: z.number().int().nonnegative(),
@@ -141,12 +219,26 @@ export const NormalizedEventTypeSchema = z.enum([
   "tool_call_start",
   "tool_call_delta",
   "tool_call_end",
+  "tool_call_result",
+  "agent_activity",
   "usage",
   "error",
   "done",
   "stream_reset",
+  "terminal_command_start",
+  "terminal_stdout",
+  "terminal_stderr",
+  "terminal_exit",
+  "file_changes_detected",
 ]);
 export type NormalizedEventType = z.infer<typeof NormalizedEventTypeSchema>;
+
+export const AgentActivitySchema = z.object({
+  step: z.string(),
+  status: z.enum(["in_progress", "completed", "failed"]),
+  details: z.string().optional(),
+});
+export type AgentActivity = z.infer<typeof AgentActivitySchema>;
 
 export const NormalizedEventSchema = z.object({
   type: NormalizedEventTypeSchema,
@@ -154,7 +246,13 @@ export const NormalizedEventSchema = z.object({
   textDelta: z.string().optional(),
   thinkingDelta: z.string().optional(),
   toolCall: ToolCallSchema.optional(),
+  toolResult: ToolExecutionResultSchema.optional(),
+  activity: AgentActivitySchema.optional(),
   usage: UsageStatsSchema.optional(),
+  executionSessionId: z.string().optional(),
+  command: z.string().optional(),
+  exitCode: z.number().optional(),
+  changes: z.array(AgentFileChangeSchema).optional(),
   error: z
     .object({
       code: z.string(),

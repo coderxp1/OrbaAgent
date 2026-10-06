@@ -264,4 +264,85 @@ describe("ModelGateway Provider Failover & Production Safety", () => {
     expect(decision.primaryModel.provider).toBe("langdock");
     expect(decision.fallbackChain.some((m) => m.provider === "openrouter")).toBe(true);
   });
+
+  it("should inject OrbaAgent system prompt into request messages", async () => {
+    let capturedRequest: ChatCompletionRequest | undefined;
+    class CapturingAdapter extends LangdockAdapter {
+      override async *streamChat(
+        req: ChatCompletionRequest,
+      ): AsyncGenerator<NormalizedEvent, void, unknown> {
+        capturedRequest = req;
+        yield { type: "text_delta", traceId: req.trace.traceId, textDelta: "Hello" };
+      }
+    }
+
+    const gateway = new ModelGateway({
+      langdock: new CapturingAdapter(),
+      openrouter: new OpenRouterAdapter(),
+    });
+
+    for await (const _ of gateway.streamChat(sampleRequest)) {
+      // Stream
+    }
+
+    expect(capturedRequest).toBeDefined();
+    expect(capturedRequest?.messages[0].role).toBe("system");
+    expect(capturedRequest?.messages[0].content).toContain("You are OrbaAgent");
+  });
+
+  it("should sanitize provider self-identification leakage in stream deltas", async () => {
+    class LeakyAdapter extends LangdockAdapter {
+      override async *streamChat(
+        req: ChatCompletionRequest,
+      ): AsyncGenerator<NormalizedEvent, void, unknown> {
+        yield {
+          type: "text_delta",
+          traceId: req.trace.traceId,
+          textDelta: "Hi there! I'm the GLM language model trained by Z.ai.",
+        };
+      }
+    }
+
+    const gateway = new ModelGateway({
+      langdock: new LeakyAdapter(),
+      openrouter: new OpenRouterAdapter(),
+    });
+
+    const events: NormalizedEvent[] = [];
+    for await (const event of gateway.streamChat(sampleRequest)) {
+      events.push(event);
+    }
+
+    const textDelta = events.find((e) => e.type === "text_delta")?.textDelta;
+    expect(textDelta).not.toContain("GLM");
+    expect(textDelta).not.toContain("Z.ai");
+    expect(textDelta).toContain("OrbaAgent");
+  });
+
+  it("should deduplicate thinking deltas during internal provider failover retries", async () => {
+    class MultiFailLangdockAdapter extends LangdockAdapter {
+      // biome-ignore lint/correctness/useYield: Interface requirement
+      override async *streamChat(): AsyncGenerator<NormalizedEvent, void, unknown> {
+        throw new Error("Langdock rate limit");
+      }
+    }
+
+    const gateway = new ModelGateway({
+      langdock: new MultiFailLangdockAdapter(),
+      openrouter: new OpenRouterAdapter(),
+    });
+
+    const events: NormalizedEvent[] = [];
+    for await (const event of gateway.streamChat(sampleRequest)) {
+      events.push(event);
+    }
+
+    const thinkingDeltas = events
+      .filter((e) => e.type === "thinking_delta")
+      .map((e) => e.thinkingDelta);
+
+    // Should only yield route optimization notice ONCE when switching from Langdock family to OpenRouter family
+    const optimizeNotices = thinkingDeltas.filter((t) => t?.includes("Optimizing execution route"));
+    expect(optimizeNotices.length).toBe(1);
+  });
 });

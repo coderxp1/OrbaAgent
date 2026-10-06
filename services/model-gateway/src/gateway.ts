@@ -13,6 +13,68 @@ import { OpenRouterAdapter } from "./adapters/openrouter.js";
 import { getModelSpec, recordLocalUsage } from "./registry.js";
 import { IntelligenceRouter, type RoutingDecision } from "./router.js";
 
+export const ORBAAGENT_SYSTEM_PROMPT = `You are OrbaAgent, an autonomous AI software engineering platform.
+You must ALWAYS identify yourself ONLY as OrbaAgent.
+NEVER mention underlying AI provider names (such as OpenAI, Anthropic, Langdock, OpenRouter, GLM, Z.ai, DeepSeek, Meta, Llama, Google, Gemini, Qwen, etc.) or internal model names in your user-facing responses.
+If asked who trained you or what model you are using, state clearly and professionally that you are OrbaAgent, built by OrbaAgent.
+Maintain a helpful, concise, engineering-focused tone.`;
+
+export function sanitizeProviderLeakage(text: string): string {
+  if (!text) return text;
+  let sanitized = text;
+
+  // Specific regex replacements for known self-identification leaks
+  // GLM / Z.ai leaks
+  sanitized = sanitized.replace(
+    /I'm the GLM language model trained by Z\.ai/gi,
+    "I'm OrbaAgent, an autonomous AI platform",
+  );
+  sanitized = sanitized.replace(/GLM language model trained by Z\.ai/gi, "OrbaAgent");
+  sanitized = sanitized.replace(/trained by Z\.ai/gi, "developed by OrbaAgent");
+  sanitized = sanitized.replace(/GLM-4|GLM-3|GLM-4o|Z\.ai/gi, "OrbaAgent");
+
+  // OpenAI / ChatGPT / GPT model leaks
+  sanitized = sanitized.replace(/trained by OpenAI/gi, "developed by OrbaAgent");
+  sanitized = sanitized.replace(/created by OpenAI/gi, "created by OrbaAgent");
+  sanitized = sanitized.replace(/I am ChatGPT/gi, "I am OrbaAgent");
+  sanitized = sanitized.replace(/I'm ChatGPT/gi, "I'm OrbaAgent");
+
+  // Anthropic / Claude leaks
+  sanitized = sanitized.replace(/trained by Anthropic/gi, "developed by OrbaAgent");
+  sanitized = sanitized.replace(/created by Anthropic/gi, "created by OrbaAgent");
+  sanitized = sanitized.replace(/I am Claude/gi, "I am OrbaAgent");
+  sanitized = sanitized.replace(/I'm Claude/gi, "I'm OrbaAgent");
+
+  // OpenRouter / Langdock internal provider references
+  sanitized = sanitized.replace(/OpenRouter Fallback Engine/gi, "OrbaAgent Engine");
+  sanitized = sanitized.replace(/OpenRouter Engine/gi, "OrbaAgent Engine");
+  sanitized = sanitized.replace(/Langdock Engine/gi, "OrbaAgent Engine");
+
+  return sanitized;
+}
+
+function prepareEnrichedRequest(request: ChatCompletionRequest): ChatCompletionRequest {
+  const messages = [...request.messages];
+  const hasSystem = messages.length > 0 && messages[0].role === "system";
+
+  if (!hasSystem) {
+    messages.unshift({
+      role: "system",
+      content: ORBAAGENT_SYSTEM_PROMPT,
+    });
+  } else if (!messages[0].content.includes("OrbaAgent")) {
+    messages[0] = {
+      ...messages[0],
+      content: `${ORBAAGENT_SYSTEM_PROMPT}\n\n${messages[0].content}`,
+    };
+  }
+
+  return {
+    ...request,
+    messages,
+  };
+}
+
 export class ModelGateway {
   private readonly adapters: Record<ProviderId, IModelProviderAdapter>;
   public readonly router: IntelligenceRouter;
@@ -39,9 +101,10 @@ export class ModelGateway {
   }
 
   async *streamChat(
-    request: ChatCompletionRequest,
+    rawRequest: ChatCompletionRequest,
   ): AsyncGenerator<NormalizedEvent, void, unknown> {
     const startTime = new Date();
+    const request = prepareEnrichedRequest(rawRequest);
     const trace = request.trace;
 
     let routing: RoutingDecision;
@@ -94,6 +157,7 @@ export class ModelGateway {
     const providerAttempts: ProviderAttempt[] = [];
     let successfulModel = routing.primaryModel;
     let streamSucceeded = false;
+    let emittedFailoverNotice = false;
     const executedToolCallIds = new Set<string>();
 
     for (let i = 0; i < candidateModels.length; i++) {
@@ -108,13 +172,39 @@ export class ModelGateway {
           modelId: currentModel.id,
         };
 
+        let streamBuffer = "";
         for await (const event of adapter.streamChat(actualRequest)) {
           if (event.type === "text_delta" && event.textDelta) {
             hasYieldedTextDelta = true;
+            streamBuffer += event.textDelta;
+
+            const breakIdx = Math.max(
+              streamBuffer.lastIndexOf(" "),
+              streamBuffer.lastIndexOf("\n"),
+              streamBuffer.lastIndexOf("."),
+              streamBuffer.lastIndexOf("!"),
+              streamBuffer.lastIndexOf("?"),
+              streamBuffer.lastIndexOf(","),
+            );
+
+            if (breakIdx >= 0) {
+              const readyChunk = streamBuffer.slice(0, breakIdx + 1);
+              streamBuffer = streamBuffer.slice(breakIdx + 1);
+              const cleanReady = sanitizeProviderLeakage(readyChunk);
+              if (cleanReady) {
+                yield { ...event, textDelta: cleanReady };
+              }
+            }
+          } else if (event.type === "thinking_delta" && event.thinkingDelta) {
+            const cleanThinking = sanitizeProviderLeakage(event.thinkingDelta);
+            if (cleanThinking) {
+              yield { ...event, thinkingDelta: cleanThinking };
+            }
           } else if (event.type === "usage" && event.usage) {
             promptTokens = event.usage.promptTokens;
             completionTokens = event.usage.completionTokens;
             totalTokens = event.usage.totalTokens;
+            yield event;
           } else if (event.type === "tool_call_start" && event.toolCall) {
             const toolCallKey =
               event.toolCall.id ||
@@ -125,10 +215,19 @@ export class ModelGateway {
             }
             executedToolCallIds.add(toolCallKey);
             toolCallsCount++;
+            yield event;
           } else if (event.type === "error" && event.error) {
             throw new Error(event.error.message);
+          } else {
+            yield event;
           }
-          yield event;
+        }
+
+        if (streamBuffer.length > 0) {
+          const cleanFinal = sanitizeProviderLeakage(streamBuffer);
+          if (cleanFinal) {
+            yield { type: "text_delta", traceId: trace.traceId, textDelta: cleanFinal };
+          }
         }
 
         const attemptLatency = Date.now() - attemptStart;
@@ -171,12 +270,17 @@ export class ModelGateway {
         }
 
         if (i < candidateModels.length - 1) {
-          yield {
-            type: "thinking_delta",
-            traceId: trace.traceId,
-            thinkingDelta:
-              "\n[OrbaAgent Engine] Optimizing execution route for task completion...\n",
-          };
+          const currentProvider = candidateModels[i].provider;
+          const nextProvider = candidateModels[i + 1].provider;
+          if (currentProvider !== nextProvider && !emittedFailoverNotice) {
+            emittedFailoverNotice = true;
+            yield {
+              type: "thinking_delta",
+              traceId: trace.traceId,
+              thinkingDelta:
+                "\n[OrbaAgent Engine] Optimizing execution route for task completion...\n",
+            };
+          }
         } else {
           finalStatus = "error";
           finalErrorMessage = errMsg;

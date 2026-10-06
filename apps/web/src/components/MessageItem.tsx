@@ -1,14 +1,26 @@
 "use client";
 
-import type { ChatMessage, ToolCall } from "@orbaagent/shared";
-import { Brain, Check, Code, Copy, User, Wrench } from "lucide-react";
+import type { ChatMessage } from "@orbaagent/shared";
+import { Brain, Check, Copy, User } from "lucide-react";
 import { useState } from "react";
+import { FileChangesReview } from "./FileChangesReview";
+import { TerminalSession } from "./TerminalSession";
 
 interface MessageItemProps {
   message: ChatMessage;
+  onAcceptChange?: (changeId: string, runId?: string) => void;
+  onRejectChange?: (changeId: string, runId?: string) => void;
+  onAcceptAllChanges?: (runId?: string) => void;
+  onRejectAllChanges?: (runId?: string) => void;
 }
 
-export function MessageItem({ message }: MessageItemProps) {
+export function MessageItem({
+  message,
+  onAcceptChange,
+  onRejectChange,
+  onAcceptAllChanges,
+  onRejectAllChanges,
+}: MessageItemProps) {
   const isUser = message.role === "user";
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
   const [showThinking, setShowThinking] = useState<boolean>(true);
@@ -21,16 +33,29 @@ export function MessageItem({ message }: MessageItemProps) {
 
   return (
     <div
-      className={`flex w-full gap-4 p-4 ${isUser ? "bg-zinc-950/40" : "bg-zinc-900/40 border-y border-zinc-900"}`}
+      className={`flex w-full gap-4 p-4 rounded-xl transition-colors ${
+        isUser
+          ? "bg-zinc-950/40 border border-zinc-900"
+          : "bg-[#161616] border border-[#242424]"
+      }`}
     >
+      {/* Avatar: User icon vs Official Orba Mascot Logo */}
       <div
-        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
+        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg overflow-hidden ${
           isUser
             ? "bg-zinc-800 text-zinc-300"
-            : "bg-gradient-to-tr from-cyan-600 to-indigo-600 text-white shadow-sm shadow-cyan-950"
+            : "bg-white p-1 ring-1 ring-white/20 shadow-md shadow-black/40"
         }`}
       >
-        {isUser ? <User className="h-4 w-4" /> : <Code className="h-4 w-4" />}
+        {isUser ? (
+          <User className="h-4 w-4" />
+        ) : (
+          <img
+            src="/orba-mascot.svg"
+            alt="OrbaAgent Mascot"
+            className="h-full w-full object-contain"
+          />
+        )}
       </div>
 
       <div className="flex flex-1 flex-col gap-3 overflow-hidden text-sm">
@@ -65,27 +90,24 @@ export function MessageItem({ message }: MessageItemProps) {
           </div>
         )}
 
-        {/* Tool Execution Cards */}
+        {/* Unified Live Terminal Session */}
         {message.toolCalls && message.toolCalls.length > 0 && (
-          <div className="flex flex-col gap-2">
-            {message.toolCalls.map((tc: ToolCall) => (
-              <div
-                key={tc.id}
-                className="flex flex-col gap-1.5 rounded-lg border border-cyan-900/40 bg-cyan-950/20 p-3 text-xs text-cyan-200"
-              >
-                <div className="flex items-center gap-2 font-medium text-cyan-400">
-                  <Wrench className="h-3.5 w-3.5" />
-                  <span>Tool Invocation: {tc.name}</span>
-                  <span className="ml-auto font-mono text-[10px] text-cyan-500 bg-cyan-950 px-1.5 py-0.5 rounded">
-                    {tc.id}
-                  </span>
-                </div>
-                <pre className="overflow-x-auto rounded bg-zinc-950 p-2 font-mono text-[11px] text-zinc-300">
-                  {JSON.stringify(tc.arguments, null, 2)}
-                </pre>
-              </div>
-            ))}
-          </div>
+          <TerminalSession
+            toolCalls={message.toolCalls}
+            toolResults={message.toolResults}
+            isLive={false}
+          />
+        )}
+
+        {/* Agent File Changes Review Panel */}
+        {message.fileChanges && message.fileChanges.length > 0 && (
+          <FileChangesReview
+            changes={message.fileChanges}
+            onAccept={onAcceptChange ? (id) => onAcceptChange(id) : undefined}
+            onReject={onRejectChange ? (id) => onRejectChange(id) : undefined}
+            onAcceptAll={onAcceptAllChanges ? () => onAcceptAllChanges() : undefined}
+            onRejectAll={onRejectAllChanges ? () => onRejectAllChanges() : undefined}
+          />
         )}
 
         {/* Message Content */}
@@ -174,3 +196,4 @@ function FormattedContent({
     </div>
   );
 }
+

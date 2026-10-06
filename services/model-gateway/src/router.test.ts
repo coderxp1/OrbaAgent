@@ -60,9 +60,9 @@ describe("IntelligenceRouter", () => {
   });
 
   it("should select another eligible Langdock model when primary model quota is exhausted", () => {
-    // Record 500 requests for gpt-5.4
+    // Record 500 requests for gpt-5.4 under tenant t_1
     for (let i = 0; i < 500; i++) {
-      recordLocalUsage("gpt-5.4", 100);
+      recordLocalUsage("gpt-5.4", 100, "t_1");
     }
 
     const req: ChatCompletionRequest = {

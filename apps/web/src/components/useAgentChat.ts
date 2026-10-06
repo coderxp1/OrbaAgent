@@ -1,6 +1,6 @@
 "use client";
 
-import type { ChatMessage, NormalizedEvent, UsageStats } from "@orbaagent/shared";
+import type { AgentActivity, ChatMessage, NormalizedEvent, UsageStats } from "@orbaagent/shared";
 import { useCallback, useRef, useState } from "react";
 
 export function useAgentChat() {
@@ -9,6 +9,7 @@ export function useAgentChat() {
   const [error, setError] = useState<{ code: string; message: string } | null>(null);
   const [latestUsage, setLatestUsage] = useState<UsageStats | null>(null);
   const [activeTraceId, setActiveTraceId] = useState<string | null>(null);
+  const [activeActivity, setActiveActivity] = useState<AgentActivity | null>(null);
 
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -118,11 +119,15 @@ export function useAgentChat() {
                   );
                 } else if (event.type === "thinking_delta" && event.thinkingDelta) {
                   setMessages((prev) =>
-                    prev.map((msg) =>
-                      msg.id === assistantMsgId
-                        ? { ...msg, thinking: (msg.thinking || "") + event.thinkingDelta }
-                        : msg,
-                    ),
+                    prev.map((msg) => {
+                      if (msg.id !== assistantMsgId) return msg;
+                      const currentThinking = msg.thinking || "";
+                      const delta = event.thinkingDelta || "";
+                      if (currentThinking.endsWith(delta)) {
+                        return msg;
+                      }
+                      return { ...msg, thinking: currentThinking + delta };
+                    }),
                   );
                 } else if (event.type === "tool_call_start" && event.toolCall) {
                   const tc = event.toolCall;
@@ -131,6 +136,25 @@ export function useAgentChat() {
                       if (msg.id !== assistantMsgId) return msg;
                       const existing = msg.toolCalls || [];
                       return { ...msg, toolCalls: [...existing, tc] };
+                    }),
+                  );
+                } else if (event.type === "tool_call_result" && event.toolResult) {
+                  const tr = event.toolResult;
+                  setMessages((prev) =>
+                    prev.map((msg) => {
+                      if (msg.id !== assistantMsgId) return msg;
+                      const existing = msg.toolResults || [];
+                      return { ...msg, toolResults: [...existing, tr] };
+                    }),
+                  );
+                } else if (event.type === "agent_activity" && event.activity) {
+                  setActiveActivity(event.activity);
+                } else if (event.type === "file_changes_detected" && event.changes) {
+                  const detectedChanges = event.changes;
+                  setMessages((prev) =>
+                    prev.map((msg) => {
+                      if (msg.id !== assistantMsgId) return msg;
+                      return { ...msg, fileChanges: detectedChanges };
                     }),
                   );
                 } else if (event.type === "usage" && event.usage) {
@@ -153,10 +177,55 @@ export function useAgentChat() {
         }
       } finally {
         setIsGenerating(false);
+        setActiveActivity(null);
         abortControllerRef.current = null;
       }
     },
     [isGenerating, messages],
+  );
+
+  const reviewFileChange = useCallback(
+    async (
+      action: "accept" | "reject" | "accept_all" | "reject_all",
+      changeId?: string,
+      agentRunId?: string,
+    ) => {
+      try {
+        await fetch("/api/changes/review", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action, changeId, agentRunId }),
+        });
+
+        // Optimistically update local message state
+        setMessages((prev) =>
+          prev.map((msg) => {
+            if (!msg.fileChanges || msg.fileChanges.length === 0) return msg;
+            const updated = msg.fileChanges.map((change) => {
+              if (action === "accept_all") {
+                return { ...change, reviewStatus: "accepted" as const };
+              }
+              if (action === "reject_all") {
+                return { ...change, reviewStatus: "rejected" as const };
+              }
+              if (change.changeId === changeId) {
+                return {
+                  ...change,
+                  reviewStatus: (action === "accept" ? "accepted" : "rejected") as
+                    | "accepted"
+                    | "rejected",
+                };
+              }
+              return change;
+            });
+            return { ...msg, fileChanges: updated };
+          }),
+        );
+      } catch (err) {
+        console.error("Failed to review file change:", err);
+      }
+    },
+    [],
   );
 
   const retryLastMessage = useCallback(() => {
@@ -173,6 +242,7 @@ export function useAgentChat() {
     setError(null);
     setLatestUsage(null);
     setActiveTraceId(null);
+    setActiveActivity(null);
   }, [cancelGeneration]);
 
   return {
@@ -181,9 +251,11 @@ export function useAgentChat() {
     error,
     latestUsage,
     activeTraceId,
+    activeActivity,
     sendMessage,
     cancelGeneration,
     retryLastMessage,
     clearChat,
+    reviewFileChange,
   };
 }

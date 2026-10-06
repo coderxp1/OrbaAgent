@@ -38,9 +38,17 @@ providers:
     watch: true
 
 certificatesResolvers:
+  le-http:
+    acme:
+      email: admin@orbaagent.dev
+      storage: /etc/traefik/acme/acme.json
+      caServer: https://acme-v02.api.letsencrypt.org/directory
+      httpChallenge:
+        entryPoint: web
+
   le-staging:
     acme:
-      email: ${ACME_EMAIL}
+      email: admin@orbaagent.dev
       storage: /etc/traefik/acme/acme.json
       caServer: https://acme-staging-v02.api.letsencrypt.org/directory
       dnsChallenge:
@@ -52,7 +60,7 @@ certificatesResolvers:
 
   le-prod:
     acme:
-      email: ${ACME_EMAIL}
+      email: admin@orbaagent.dev
       storage: /etc/traefik/acme/acme.json
       caServer: https://acme-v02.api.letsencrypt.org/directory
       dnsChallenge:
