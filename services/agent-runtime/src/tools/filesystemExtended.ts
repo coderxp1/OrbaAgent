@@ -1,10 +1,6 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import type {
-  ToolDefinition,
-  ToolExecutionResult,
-  ToolMetadata,
-} from "@orbaagent/shared";
+import type { ToolDefinition, ToolExecutionResult, ToolMetadata } from "@orbaagent/shared";
 import type { ITool, ToolExecutionContext } from "./base.js";
 
 function resolveSafePath(workspaceDir: string, relativePath: string, allowRoot = false): string {
@@ -49,7 +45,8 @@ export class FilesystemSearchTool implements ITool {
         },
         contentMatch: {
           type: "boolean",
-          description: "Search inside file contents (true) or file names only (false, default: true)",
+          description:
+            "Search inside file contents (true) or file names only (false, default: true)",
         },
         maxResults: {
           type: "number",
@@ -81,7 +78,8 @@ export class FilesystemSearchTool implements ITool {
     const query = String(args.query || "");
     const subPath = String(args.path || ".");
     const contentMatch = args.contentMatch !== false;
-    const maxResults = typeof args.maxResults === "number" ? Math.min(50, Math.max(1, args.maxResults)) : 20;
+    const maxResults =
+      typeof args.maxResults === "number" ? Math.min(50, Math.max(1, args.maxResults)) : 20;
 
     if (!query) {
       return {

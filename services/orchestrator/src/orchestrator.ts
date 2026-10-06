@@ -19,6 +19,7 @@ export interface AgentOrchestratorOptions {
   router?: ToolRouter;
   maxIterations?: number;
   workspacePath?: string;
+  autoApprove?: boolean;
 }
 
 export type OrchestratorLoopState =
@@ -63,6 +64,7 @@ export class AgentOrchestrator {
   private readonly router: ToolRouter;
   private readonly maxIterations: number;
   private readonly workspacePath: string;
+  private readonly autoApprove: boolean;
 
   constructor(options?: AgentOrchestratorOptions) {
     this.gateway = options?.gateway || new ModelGateway();
@@ -70,6 +72,7 @@ export class AgentOrchestrator {
     this.router = options?.router || new ToolRouter({ registry: this.registry });
     this.maxIterations = options?.maxIterations || 12;
     this.workspacePath = options?.workspacePath || process.env.ORBA_WORKSPACE_PATH || process.cwd();
+    this.autoApprove = options?.autoApprove ?? false;
   }
 
   getToolRegistry(): ToolRegistry {
@@ -177,8 +180,6 @@ export class AgentOrchestrator {
           stepText += event.textDelta;
           yield event;
         } else if (event.type === "done") {
-          // Never emit done inside the loop; only emit done when the orchestrator state machine completes
-          continue;
         } else {
           yield event;
         }
@@ -192,7 +193,11 @@ export class AgentOrchestrator {
 
       // Case 1: No tool calls were produced in this turn
       if (pendingToolCalls.length === 0) {
-        if (hasExecutedAnyTools && indicatesPendingAction(stepText) && iteration < this.maxIterations) {
+        if (
+          hasExecutedAnyTools &&
+          indicatesPendingAction(stepText) &&
+          iteration < this.maxIterations
+        ) {
           currentMessages.push({
             role: "assistant",
             content: stepText,
@@ -277,7 +282,9 @@ export class AgentOrchestrator {
             agentRunId: trace.agentRunId || "default-run",
             githubToken,
             traceId: trace.traceId,
-            isPreApproved: false,
+            isPreApproved: Boolean(this.autoApprove || (trace as any)?.isPreApproved),
+            // Surface structured attachments to tools to enable artifact_list/read without relying on URLs in text
+            attachments: (rawRequest as any).attachments || [],
           },
         );
 

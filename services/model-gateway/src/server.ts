@@ -38,7 +38,123 @@ export function createModelGatewayServer(gateway = new ModelGateway()) {
   };
 
   server.get("/health", async () => {
-    return { status: "ok", service: "model-gateway", timestamp: new Date().toISOString() };
+    const langdockHealth = gateway.router.getProviderHealth("langdock");
+    const openrouterHealth = gateway.router.getProviderHealth("openrouter");
+
+    const langdockConfigured = gateway.router.isProviderConfigured("langdock");
+    const openrouterConfigured = gateway.router.isProviderConfigured("openrouter");
+
+    const allModels = listAvailableModels();
+    const langdockModels = allModels.filter((m) => m.provider === "langdock");
+    const openrouterModels = allModels.filter((m) => m.provider === "openrouter");
+
+    const eligibleLangdock =
+      langdockHealth.isHealthy && langdockHealth.isAuthenticated && langdockConfigured
+        ? langdockModels.filter((m) => gateway.router.getModelFailures(m.id) < 3)
+        : [];
+
+    const eligibleOpenRouter =
+      openrouterHealth.isHealthy && openrouterHealth.isAuthenticated && openrouterConfigured
+        ? openrouterModels.filter((m) => gateway.router.getModelFailures(m.id) < 3)
+        : [];
+
+    const hasEligibleRoute = eligibleLangdock.length > 0 || eligibleOpenRouter.length > 0;
+
+    return {
+      status: hasEligibleRoute ? "ok" : "degraded",
+      service: "model-gateway",
+      timestamp: new Date().toISOString(),
+      providers: {
+        langdock: {
+          reachable: langdockConfigured,
+          authenticated: langdockHealth.isAuthenticated,
+          isHealthy: langdockHealth.isHealthy,
+          circuitBreakerOpen: !langdockHealth.isHealthy,
+          modelsDiscovered: langdockModels.length,
+          eligibleModels: eligibleLangdock.length,
+          status: !langdockConfigured
+            ? "UNCONFIGURED"
+            : !langdockHealth.isAuthenticated
+              ? "UNAUTHENTICATED"
+              : !langdockHealth.isHealthy
+                ? "CIRCUIT_OPEN"
+                : eligibleLangdock.length > 0
+                  ? "OPERATIONAL"
+                  : "NO_ELIGIBLE_MODELS",
+          reason: langdockHealth.authError || (langdockHealth.isHealthy ? "Active" : "Cooldown"),
+        },
+        openrouter: {
+          reachable: openrouterConfigured,
+          authenticated: openrouterHealth.isAuthenticated,
+          isHealthy: openrouterHealth.isHealthy,
+          circuitBreakerOpen: !openrouterHealth.isHealthy,
+          modelsDiscovered: openrouterModels.length,
+          eligibleModels: eligibleOpenRouter.length,
+          status: !openrouterConfigured
+            ? "UNCONFIGURED"
+            : !openrouterHealth.isAuthenticated
+              ? "UNAUTHENTICATED"
+              : !openrouterHealth.isHealthy
+                ? "CIRCUIT_OPEN"
+                : eligibleOpenRouter.length > 0
+                  ? "OPERATIONAL"
+                  : "NO_ELIGIBLE_MODELS",
+          reason:
+            openrouterHealth.authError || (openrouterHealth.isHealthy ? "Active" : "Cooldown"),
+        },
+      },
+    };
+  });
+
+  server.get("/health/models", async () => {
+    const healthTracker = gateway.router.getHealthTracker();
+    const records = healthTracker.getAllRecords();
+
+    const langdockHealth = gateway.router.getProviderHealth("langdock");
+    const openrouterHealth = gateway.router.getProviderHealth("openrouter");
+
+    const langdockConfigured = gateway.router.isProviderConfigured("langdock");
+    const openrouterConfigured = gateway.router.isProviderConfigured("openrouter");
+
+    const modelDiagnostics = records.map((rec) => {
+      const isProviderAuth =
+        rec.provider === "langdock"
+          ? langdockHealth.isAuthenticated && langdockConfigured
+          : openrouterHealth.isAuthenticated && openrouterConfigured;
+
+      const isProviderHealthy =
+        rec.provider === "langdock" ? langdockHealth.isHealthy : openrouterHealth.isHealthy;
+
+      const eligible = isProviderAuth && isProviderHealthy && rec.status === "AVAILABLE";
+      const cooldownRemainingMs =
+        rec.cooldownUntil && rec.cooldownUntil > Date.now() ? rec.cooldownUntil - Date.now() : 0;
+
+      return {
+        modelId: rec.modelId,
+        displayName: rec.displayName,
+        provider: rec.provider,
+        status: rec.status,
+        eligible,
+        authenticated: isProviderAuth,
+        failureCount: rec.failureCount,
+        cooldownRemainingMs,
+        lastFailureTime: rec.lastFailureTime
+          ? new Date(rec.lastFailureTime).toISOString()
+          : undefined,
+        lastSuccessTime: rec.lastSuccessTime
+          ? new Date(rec.lastSuccessTime).toISOString()
+          : undefined,
+        lastErrorType: rec.lastErrorType,
+        latencyMs: rec.latency,
+      };
+    });
+
+    return {
+      timestamp: new Date().toISOString(),
+      totalModels: modelDiagnostics.length,
+      eligibleModelsCount: modelDiagnostics.filter((m) => m.eligible).length,
+      models: modelDiagnostics,
+    };
   });
 
   server.get("/v1/models", async (request, reply) => {

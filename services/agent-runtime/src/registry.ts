@@ -4,17 +4,19 @@ import type {
   ToolManifest,
   ToolMetadata,
 } from "@orbaagent/shared";
+import { CapabilityManager } from "./capabilities.js";
+import { ConnectorProvider } from "./connectors/provider.js";
+import type { IConnector } from "./connectors/types.js";
 import { IntegrationsManager } from "./integrations.js";
+import { MCPProvider } from "./mcp/provider.js";
+import type { McpServerConfig } from "./mcp/transport.js";
+import { NativeProvider } from "./native/provider.js";
 import { PermissionEngine } from "./permissions.js";
 import { SecretManager } from "./secrets.js";
 import type { ITool, ToolExecutionContext } from "./tools/base.js";
+import { BrowserTool } from "./tools/browser.js";
 import { EnvironmentInspectTool } from "./tools/environment.js";
-import {
-  EditFileTool,
-  ListFilesTool,
-  ReadFileTool,
-  WriteFileTool,
-} from "./tools/filesystem.js";
+import { EditFileTool, ListFilesTool, ReadFileTool, WriteFileTool } from "./tools/filesystem.js";
 import {
   FilesystemCopyTool,
   FilesystemDeleteTool,
@@ -24,21 +26,14 @@ import {
 } from "./tools/filesystemExtended.js";
 import { GitTool } from "./tools/git.js";
 import { GitHubTool } from "./tools/github.js";
+import { CodeQualityTool } from "./tools/lintTypecheck.js";
+import { PackageManagerTool } from "./tools/packageManager.js";
 import { ProcessManagerTool } from "./tools/processManager.js";
 import { ShellTool } from "./tools/shell.js";
 import { TaskCompleteTool } from "./tools/taskComplete.js";
-import { IToolSearchableRegistry, ToolsSearchTool } from "./tools/toolsSearch.js";
-import { WebFetchTool } from "./tools/web.js";
-import { BrowserTool } from "./tools/browser.js";
-import { PackageManagerTool } from "./tools/packageManager.js";
 import { TestRunnerTool } from "./tools/testRunner.js";
-import { CodeQualityTool } from "./tools/lintTypecheck.js";
-import { NativeProvider } from "./native/provider.js";
-import { ConnectorProvider } from "./connectors/provider.js";
-import type { IConnector } from "./connectors/types.js";
-import { MCPProvider } from "./mcp/provider.js";
-import type { McpServerConfig } from "./mcp/transport.js";
-import { CapabilityManager } from "./capabilities.js";
+import { type IToolSearchableRegistry, ToolsSearchTool } from "./tools/toolsSearch.js";
+import { WebFetchTool } from "./tools/web.js";
 
 export class ToolRegistry implements IToolSearchableRegistry {
   private readonly tools: Map<string, ITool> = new Map();

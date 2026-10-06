@@ -50,7 +50,8 @@ export async function POST(request: Request) {
     }
 
     const executionSessionId =
-      body.trace?.executionSessionId || `exec_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+      body.trace?.executionSessionId ||
+      `exec_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
 
     const fullRequest: ChatCompletionRequest = {
       ...body,
@@ -64,8 +65,10 @@ export async function POST(request: Request) {
         githubToken,
         executionSessionId,
       },
+      attachments: Array.isArray((body as any).attachments) ? (body as any).attachments : undefined,
     };
 
+    // Establish Server-Sent Events stream with buffering disabled for proxies
     const stream = new ReadableStream({
       async start(controller) {
         const encoder = new TextEncoder();
@@ -94,6 +97,10 @@ export async function POST(request: Request) {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache",
         Connection: "keep-alive",
+        // Disable proxy buffering for SSE (Nginx/Traefik)
+        "X-Accel-Buffering": "no",
+        // Prevent Next/edge runtimes from attempting compression on streamed body
+        "Content-Encoding": "identity",
       },
     });
   } catch (err: unknown) {

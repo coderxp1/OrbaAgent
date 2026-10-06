@@ -1,6 +1,15 @@
 "use client";
 
-import { Bookmark, Code2, FileText, FolderGit2, Library, Sparkles, Terminal, X } from "lucide-react";
+import {
+  Bookmark,
+  Code2,
+  FileText,
+  FolderGit2,
+  Library,
+  Sparkles,
+  Terminal,
+  X,
+} from "lucide-react";
 
 interface LibraryModalProps {
   isOpen: boolean;
@@ -12,25 +21,29 @@ const TEMPLATES = [
   {
     category: "Full Repository Audit",
     title: "Inspect GitHub Repository & Run Verification",
-    prompt: "Inspect the connected repository, analyze the project structure, install dependencies, run type checking and tests, and report any failing issues.",
+    prompt:
+      "Inspect the connected repository, analyze the project structure, install dependencies, run type checking and tests, and report any failing issues.",
     icon: FolderGit2,
   },
   {
     category: "Full-Stack Development",
     title: "Refactor Component & Enforce Type Safety",
-    prompt: "Scan all TypeScript files in the codebase, locate any any-casts or missing types, and refactor them with strict interfaces.",
+    prompt:
+      "Scan all TypeScript files in the codebase, locate any any-casts or missing types, and refactor them with strict interfaces.",
     icon: Code2,
   },
   {
     category: "Meeting & Product Synthesis",
     title: "Executive AI Meeting Notes & Action Plan",
-    prompt: "Generate an executive meeting summary outline with Action Items, Owners, Key Strategic Decisions, and Target Deliverables.",
+    prompt:
+      "Generate an executive meeting summary outline with Action Items, Owners, Key Strategic Decisions, and Target Deliverables.",
     icon: FileText,
   },
   {
     category: "DevOps & CI/CD",
     title: "Docker Production Health & Security Audit",
-    prompt: "Inspect our Dockerfile and docker-compose files to ensure multi-stage builds, non-root users, minimal image size, and secure secret handling.",
+    prompt:
+      "Inspect our Dockerfile and docker-compose files to ensure multi-stage builds, non-root users, minimal image size, and secure secret handling.",
     icon: Terminal,
   },
 ];
@@ -48,7 +61,9 @@ export function LibraryModal({ isOpen, onClose, onSelectPrompt }: LibraryModalPr
             </div>
             <div>
               <h2 className="text-sm font-bold text-white">Workforce Workflow Library</h2>
-              <p className="text-[11px] text-zinc-400">Proven autonomous workflow templates and prompts</p>
+              <p className="text-[11px] text-zinc-400">
+                Proven autonomous workflow templates and prompts
+              </p>
             </div>
           </div>
           <button
@@ -103,4 +118,3 @@ export function LibraryModal({ isOpen, onClose, onSelectPrompt }: LibraryModalPr
     </div>
   );
 }
-

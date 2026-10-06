@@ -6,8 +6,8 @@ import type {
 } from "@orbaagent/shared";
 import { IntegrationsManager } from "./integrations.js";
 import { AgentMemoryManager } from "./memory.js";
-import type { ITool, ToolExecutionContext } from "./tools/base.js";
 import type { ToolRegistry } from "./registry.js";
+import type { ITool, ToolExecutionContext } from "./tools/base.js";
 
 export type CapabilityStatus =
   | "AVAILABLE"
@@ -52,7 +52,13 @@ export interface CapabilityReport {
 
 export class CapabilityManager {
   private static instance: CapabilityManager;
-  private mediaWorkerAvailable = false; // GPU 1 worker on 45.84.65.76 is frozen / not deployed yet
+  private mediaWorkerAvailable = false; // GPU 1 media worker is not deployed yet
+  /**
+   * Whether image/video generation may be advertised. Deliberately separate from
+   * {@link mediaWorkerAvailable}: the worker can be reachable while no real
+   * generation backend is loaded, in which case generation is NOT available.
+   */
+  private mediaGenerationAdvertised = false;
   private playwrightAvailable = true; // Playwright chromium installed and verified
 
   public static getInstance(): CapabilityManager {
@@ -64,6 +70,59 @@ export class CapabilityManager {
 
   public setMediaWorkerAvailable(available: boolean): void {
     this.mediaWorkerAvailable = available;
+  }
+
+  public async checkMediaWorkerHealth(): Promise<boolean> {
+    // Allow hard disable via env to avoid blocking normal chat in environments where GPU worker is not yet deployed
+    if (process.env.MEDIA_WORKER_DISABLED === "true") {
+      this.mediaWorkerAvailable = false;
+      return false;
+    }
+
+    const workerUrl = (process.env.MEDIA_WORKER_URL || "").trim();
+    const workerToken = (process.env.MEDIA_WORKER_TOKEN || "").trim();
+
+    // No fallback URL or token: a missing token must not silently become a
+    // hardcoded shared secret, and a missing URL must not reach a hardcoded host.
+    if (!workerUrl || !workerToken) {
+      this.mediaWorkerAvailable = false;
+      return false;
+    }
+
+    try {
+      const res = await fetch(`${workerUrl}/health`, {
+        headers: { Authorization: `Bearer ${workerToken}` },
+        // Keep this very short to avoid blocking any agent turn when the GPU worker is down
+        signal: AbortSignal.timeout(Number(process.env.MEDIA_WORKER_HEALTH_TIMEOUT_MS) || 800),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        this.mediaWorkerAvailable = data.worker === "healthy" || data.status === "ok";
+        // Trust the worker's own capability flags. A reachable GPU does not imply
+        // a loaded generation model, so absent flags default to false.
+        const caps = data.capabilities ?? {};
+        this.setMediaGenerationAdvertised(
+          Boolean(caps.image_generation) || Boolean(caps.video_generation),
+        );
+        return this.mediaWorkerAvailable;
+      }
+    } catch {
+      // Worker offline or unreachable
+    }
+    this.mediaWorkerAvailable = false;
+    this.setMediaGenerationAdvertised(false);
+    return false;
+  }
+
+  /**
+   * Whether image/video generation may be advertised as AVAILABLE.
+   *
+   * Defaults to `false`. The real GPU generation backend has not been deployed,
+   * so generation must not be reported as available merely because a worker
+   * responds to /health.
+   */
+  public setMediaGenerationAdvertised(advertised: boolean): void {
+    this.mediaGenerationAdvertised = advertised;
   }
 
   public setPlaywrightAvailable(available: boolean): void {
@@ -84,7 +143,8 @@ export class CapabilityManager {
       (i) => (i.name === "google_workspace" || i.name === "google_drive") && i.connected,
     );
     const m365Connected = integrations.some(
-      (i) => (i.name === "microsoft_365" || i.name === "teams" || i.name === "outlook") && i.connected,
+      (i) =>
+        (i.name === "microsoft_365" || i.name === "teams" || i.name === "outlook") && i.connected,
     );
 
     const coding_development: CapabilityItem[] = [
@@ -131,7 +191,8 @@ export class CapabilityManager {
         category: "coding_development",
         status: "AVAILABLE",
         provider: "native",
-        description: "Manage dependencies across pnpm, npm, yarn (install, remove, outdated, audit)",
+        description:
+          "Manage dependencies across pnpm, npm, yarn (install, remove, outdated, audit)",
         tools: ["package_manager"],
         requiresApproval: true,
       },
@@ -141,7 +202,8 @@ export class CapabilityManager {
         category: "coding_development",
         status: "AVAILABLE",
         provider: "native",
-        description: "Auto-detect framework (vitest, jest, pytest, playwright), discover & run tests",
+        description:
+          "Auto-detect framework (vitest, jest, pytest, playwright), discover & run tests",
         tools: ["test_runner"],
       },
       {
@@ -150,7 +212,8 @@ export class CapabilityManager {
         category: "coding_development",
         status: "AVAILABLE",
         provider: "native",
-        description: "Run TypeScript typechecking, Biome, ESLint, Prettier with structured diagnostics",
+        description:
+          "Run TypeScript typechecking, Biome, ESLint, Prettier with structured diagnostics",
         tools: ["code_quality"],
       },
       {
@@ -159,7 +222,8 @@ export class CapabilityManager {
         category: "coding_development",
         status: "AVAILABLE",
         provider: "native",
-        description: "Build, run, inspect, stop containers & Docker Compose with workspace volume sandboxing",
+        description:
+          "Build, run, inspect, stop containers & Docker Compose with workspace volume sandboxing",
         tools: ["container_action"],
       },
       {
@@ -168,7 +232,8 @@ export class CapabilityManager {
         category: "coding_development",
         status: "AVAILABLE",
         provider: "native",
-        description: "Native Node 24 SQLite (zero C++ dependencies), PostgreSQL & Redis adapters, migrations, explain, backups",
+        description:
+          "Native Node 24 SQLite (zero C++ dependencies), PostgreSQL & Redis adapters, migrations, explain, backups",
         tools: ["database_action"],
         requiresApproval: true,
       },
@@ -188,7 +253,8 @@ export class CapabilityManager {
         category: "coding_development",
         status: "AVAILABLE",
         provider: "connector",
-        description: "Manage Vercel, Cloudflare, and Supabase deployments, domains, logs, rollbacks",
+        description:
+          "Manage Vercel, Cloudflare, and Supabase deployments, domains, logs, rollbacks",
         tools: ["deployment_action"],
       },
     ];
@@ -200,7 +266,8 @@ export class CapabilityManager {
         category: "web_browsing",
         status: this.playwrightAvailable ? "AVAILABLE" : "UNAVAILABLE",
         provider: "native",
-        description: "Playwright Chromium headless browser (navigate, click, type, screenshot, evaluate, forms)",
+        description:
+          "Playwright Chromium headless browser (navigate, click, type, screenshot, evaluate, forms)",
         tools: ["browser_action"],
         notes: this.playwrightAvailable
           ? "Chromium available"
@@ -273,7 +340,9 @@ export class CapabilityManager {
         description: "Send Teams messages, access SharePoint files and OneDrive",
         tools: ["microsoft_365_service"],
         connected: m365Connected,
-        notes: m365Connected ? "Connected" : "Available, but Microsoft 365 account is not connected",
+        notes: m365Connected
+          ? "Connected"
+          : "Available, but Microsoft 365 account is not connected",
       },
     ];
 
@@ -284,7 +353,8 @@ export class CapabilityManager {
         category: "workspace_memory",
         status: "AVAILABLE",
         provider: "native",
-        description: "Project architecture context, decisions, past work, and user preferences persisted across turns",
+        description:
+          "Project architecture context, decisions, past work, and user preferences persisted across turns",
         tools: ["memory_manager"],
         notes: "Active and persistent across sessions",
       },
@@ -294,7 +364,8 @@ export class CapabilityManager {
         category: "workspace_memory",
         status: "AVAILABLE",
         provider: "native",
-        description: "Asynchronous multi-turn jobs (start, pause, resume, cancel, schedule) surviving conversational turns",
+        description:
+          "Asynchronous multi-turn jobs (start, pause, resume, cancel, schedule) surviving conversational turns",
         tools: ["job_manager"],
       },
     ];
@@ -304,25 +375,37 @@ export class CapabilityManager {
         id: "image_generation",
         name: "AI Image Generation",
         category: "ai_media",
-        status: this.mediaWorkerAvailable ? "AVAILABLE" : "UNAVAILABLE",
+        status: this.mediaGenerationAdvertised ? "AVAILABLE" : "UNAVAILABLE",
         provider: "gpu_worker",
         description: "Diffusion-based text-to-image and image-to-image generation on dedicated GPU",
-        tools: ["image_generate"],
-        notes: this.mediaWorkerAvailable
-          ? "GPU media worker active on GPU 1"
-          : "GPU media worker is not currently deployed (planned for dedicated GPU 1 on 45.84.65.76; host is currently frozen)",
+        tools: ["media_image_generate"],
+        notes: this.mediaGenerationAdvertised
+          ? "Real generation backend reported ready by the GPU media worker"
+          : "UNAVAILABLE: the real GPU generation backend has not been deployed. The media_image_generate tool returns MEDIA_GENERATION_UNAVAILABLE and does not produce output.",
       },
       {
         id: "video_generation",
         name: "AI Video Generation",
         category: "ai_media",
+        status: this.mediaGenerationAdvertised ? "AVAILABLE" : "UNAVAILABLE",
+        provider: "gpu_worker",
+        description: "Generative text-to-video diffusion on dedicated GPU",
+        tools: ["media_video_generate"],
+        notes: this.mediaGenerationAdvertised
+          ? "Real generation backend reported ready by the GPU media worker"
+          : "UNAVAILABLE: the real GPU generation backend has not been deployed. The media_video_generate tool returns MEDIA_GENERATION_UNAVAILABLE and does not produce output.",
+      },
+      {
+        id: "media_processing",
+        name: "Media Processing",
+        category: "ai_media",
         status: this.mediaWorkerAvailable ? "AVAILABLE" : "UNAVAILABLE",
         provider: "gpu_worker",
-        description: "Text-to-video generation on dedicated GPU",
-        tools: ["video_generate"],
+        description: "Image resize, conversion, compositing, video encoding, and frame extraction",
+        tools: ["media_process"],
         notes: this.mediaWorkerAvailable
-          ? "GPU media worker active on GPU 1"
-          : "GPU media worker is not currently deployed",
+          ? "Media processing active on GPU 1"
+          : "GPU media worker on GPU 1 is currently unavailable or initializing",
       },
     ];
 
@@ -378,9 +461,7 @@ export class CapabilityManager {
     for (const item of report.categories.connected_services) {
       const mark = item.status === "AVAILABLE" ? "✓" : "○";
       const statusLabel =
-        item.status === "AVAILABLE"
-          ? "CONNECTED (Active)"
-          : "Available, but account not connected";
+        item.status === "AVAILABLE" ? "CONNECTED (Active)" : "Available, but account not connected";
       lines.push(`${mark} **${item.name}** — ${statusLabel}`);
     }
 
@@ -470,7 +551,8 @@ export class CapabilitiesInspectTool implements ITool {
     const category = String(args.category || "all");
 
     const manager = CapabilityManager.getInstance();
-    const registry = this.registry || (new (await import("./registry.js")).ToolRegistry());
+    await manager.checkMediaWorkerHealth();
+    const registry = this.registry || new (await import("./registry.js")).ToolRegistry();
     const report = manager.inspectCapabilities(registry, context.userId, context.workspaceDir);
 
     if (category !== "all" && category in report.categories) {
@@ -496,4 +578,3 @@ export class CapabilitiesInspectTool implements ITool {
     };
   }
 }
-

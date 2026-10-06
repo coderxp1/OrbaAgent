@@ -101,7 +101,8 @@ describe("Phase 3B: Autonomous Infrastructure, Databases, CI/CD, Connectors & Jo
           volumes: ["../../sensitive:/data"],
         },
         {
-          workspaceDir: tempWorkspace, agentRunId: "run_phase3b",
+          workspaceDir: tempWorkspace,
+          agentRunId: "run_phase3b",
           tenantId: "t-docker",
           userId: "u-docker",
         },
@@ -122,7 +123,8 @@ describe("Phase 3B: Autonomous Infrastructure, Databases, CI/CD, Connectors & Jo
           extraArgs: "--privileged",
         },
         {
-          workspaceDir: tempWorkspace, agentRunId: "run_phase3b",
+          workspaceDir: tempWorkspace,
+          agentRunId: "run_phase3b",
           tenantId: "t-docker",
           userId: "u-docker",
         },
@@ -139,7 +141,8 @@ describe("Phase 3B: Autonomous Infrastructure, Databases, CI/CD, Connectors & Jo
         "container_action",
         { action: "list" },
         {
-          workspaceDir: tempWorkspace, agentRunId: "run_phase3b",
+          workspaceDir: tempWorkspace,
+          agentRunId: "run_phase3b",
           tenantId: "t-docker",
           userId: "u-docker",
         },
@@ -167,7 +170,8 @@ describe("Phase 3B: Autonomous Infrastructure, Databases, CI/CD, Connectors & Jo
           databasePath: dbFile,
         },
         {
-          workspaceDir: tempWorkspace, agentRunId: "run_phase3b",
+          workspaceDir: tempWorkspace,
+          agentRunId: "run_phase3b",
           tenantId: "t-db",
           userId: "u-db",
         },
@@ -198,7 +202,8 @@ describe("Phase 3B: Autonomous Infrastructure, Databases, CI/CD, Connectors & Jo
           query: createTableSql,
         },
         {
-          workspaceDir: tempWorkspace, agentRunId: "run_phase3b",
+          workspaceDir: tempWorkspace,
+          agentRunId: "run_phase3b",
           tenantId: "t-db",
           userId: "u-db",
         },
@@ -224,7 +229,8 @@ describe("Phase 3B: Autonomous Infrastructure, Databases, CI/CD, Connectors & Jo
           query: insertSql,
         },
         {
-          workspaceDir: tempWorkspace, agentRunId: "run_phase3b",
+          workspaceDir: tempWorkspace,
+          agentRunId: "run_phase3b",
           tenantId: "t-db",
           userId: "u-db",
         },
@@ -243,7 +249,8 @@ describe("Phase 3B: Autonomous Infrastructure, Databases, CI/CD, Connectors & Jo
           query: "SELECT id, name, price, sku, stock FROM products ORDER BY id ASC;",
         },
         {
-          workspaceDir: tempWorkspace, agentRunId: "run_phase3b",
+          workspaceDir: tempWorkspace,
+          agentRunId: "run_phase3b",
           tenantId: "t-db",
           userId: "u-db",
         },
@@ -267,7 +274,8 @@ describe("Phase 3B: Autonomous Infrastructure, Databases, CI/CD, Connectors & Jo
           databasePath: dbFile,
         },
         {
-          workspaceDir: tempWorkspace, agentRunId: "run_phase3b",
+          workspaceDir: tempWorkspace,
+          agentRunId: "run_phase3b",
           tenantId: "t-db",
           userId: "u-db",
         },
@@ -290,7 +298,8 @@ describe("Phase 3B: Autonomous Infrastructure, Databases, CI/CD, Connectors & Jo
           query: "SELECT * FROM products WHERE sku = 'SKU-001';",
         },
         {
-          workspaceDir: tempWorkspace, agentRunId: "run_phase3b",
+          workspaceDir: tempWorkspace,
+          agentRunId: "run_phase3b",
           tenantId: "t-db",
           userId: "u-db",
         },
@@ -327,7 +336,8 @@ describe("Phase 3B: Autonomous Infrastructure, Databases, CI/CD, Connectors & Jo
           migrationPath: migrationFile,
         },
         {
-          workspaceDir: tempWorkspace, agentRunId: "run_phase3b",
+          workspaceDir: tempWorkspace,
+          agentRunId: "run_phase3b",
           tenantId: "t-db",
           userId: "u-db",
         },
@@ -347,7 +357,8 @@ describe("Phase 3B: Autonomous Infrastructure, Databases, CI/CD, Connectors & Jo
           query: "SELECT COUNT(*) as total FROM orders;",
         },
         {
-          workspaceDir: tempWorkspace, agentRunId: "run_phase3b",
+          workspaceDir: tempWorkspace,
+          agentRunId: "run_phase3b",
           tenantId: "t-db",
           userId: "u-db",
         },
@@ -372,7 +383,8 @@ describe("Phase 3B: Autonomous Infrastructure, Databases, CI/CD, Connectors & Jo
           backupPath: backupFile,
         },
         {
-          workspaceDir: tempWorkspace, agentRunId: "run_phase3b",
+          workspaceDir: tempWorkspace,
+          agentRunId: "run_phase3b",
           tenantId: "t-db",
           userId: "u-db",
         },
@@ -383,9 +395,9 @@ describe("Phase 3B: Autonomous Infrastructure, Databases, CI/CD, Connectors & Jo
 
       // Verify backup file exists and has content
       const content = await fs.readFile(path.join(tempWorkspace, backupFile), "utf-8");
-      expect(content).toContain("INSERT INTO \"products\"");
+      expect(content).toContain('INSERT INTO "products"');
       expect(content).toContain("Widget A");
-      expect(content).toContain("INSERT INTO \"orders\"");
+      expect(content).toContain('INSERT INTO "orders"');
     });
 
     it("blocks destructive queries unless explicitly pre-approved", async () => {
@@ -400,7 +412,8 @@ describe("Phase 3B: Autonomous Infrastructure, Databases, CI/CD, Connectors & Jo
           query: "DROP TABLE products;",
         },
         {
-          workspaceDir: tempWorkspace, agentRunId: "run_phase3b",
+          workspaceDir: tempWorkspace,
+          agentRunId: "run_phase3b",
           tenantId: "t-db",
           userId: "u-db",
           isPreApproved: false,
@@ -408,7 +421,9 @@ describe("Phase 3B: Autonomous Infrastructure, Databases, CI/CD, Connectors & Jo
       );
 
       expect(dropRes.result.success).toBe(false);
-      expect(dropRes.result.error).toContain("Destructive database query requires explicit pre-approval");
+      expect(dropRes.result.error).toContain(
+        "Destructive database query requires explicit pre-approval",
+      );
 
       // Pre-approved DROP TABLE
       const approvedDrop = await router.routeAndExecute(
@@ -421,7 +436,8 @@ describe("Phase 3B: Autonomous Infrastructure, Databases, CI/CD, Connectors & Jo
           query: "DROP TABLE orders;",
         },
         {
-          workspaceDir: tempWorkspace, agentRunId: "run_phase3b",
+          workspaceDir: tempWorkspace,
+          agentRunId: "run_phase3b",
           tenantId: "t-db",
           userId: "u-db",
           isPreApproved: true,
@@ -444,7 +460,8 @@ describe("Phase 3B: Autonomous Infrastructure, Databases, CI/CD, Connectors & Jo
           connectionString,
         },
         {
-          workspaceDir: tempWorkspace, agentRunId: "run_phase3b",
+          workspaceDir: tempWorkspace,
+          agentRunId: "run_phase3b",
           tenantId: "t-db",
           userId: "u-db",
         },
@@ -467,7 +484,8 @@ describe("Phase 3B: Autonomous Infrastructure, Databases, CI/CD, Connectors & Jo
           branch: "main",
         },
         {
-          workspaceDir: tempWorkspace, agentRunId: "run_phase3b",
+          workspaceDir: tempWorkspace,
+          agentRunId: "run_phase3b",
           tenantId: "t-ci",
           userId: "u-ci",
         },
@@ -491,7 +509,8 @@ describe("Phase 3B: Autonomous Infrastructure, Databases, CI/CD, Connectors & Jo
           runId: 102489,
         },
         {
-          workspaceDir: tempWorkspace, agentRunId: "run_phase3b",
+          workspaceDir: tempWorkspace,
+          agentRunId: "run_phase3b",
           tenantId: "t-ci",
           userId: "u-ci",
         },
@@ -512,7 +531,8 @@ describe("Phase 3B: Autonomous Infrastructure, Databases, CI/CD, Connectors & Jo
           runId: 102489,
         },
         {
-          workspaceDir: tempWorkspace, agentRunId: "run_phase3b",
+          workspaceDir: tempWorkspace,
+          agentRunId: "run_phase3b",
           tenantId: "t-ci",
           userId: "u-ci",
         },
@@ -530,7 +550,8 @@ describe("Phase 3B: Autonomous Infrastructure, Databases, CI/CD, Connectors & Jo
           runId: 102489,
         },
         {
-          workspaceDir: tempWorkspace, agentRunId: "run_phase3b",
+          workspaceDir: tempWorkspace,
+          agentRunId: "run_phase3b",
           tenantId: "t-ci",
           userId: "u-ci",
         },
@@ -549,7 +570,8 @@ describe("Phase 3B: Autonomous Infrastructure, Databases, CI/CD, Connectors & Jo
           runId: 102489,
         },
         {
-          workspaceDir: tempWorkspace, agentRunId: "run_phase3b",
+          workspaceDir: tempWorkspace,
+          agentRunId: "run_phase3b",
           tenantId: "t-ci",
           userId: "u-ci",
         },
@@ -573,7 +595,8 @@ describe("Phase 3B: Autonomous Infrastructure, Databases, CI/CD, Connectors & Jo
           projectName: "orba-web",
         },
         {
-          workspaceDir: tempWorkspace, agentRunId: "run_phase3b",
+          workspaceDir: tempWorkspace,
+          agentRunId: "run_phase3b",
           tenantId: "t-cloud",
           userId: "u-cloud",
         },
@@ -593,7 +616,8 @@ describe("Phase 3B: Autonomous Infrastructure, Databases, CI/CD, Connectors & Jo
           projectName: "orba-docs",
         },
         {
-          workspaceDir: tempWorkspace, agentRunId: "run_phase3b",
+          workspaceDir: tempWorkspace,
+          agentRunId: "run_phase3b",
           tenantId: "t-cloud",
           userId: "u-cloud",
         },
@@ -615,7 +639,8 @@ describe("Phase 3B: Autonomous Infrastructure, Databases, CI/CD, Connectors & Jo
           deploymentId: "dep_90210",
         },
         {
-          workspaceDir: tempWorkspace, agentRunId: "run_phase3b",
+          workspaceDir: tempWorkspace,
+          agentRunId: "run_phase3b",
           tenantId: "t-cloud",
           userId: "u-cloud",
         },
@@ -636,7 +661,8 @@ describe("Phase 3B: Autonomous Infrastructure, Databases, CI/CD, Connectors & Jo
           deploymentId: "dep_90210",
         },
         {
-          workspaceDir: tempWorkspace, agentRunId: "run_phase3b",
+          workspaceDir: tempWorkspace,
+          agentRunId: "run_phase3b",
           tenantId: "t-cloud",
           userId: "u-cloud",
         },
@@ -661,7 +687,8 @@ describe("Phase 3B: Autonomous Infrastructure, Databases, CI/CD, Connectors & Jo
           },
         },
         {
-          workspaceDir: tempWorkspace, agentRunId: "run_phase3b",
+          workspaceDir: tempWorkspace,
+          agentRunId: "run_phase3b",
           tenantId: "t-cloud",
           userId: "u-cloud",
         },
@@ -682,7 +709,8 @@ describe("Phase 3B: Autonomous Infrastructure, Databases, CI/CD, Connectors & Jo
           deploymentId: "dep_prev_7712",
         },
         {
-          workspaceDir: tempWorkspace, agentRunId: "run_phase3b",
+          workspaceDir: tempWorkspace,
+          agentRunId: "run_phase3b",
           tenantId: "t-cloud",
           userId: "u-cloud",
         },
@@ -724,7 +752,8 @@ describe("Phase 3B: Autonomous Infrastructure, Databases, CI/CD, Connectors & Jo
           base: "main",
         },
         {
-          workspaceDir: tempWorkspace, agentRunId: "run_phase3b",
+          workspaceDir: tempWorkspace,
+          agentRunId: "run_phase3b",
           tenantId: "t-conn",
           userId: "u-conn",
           isPreApproved: true,
@@ -745,7 +774,8 @@ describe("Phase 3B: Autonomous Infrastructure, Databases, CI/CD, Connectors & Jo
           repo: "orbaagent/orbaagent",
         },
         {
-          workspaceDir: tempWorkspace, agentRunId: "run_phase3b",
+          workspaceDir: tempWorkspace,
+          agentRunId: "run_phase3b",
           tenantId: "t-conn",
           userId: "u-conn",
         },
@@ -766,7 +796,8 @@ describe("Phase 3B: Autonomous Infrastructure, Databases, CI/CD, Connectors & Jo
           body: "Automated verification completed successfully.",
         },
         {
-          workspaceDir: tempWorkspace, agentRunId: "run_phase3b",
+          workspaceDir: tempWorkspace,
+          agentRunId: "run_phase3b",
           tenantId: "t-conn",
           userId: "u-conn",
           isPreApproved: true,
@@ -787,7 +818,8 @@ describe("Phase 3B: Autonomous Infrastructure, Databases, CI/CD, Connectors & Jo
           message: "Production deployment ready for verification.",
         },
         {
-          workspaceDir: tempWorkspace, agentRunId: "run_phase3b",
+          workspaceDir: tempWorkspace,
+          agentRunId: "run_phase3b",
           tenantId: "t-conn",
           userId: "u-conn",
         },
@@ -801,7 +833,8 @@ describe("Phase 3B: Autonomous Infrastructure, Databases, CI/CD, Connectors & Jo
         "slack_service",
         { action: "list_channels" },
         {
-          workspaceDir: tempWorkspace, agentRunId: "run_phase3b",
+          workspaceDir: tempWorkspace,
+          agentRunId: "run_phase3b",
           tenantId: "t-conn",
           userId: "u-conn",
         },
@@ -822,7 +855,8 @@ describe("Phase 3B: Autonomous Infrastructure, Databases, CI/CD, Connectors & Jo
           content: "Comprehensive automated verification notes",
         },
         {
-          workspaceDir: tempWorkspace, agentRunId: "run_phase3b",
+          workspaceDir: tempWorkspace,
+          agentRunId: "run_phase3b",
           tenantId: "t-conn",
           userId: "u-conn",
         },
@@ -839,7 +873,8 @@ describe("Phase 3B: Autonomous Infrastructure, Databases, CI/CD, Connectors & Jo
           query: "Architecture",
         },
         {
-          workspaceDir: tempWorkspace, agentRunId: "run_phase3b",
+          workspaceDir: tempWorkspace,
+          agentRunId: "run_phase3b",
           tenantId: "t-conn",
           userId: "u-conn",
         },
@@ -859,7 +894,8 @@ describe("Phase 3B: Autonomous Infrastructure, Databases, CI/CD, Connectors & Jo
           query: "Specs",
         },
         {
-          workspaceDir: tempWorkspace, agentRunId: "run_phase3b",
+          workspaceDir: tempWorkspace,
+          agentRunId: "run_phase3b",
           tenantId: "t-conn",
           userId: "u-conn",
         },
@@ -877,7 +913,8 @@ describe("Phase 3B: Autonomous Infrastructure, Databases, CI/CD, Connectors & Jo
           message: "All services healthy.",
         },
         {
-          workspaceDir: tempWorkspace, agentRunId: "run_phase3b",
+          workspaceDir: tempWorkspace,
+          agentRunId: "run_phase3b",
           tenantId: "t-conn",
           userId: "u-conn",
         },
@@ -900,7 +937,8 @@ describe("Phase 3B: Autonomous Infrastructure, Databases, CI/CD, Connectors & Jo
           payload: { target: "all" },
         },
         {
-          workspaceDir: tempWorkspace, agentRunId: "run_phase3b",
+          workspaceDir: tempWorkspace,
+          agentRunId: "run_phase3b",
           tenantId: "t-job",
           userId: "u-job",
         },
@@ -921,7 +959,8 @@ describe("Phase 3B: Autonomous Infrastructure, Databases, CI/CD, Connectors & Jo
           jobId,
         },
         {
-          workspaceDir: tempWorkspace, agentRunId: "run_phase3b",
+          workspaceDir: tempWorkspace,
+          agentRunId: "run_phase3b",
           tenantId: "t-job",
           userId: "u-job",
         },
@@ -940,7 +979,8 @@ describe("Phase 3B: Autonomous Infrastructure, Databases, CI/CD, Connectors & Jo
           jobId,
         },
         {
-          workspaceDir: tempWorkspace, agentRunId: "run_phase3b",
+          workspaceDir: tempWorkspace,
+          agentRunId: "run_phase3b",
           tenantId: "t-job",
           userId: "u-job",
         },
@@ -962,7 +1002,8 @@ describe("Phase 3B: Autonomous Infrastructure, Databases, CI/CD, Connectors & Jo
           jobId,
         },
         {
-          workspaceDir: tempWorkspace, agentRunId: "run_phase3b",
+          workspaceDir: tempWorkspace,
+          agentRunId: "run_phase3b",
           tenantId: "t-job",
           userId: "u-job",
         },
@@ -983,7 +1024,8 @@ describe("Phase 3B: Autonomous Infrastructure, Databases, CI/CD, Connectors & Jo
           jobId,
         },
         {
-          workspaceDir: tempWorkspace, agentRunId: "run_phase3b",
+          workspaceDir: tempWorkspace,
+          agentRunId: "run_phase3b",
           tenantId: "t-job",
           userId: "u-job",
         },
@@ -1007,7 +1049,8 @@ describe("Phase 3B: Autonomous Infrastructure, Databases, CI/CD, Connectors & Jo
           payload: { endpoint: "https://api.internal/health" },
         },
         {
-          workspaceDir: tempWorkspace, agentRunId: "run_phase3b",
+          workspaceDir: tempWorkspace,
+          agentRunId: "run_phase3b",
           tenantId: "t-job",
           userId: "u-job",
         },
@@ -1034,7 +1077,8 @@ describe("Phase 3B: Autonomous Infrastructure, Databases, CI/CD, Connectors & Jo
           action: "list",
         },
         {
-          workspaceDir: tempWorkspace, agentRunId: "run_phase3b",
+          workspaceDir: tempWorkspace,
+          agentRunId: "run_phase3b",
           tenantId: "t-job",
           userId: "u-job",
         },
@@ -1061,7 +1105,8 @@ describe("Phase 3B: Autonomous Infrastructure, Databases, CI/CD, Connectors & Jo
         "tools_search",
         { query: "database git github ci write" },
         {
-          workspaceDir: tempWorkspace, agentRunId: "run_phase3b",
+          workspaceDir: tempWorkspace,
+          agentRunId: "run_phase3b",
           tenantId: "t-wf",
           userId: "u-wf",
         },
@@ -1075,10 +1120,12 @@ describe("Phase 3B: Autonomous Infrastructure, Databases, CI/CD, Connectors & Jo
         "write_file",
         {
           filePath: "src/calculator.ts",
-          content: "export function multiply(a: number, b: number): number { return a * b; }\nexport function divide(a: number, b: number): number { if (b === 0) throw new Error('Divide by zero'); return a / b; }",
+          content:
+            "export function multiply(a: number, b: number): number { return a * b; }\nexport function divide(a: number, b: number): number { if (b === 0) throw new Error('Divide by zero'); return a / b; }",
         },
         {
-          workspaceDir: tempWorkspace, agentRunId: "run_phase3b",
+          workspaceDir: tempWorkspace,
+          agentRunId: "run_phase3b",
           tenantId: "t-wf",
           userId: "u-wf",
         },
@@ -1105,7 +1152,8 @@ describe("Phase 3B: Autonomous Infrastructure, Databases, CI/CD, Connectors & Jo
           migrationPath: dbMigrationFile,
         },
         {
-          workspaceDir: tempWorkspace, agentRunId: "run_phase3b",
+          workspaceDir: tempWorkspace,
+          agentRunId: "run_phase3b",
           tenantId: "t-wf",
           userId: "u-wf",
         },
@@ -1121,10 +1169,12 @@ describe("Phase 3B: Autonomous Infrastructure, Databases, CI/CD, Connectors & Jo
           action: "query",
           engine: "sqlite",
           databasePath: "prod_metrics.db",
-          query: "SELECT metric_name, metric_value FROM run_metrics WHERE metric_name = 'code_coverage';",
+          query:
+            "SELECT metric_name, metric_value FROM run_metrics WHERE metric_name = 'code_coverage';",
         },
         {
-          workspaceDir: tempWorkspace, agentRunId: "run_phase3b",
+          workspaceDir: tempWorkspace,
+          agentRunId: "run_phase3b",
           tenantId: "t-wf",
           userId: "u-wf",
         },
@@ -1140,7 +1190,8 @@ describe("Phase 3B: Autonomous Infrastructure, Databases, CI/CD, Connectors & Jo
         "execute_git",
         { action: "status" },
         {
-          workspaceDir: tempWorkspace, agentRunId: "run_phase3b",
+          workspaceDir: tempWorkspace,
+          agentRunId: "run_phase3b",
           tenantId: "t-wf",
           userId: "u-wf",
         },
@@ -1161,7 +1212,8 @@ describe("Phase 3B: Autonomous Infrastructure, Databases, CI/CD, Connectors & Jo
           base: "main",
         },
         {
-          workspaceDir: tempWorkspace, agentRunId: "run_phase3b",
+          workspaceDir: tempWorkspace,
+          agentRunId: "run_phase3b",
           tenantId: "t-wf",
           userId: "u-wf",
           isPreApproved: true,
@@ -1182,7 +1234,8 @@ describe("Phase 3B: Autonomous Infrastructure, Databases, CI/CD, Connectors & Jo
           branch: "main",
         },
         {
-          workspaceDir: tempWorkspace, agentRunId: "run_phase3b",
+          workspaceDir: tempWorkspace,
+          agentRunId: "run_phase3b",
           tenantId: "t-wf",
           userId: "u-wf",
         },
@@ -1195,11 +1248,13 @@ describe("Phase 3B: Autonomous Infrastructure, Databases, CI/CD, Connectors & Jo
         "wf_step_8_complete",
         "task_complete",
         {
-          summary: "Autonomous workflow executed: code written, DB migrated & verified, PR opened, CI monitored.",
+          summary:
+            "Autonomous workflow executed: code written, DB migrated & verified, PR opened, CI monitored.",
           filesModified: ["src/calculator.ts", "migrations/init_metrics.sql", "prod_metrics.db"],
         },
         {
-          workspaceDir: tempWorkspace, agentRunId: "run_phase3b",
+          workspaceDir: tempWorkspace,
+          agentRunId: "run_phase3b",
           tenantId: "t-wf",
           userId: "u-wf",
         },

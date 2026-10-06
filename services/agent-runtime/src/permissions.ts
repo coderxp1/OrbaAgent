@@ -1,11 +1,7 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type {
-  AuditEvent,
-  PermissionTier,
-  ToolCategory,
-} from "@orbaagent/shared";
+import type { AuditEvent, PermissionTier, ToolCategory } from "@orbaagent/shared";
 import { SecretManager } from "./secrets.js";
 import type { ToolExecutionContext } from "./tools/base.js";
 
@@ -49,7 +45,7 @@ export class PermissionEngine {
   public isPathWithinWorkspace(
     targetPath: string,
     workspaceDir: string,
-    allowRoot: boolean = false,
+    allowRoot = false,
   ): boolean {
     if (!targetPath || !workspaceDir) return false;
     const resolvedTarget = path.resolve(workspaceDir, targetPath);
@@ -109,14 +105,18 @@ export class PermissionEngine {
     }
 
     // 3. Process kill restriction: Cannot kill host PIDs or system PIDs
-    if (allowed && (toolName === "process_manager" || toolName === "process_kill" || toolName === "process")) {
+    if (
+      allowed &&
+      (toolName === "process_manager" || toolName === "process_kill" || toolName === "process")
+    ) {
       const action = String(args.action || args.operation || "");
       if (action === "kill" || toolName === "process_kill") {
         const rawId = String(args.processId || args.pid || "");
         const numPid = Number(rawId);
         const managedPids = (args._managedPids as Set<number> | undefined) || new Set<number>();
         // If it's a numeric PID and not in managedPids, or not a known managed process id
-        const isManaged = (!isNaN(numPid) && managedPids.has(numPid)) || (rawId.startsWith("p_"));
+        const isManaged =
+          (!Number.isNaN(numPid) && managedPids.has(numPid)) || rawId.startsWith("p_");
         if (!isManaged) {
           allowed = false;
           denialReason = `Target PID '${rawId}' is not an OrbaAgent-managed process. Terminating external or host processes is strictly forbidden.`;
@@ -210,7 +210,11 @@ export class PermissionEngine {
     // 8. Database query safety & path checks
     if (allowed && toolName === "database_action") {
       const dbPath = String(args.databasePath || "");
-      if (dbPath && dbPath !== ":memory:" && !this.isPathWithinWorkspace(dbPath, context.workspaceDir)) {
+      if (
+        dbPath &&
+        dbPath !== ":memory:" &&
+        !this.isPathWithinWorkspace(dbPath, context.workspaceDir)
+      ) {
         allowed = false;
         denialReason = `SQLite database path '${dbPath}' resolves outside workspace boundary.`;
       }
@@ -251,8 +255,8 @@ export class PermissionEngine {
     // Prepare redacted arguments for audit log
     const redactedArgs = secretManager.redactObject({ ...args });
     // Remove internal routing flags from audit log
-    delete (redactedArgs as Record<string, unknown>)._managedPids;
-    delete (redactedArgs as Record<string, unknown>)._toolCallId;
+    (redactedArgs as Record<string, unknown>)._managedPids = undefined;
+    (redactedArgs as Record<string, unknown>)._toolCallId = undefined;
 
     const auditEvent: AuditEvent = {
       id: `audit_${randomUUID()}`,

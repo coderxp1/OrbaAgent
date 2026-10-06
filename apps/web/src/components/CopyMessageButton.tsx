@@ -83,4 +83,3 @@ export function CopyMessageButton({ message, className = "" }: CopyMessageButton
     </div>
   );
 }
-

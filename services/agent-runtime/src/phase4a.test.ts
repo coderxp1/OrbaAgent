@@ -95,7 +95,9 @@ describe("Phase 4A: Production Capability Verification & Autonomous Workflow", (
       expect(slackItem?.status).toBe("AVAILABLE_BUT_NOT_CONNECTED");
       expect(slackItem?.notes).toContain("Available, but Slack account is not connected");
 
-      const notionItem = report.categories.connected_services.find((s) => s.id === "notion_service");
+      const notionItem = report.categories.connected_services.find(
+        (s) => s.id === "notion_service",
+      );
       expect(notionItem).toBeDefined();
       expect(notionItem?.status).toBe("AVAILABLE_BUT_NOT_CONNECTED");
 
@@ -123,21 +125,44 @@ describe("Phase 4A: Production Capability Verification & Autonomous Workflow", (
 
     it("accurately reports GPU media worker status as unavailable before deployment", async () => {
       capabilityManager.setMediaWorkerAvailable(false);
+      capabilityManager.setMediaGenerationAdvertised(false);
       const report = capabilityManager.inspectCapabilities(registry, "u-phase4a", "t-phase4a");
       const imgItem = report.categories.ai_media.find((m) => m.id === "image_generation");
 
       expect(imgItem?.status).toBe("UNAVAILABLE");
-      expect(imgItem?.notes).toContain("GPU media worker is not currently deployed");
+      expect(imgItem?.notes).toContain("real GPU generation backend has not been deployed");
 
-      // When later deployed, report changes dynamically without manual prompt editing
-      capabilityManager.setMediaWorkerAvailable(true);
-      const updatedReport = capabilityManager.inspectCapabilities(registry, "u-phase4a", "t-phase4a");
-      const updatedImgItem = updatedReport.categories.ai_media.find((m) => m.id === "image_generation");
+      // Generation is advertised only when a real backend reports ready. Merely
+      // reaching a worker is not sufficient: the worker can be up while no
+      // generation model is loaded, which previously caused a false AVAILABLE.
+      capabilityManager.setMediaGenerationAdvertised(true);
+      const updatedReport = capabilityManager.inspectCapabilities(
+        registry,
+        "u-phase4a",
+        "t-phase4a",
+      );
+      const updatedImgItem = updatedReport.categories.ai_media.find(
+        (m) => m.id === "image_generation",
+      );
       expect(updatedImgItem?.status).toBe("AVAILABLE");
-      expect(updatedImgItem?.notes).toContain("GPU media worker active on GPU 1");
+      expect(updatedImgItem?.notes).toContain("Real generation backend reported ready");
+
+      // A reachable worker with no generation backend must NOT advertise generation.
+      capabilityManager.setMediaWorkerAvailable(true);
+      capabilityManager.setMediaGenerationAdvertised(false);
+      const workerUpReport = capabilityManager.inspectCapabilities(
+        registry,
+        "u-phase4a",
+        "t-phase4a",
+      );
+      const workerUpImgItem = workerUpReport.categories.ai_media.find(
+        (m) => m.id === "image_generation",
+      );
+      expect(workerUpImgItem?.status).toBe("UNAVAILABLE");
 
       // Restore to actual current state (frozen GPU server)
       capabilityManager.setMediaWorkerAvailable(false);
+      capabilityManager.setMediaGenerationAdvertised(false);
     });
   });
 
@@ -214,7 +239,9 @@ describe("Phase 4A: Production Capability Verification & Autonomous Workflow", (
 
       // Failure confirmed
       expect(firstRunRes.result.success).toBe(false);
-      expect(firstRunRes.result.output).toMatch(/AssertionError|Expected discounted price to be 80/);
+      expect(firstRunRes.result.output).toMatch(
+        /AssertionError|Expected discounted price to be 80/,
+      );
 
       // Step 7: Autonomous Diagnosis & Correction
       const fixedCode = `

@@ -1,10 +1,6 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { type ChildProcess, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import type {
-  ToolDefinition,
-  ToolExecutionResult,
-  ToolMetadata,
-} from "@orbaagent/shared";
+import type { ToolDefinition, ToolExecutionResult, ToolMetadata } from "@orbaagent/shared";
 import { SecretManager } from "../secrets.js";
 import type { ITool, ToolExecutionContext } from "./base.js";
 
@@ -43,7 +39,7 @@ export class ProcessManager {
 
   public startProcess(
     command: string,
-    args: string[] = [],
+    args: string[],
     options: {
       cwd: string;
       env?: Record<string, string>;
@@ -135,7 +131,7 @@ export class ProcessManager {
       record = this.processes.get(idOrPid);
       if (!record) {
         const numPid = Number(idOrPid);
-        if (!isNaN(numPid)) {
+        if (!Number.isNaN(numPid)) {
           const id = this.pidToProcessId.get(numPid);
           if (id) record = this.processes.get(id);
         }
@@ -165,7 +161,7 @@ export class ProcessManager {
       record = this.processes.get(idOrPid);
       if (!record) {
         const numPid = Number(idOrPid);
-        if (!isNaN(numPid)) {
+        if (!Number.isNaN(numPid)) {
           const id = this.pidToProcessId.get(numPid);
           if (id) record = this.processes.get(id);
         }
@@ -239,7 +235,9 @@ export class ProcessManagerTool implements ITool {
   ): Promise<ToolExecutionResult> {
     const startTime = Date.now();
     const toolCallId = String(args._toolCallId || "call_proc_mgr");
-    const action = String(args.action || "").toLowerCase().trim();
+    const action = String(args.action || "")
+      .toLowerCase()
+      .trim();
     const manager = ProcessManager.getInstance();
 
     switch (action) {

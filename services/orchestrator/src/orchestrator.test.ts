@@ -1,8 +1,8 @@
+import { ToolRegistry } from "@orbaagent/agent-runtime";
+import { ModelGateway } from "@orbaagent/model-gateway";
+import type { ChatCompletionRequest, NormalizedEvent } from "@orbaagent/shared";
 import { describe, expect, it, vi } from "vitest";
 import { AgentOrchestrator } from "./orchestrator.js";
-import type { ChatCompletionRequest, NormalizedEvent } from "@orbaagent/shared";
-import { ModelGateway } from "@orbaagent/model-gateway";
-import { ToolRegistry } from "@orbaagent/agent-runtime";
 
 describe("AgentOrchestrator State Machine & Autonomous Execution", () => {
   it("executes multi-step sequential tool calls to completion without stopping", async () => {
@@ -39,7 +39,10 @@ describe("AgentOrchestrator State Machine & Autonomous Execution", () => {
           toolCall: {
             id: "call_step3",
             name: "task_complete",
-            arguments: { summary: "All multi-step commands executed successfully.", verified: true },
+            arguments: {
+              summary: "All multi-step commands executed successfully.",
+              verified: true,
+            },
           },
         };
       }
@@ -289,4 +292,3 @@ describe("AgentOrchestrator State Machine & Autonomous Execution", () => {
     expect(discoveredEvents[0].discoveredTools).toContain("execute_git");
   });
 });
-

@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { type ChildProcess, spawn } from "node:child_process";
 import { SecretManager } from "../secrets.js";
 
 export interface McpToolSchema {
@@ -83,12 +83,14 @@ export class McpStdioClient {
       try {
         const msg = JSON.parse(trimmed);
         if (msg.id && this.pendingRequests.has(msg.id)) {
-          const req = this.pendingRequests.get(msg.id)!;
+          const req = this.pendingRequests.get(msg.id);
           this.pendingRequests.delete(msg.id);
-          if (msg.error) {
-            req.reject(new Error(msg.error.message || JSON.stringify(msg.error)));
-          } else {
-            req.resolve(msg.result);
+          if (req) {
+            if (msg.error) {
+              req.reject(new Error(msg.error.message || JSON.stringify(msg.error)));
+            } else {
+              req.resolve(msg.result);
+            }
           }
         }
       } catch {
@@ -103,7 +105,7 @@ export class McpStdioClient {
     }
 
     const id = this.nextId++;
-    const message = JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n";
+    const message = `${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`;
 
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -124,13 +126,13 @@ export class McpStdioClient {
         },
       });
 
-      this.child!.stdin!.write(message);
+      this.child?.stdin?.write(message);
     });
   }
 
   public sendNotification(method: string, params: Record<string, unknown>): void {
-    if (this.child && this.child.stdin && !this.child.killed) {
-      const message = JSON.stringify({ jsonrpc: "2.0", method, params }) + "\n";
+    if (this.child?.stdin && !this.child.killed) {
+      const message = `${JSON.stringify({ jsonrpc: "2.0", method, params })}\n`;
       this.child.stdin.write(message);
     }
   }

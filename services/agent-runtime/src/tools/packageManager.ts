@@ -2,11 +2,7 @@ import { exec } from "node:child_process";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { promisify } from "node:util";
-import type {
-  ToolDefinition,
-  ToolExecutionResult,
-  ToolMetadata,
-} from "@orbaagent/shared";
+import type { ToolDefinition, ToolExecutionResult, ToolMetadata } from "@orbaagent/shared";
 import { SecretManager } from "../secrets.js";
 import type { ITool, ToolExecutionContext } from "./base.js";
 
@@ -29,12 +25,14 @@ export class PackageManagerTool implements ITool {
         },
         packageName: {
           type: "string",
-          description: "Name of the package or library (e.g. 'zod', 'lodash', 'requests', 'pytest').",
+          description:
+            "Name of the package or library (e.g. 'zod', 'lodash', 'requests', 'pytest').",
         },
         packageManager: {
           type: "string",
           enum: ["pnpm", "npm", "yarn", "pip", "cargo", "auto"],
-          description: "Target package manager (default 'auto' detects from workspace and environment).",
+          description:
+            "Target package manager (default 'auto' detects from workspace and environment).",
         },
         isDev: {
           type: "boolean",
@@ -107,7 +105,9 @@ export class PackageManagerTool implements ITool {
   ): Promise<ToolExecutionResult> {
     const startTime = Date.now();
     const toolCallId = String(args._toolCallId || "call_pkg_mgr");
-    const action = String(args.action || "info").toLowerCase().trim();
+    const action = String(args.action || "info")
+      .toLowerCase()
+      .trim();
     const pkg = String(args.packageName || "").trim();
     const isDev = Boolean(args.isDev);
     const extraArgs = String(args.extraArgs || "").trim();
@@ -135,7 +135,7 @@ export class PackageManagerTool implements ITool {
       };
     }
 
-    let pm = (args.packageManager as SupportedPackageManager | "auto") || "auto";
+    const pm = (args.packageManager as SupportedPackageManager | "auto") || "auto";
     let targetPm: SupportedPackageManager;
     if (pm === "auto" || !pm) {
       targetPm = await this.detectPackageManager(context.workspaceDir);
@@ -167,7 +167,8 @@ export class PackageManagerTool implements ITool {
         break;
       }
       case "info": {
-        if (targetPm === "npm" || targetPm === "pnpm") cmd = `${targetPm} info "${pkg}" name version description`;
+        if (targetPm === "npm" || targetPm === "pnpm")
+          cmd = `${targetPm} info "${pkg}" name version description`;
         else if (targetPm === "pip") cmd = `pip show "${pkg}"`;
         else if (targetPm === "cargo") cmd = `cargo info "${pkg}"`;
         else cmd = `${targetPm} view "${pkg}"`;
@@ -175,7 +176,8 @@ export class PackageManagerTool implements ITool {
       }
       case "install": {
         if (targetPm === "pnpm") cmd = `pnpm add ${isDev ? "-D " : ""}"${pkg}" ${extraArgs}`;
-        else if (targetPm === "npm") cmd = `npm install ${isDev ? "--save-dev " : ""}"${pkg}" ${extraArgs}`;
+        else if (targetPm === "npm")
+          cmd = `npm install ${isDev ? "--save-dev " : ""}"${pkg}" ${extraArgs}`;
         else if (targetPm === "yarn") cmd = `yarn add ${isDev ? "-D " : ""}"${pkg}" ${extraArgs}`;
         else if (targetPm === "pip") cmd = `pip install "${pkg}" ${extraArgs}`;
         else if (targetPm === "cargo") cmd = `cargo add "${pkg}" ${extraArgs}`;
@@ -211,7 +213,9 @@ export class PackageManagerTool implements ITool {
       });
 
       const rawOutput = [stdout, stderr].filter(Boolean).join("\n").trim();
-      const output = secretManager.redact(rawOutput || `Package action '${action}' completed successfully.`);
+      const output = secretManager.redact(
+        rawOutput || `Package action '${action}' completed successfully.`,
+      );
 
       return {
         toolCallId,

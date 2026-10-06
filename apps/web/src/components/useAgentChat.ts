@@ -22,7 +22,10 @@ export function useAgentChat() {
   }, []);
 
   const sendMessage = useCallback(
-    async (userContent: string) => {
+    async (
+      userContent: string,
+      attachments?: Array<{ artifactId: string; name?: string; type?: string; size?: number; relPath?: string }>,
+    ) => {
       if (!userContent.trim() || isGenerating) return;
 
       setError(null);
@@ -67,6 +70,7 @@ export function useAgentChat() {
               content: m.content,
             })),
             stream: true,
+            attachments: attachments && attachments.length > 0 ? attachments : undefined,
             trace: {
               traceId,
               tenantId: "default-tenant",
@@ -79,7 +83,8 @@ export function useAgentChat() {
 
         if (!response.ok) {
           const errData = await response.json().catch(() => ({}));
-          throw new Error(errData.error || `HTTP error ${response.status}`);
+          const details = errData?.error ? `: ${errData.error}` : "";
+          throw new Error(`HTTP ${response.status}${details}`);
         }
 
         const reader = response.body?.getReader();
@@ -173,7 +178,21 @@ export function useAgentChat() {
           // User explicitly cancelled generation
         } else {
           const msg = err instanceof Error ? err.message : String(err);
-          setError({ code: "client_error", message: msg });
+          // Normalize common fetch/network failures for clearer UX
+          const lower = msg.toLowerCase();
+          const isNetwork =
+            lower.includes("networkerror") ||
+            lower.includes("network error") ||
+            lower.includes("failed to fetch") ||
+            lower.includes("fetch failed") ||
+            lower.includes("load failed") ||
+            lower.includes("typeerror");
+          setError({
+            code: isNetwork ? "CLIENT_ERROR" : "client_error",
+            message: isNetwork
+              ? "network error — verify the API is reachable and streaming is allowed through the proxy"
+              : msg,
+          });
         }
       } finally {
         setIsGenerating(false);

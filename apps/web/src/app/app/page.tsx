@@ -17,6 +17,7 @@ import {
   Menu,
   MessageSquare,
   Mic,
+  Paperclip,
   PenSquare,
   Plus,
   RotateCcw,
@@ -26,10 +27,10 @@ import {
   Trash2,
   Wand2,
   X,
-  Paperclip,
 } from "lucide-react";
 import type React from "react";
 import { useEffect, useRef, useState } from "react";
+import { AgentsModal } from "../../components/AgentsModal";
 import {
   AsanaIcon,
   BoxIcon,
@@ -46,8 +47,7 @@ import {
   SlackIcon,
   TeamsIcon,
 } from "../../components/AppIcons";
-import { AgentsModal } from "../../components/AgentsModal";
-import { AttachmentMenu, type AttachedFile } from "../../components/AttachmentMenu";
+import { type AttachedFile, AttachmentMenu } from "../../components/AttachmentMenu";
 import { ConnectionsModal } from "../../components/ConnectionsModal";
 import { ErrorBanner } from "../../components/ErrorBanner";
 import { GitHubConnectionModal } from "../../components/GitHubConnectionModal";
@@ -192,21 +192,45 @@ export default function WorkspacePage() {
     }
   };
 
-  const handleSend = () => {
+  const handleSend = async () => {
     if ((!inputPrompt.trim() && attachedFiles.length === 0) || isGenerating) return;
     let text = inputPrompt.trim();
-    if (attachedFiles.length > 0) {
-      const contextPrefix = attachedFiles
-        .map(
-          (f) =>
-            `[Attachment: ${f.name}]\n${f.content ? f.content : `File size: ${f.size} bytes`}`,
-        )
-        .join("\n\n");
-      text = text ? `${contextPrefix}\n\n${text}` : contextPrefix;
+    const filesToUpload = attachedFiles.filter((a) => (a as any).file);
+    if (filesToUpload.length > 0) {
+      const form = new FormData();
+      const bundle = `bundle_${Date.now()}`;
+      form.set("bundle", bundle);
+      for (const att of filesToUpload) {
+        // @ts-ignore
+        const f: File = (att as any).file;
+        form.append("files", f);
+      }
+      try {
+        const res = await fetch("/api/uploads", { method: "POST", body: form });
+        if (res.ok) {
+          const data = await res.json();
+          const urls: string[] = (data.artifacts || []).map((a: any) => a.url);
+          const structured = (data.artifacts || []).map((a: any) => ({
+            artifactId: a.id,
+            name: a.name,
+            type: a.type,
+            size: a.size,
+            relPath: a.relPath,
+          }));
+          if (urls.length > 0) {
+            const prefix = urls.map((u) => `[Attachment]: ${u}`).join("\n");
+            text = text ? `${prefix}\n\n${text}` : prefix;
+          }
+          sendMessage(text, structured);
+          setInputPrompt("");
+          setAttachedFiles([]);
+          return;
+        }
+      } catch {}
     }
     setInputPrompt("");
     setAttachedFiles([]);
-    sendMessage(text);
+    sendMessage(text, undefined);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -822,6 +846,14 @@ export default function WorkspacePage() {
                   onRejectChange={(changeId, runId) => reviewFileChange("reject", changeId, runId)}
                   onAcceptAllChanges={(runId) => reviewFileChange("accept_all", undefined, runId)}
                   onRejectAllChanges={(runId) => reviewFileChange("reject_all", undefined, runId)}
+                  onReply={(content) => {
+                    const quoted = content
+                      .split("\n")
+                      .map((l) => `> ${l}`)
+                      .join("\n");
+                    setInputPrompt((prev) => (prev ? `${prev}\n\n${quoted}\n` : `${quoted}\n`));
+                    textareaRef.current?.focus();
+                  }}
                 />
               ))}
 

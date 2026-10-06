@@ -1,10 +1,6 @@
 import { exec } from "node:child_process";
 import os from "node:os";
-import type {
-  ToolDefinition,
-  ToolExecutionResult,
-  ToolMetadata,
-} from "@orbaagent/shared";
+import type { ToolDefinition, ToolExecutionResult, ToolMetadata } from "@orbaagent/shared";
 import type { ITool, ToolExecutionContext } from "./base.js";
 
 async function getCliVersionAsync(cmd: string): Promise<string | null> {
@@ -69,8 +65,12 @@ export class EnvironmentInspectTool implements ITool {
       pnpm: getCliVersionAsync("pnpm --version"),
       yarn: getCliVersionAsync("yarn --version"),
       git: getCliVersionAsync("git --version"),
-      python: getCliVersionAsync("python --version").then((v) => v || getCliVersionAsync("python3 --version")),
-      pip: getCliVersionAsync("pip --version").then((v) => v || getCliVersionAsync("pip3 --version")),
+      python: getCliVersionAsync("python --version").then(
+        (v) => v || getCliVersionAsync("python3 --version"),
+      ),
+      pip: getCliVersionAsync("pip --version").then(
+        (v) => v || getCliVersionAsync("pip3 --version"),
+      ),
     };
 
     if (verbose) {

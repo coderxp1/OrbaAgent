@@ -9,6 +9,13 @@ export interface ToolExecutionContext {
   env?: Record<string, string>;
   traceId?: string;
   isPreApproved?: boolean;
+  attachments?: Array<{
+    artifactId: string;
+    name?: string;
+    type?: string;
+    size?: number;
+    relPath?: string;
+  }>;
 }
 
 export interface ITool {

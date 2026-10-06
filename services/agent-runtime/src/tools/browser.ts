@@ -1,11 +1,7 @@
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import type {
-  ToolDefinition,
-  ToolExecutionResult,
-  ToolMetadata,
-} from "@orbaagent/shared";
-import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
+import type { ToolDefinition, ToolExecutionResult, ToolMetadata } from "@orbaagent/shared";
+import { type Browser, type BrowserContext, type Page, chromium } from "playwright";
 import { SecretManager } from "../secrets.js";
 import type { ITool, ToolExecutionContext } from "./base.js";
 
@@ -55,7 +51,11 @@ export class BrowserManager {
       return trimmed;
     }
 
-    if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://") && !trimmed.startsWith("data:")) {
+    if (
+      !trimmed.startsWith("http://") &&
+      !trimmed.startsWith("https://") &&
+      !trimmed.startsWith("data:")
+    ) {
       return `https://${trimmed}`;
     }
 
@@ -89,7 +89,10 @@ export class BrowserManager {
     }
 
     if (!this.activePage || this.activePage.isClosed()) {
-      this.activePage = await this.context!.newPage();
+      if (!this.context) {
+        throw new Error("Browser context not initialized");
+      }
+      this.activePage = await this.context.newPage();
       this.pages.push(this.activePage);
       this.setupPageListeners(this.activePage);
     }
@@ -117,7 +120,10 @@ export class BrowserManager {
     });
   }
 
-  public async navigate(url: string, workspaceDir: string): Promise<{ title: string; url: string; status: number }> {
+  public async navigate(
+    url: string,
+    workspaceDir: string,
+  ): Promise<{ title: string; url: string; status: number }> {
     const safeUrl = this.validateUrl(url, workspaceDir);
     const { page } = await this.ensureBrowser();
 
@@ -130,7 +136,9 @@ export class BrowserManager {
     };
   }
 
-  public async snapshot(selector?: string): Promise<{ title: string; url: string; content: string }> {
+  public async snapshot(
+    selector?: string,
+  ): Promise<{ title: string; url: string; content: string }> {
     const { page } = await this.ensureBrowser();
     const title = await page.title();
     const url = page.url();
@@ -138,7 +146,7 @@ export class BrowserManager {
     let content = "";
     if (selector) {
       const el = await page.$(selector);
-      content = el ? (await el.innerText()) : `Element not found for selector '${selector}'`;
+      content = el ? await el.innerText() : `Element not found for selector '${selector}'`;
     } else {
       content = await page.evaluate(() => {
         return document.body ? document.body.innerText.slice(0, 8000) : "";
@@ -209,7 +217,10 @@ export class BrowserManager {
 
   public async newTab(): Promise<number> {
     const { browser } = await this.ensureBrowser();
-    const newPage = await this.context!.newPage();
+    if (!this.context) {
+      throw new Error("Browser context not initialized");
+    }
+    const newPage = await this.context.newPage();
     this.pages.push(newPage);
     this.activePage = newPage;
     this.setupPageListeners(newPage);
@@ -330,7 +341,9 @@ export class BrowserTool implements ITool {
   ): Promise<ToolExecutionResult> {
     const startTime = Date.now();
     const toolCallId = String(args._toolCallId || "call_browser");
-    const action = String(args.action || "snapshot").toLowerCase().trim();
+    const action = String(args.action || "snapshot")
+      .toLowerCase()
+      .trim();
     const browserManager = BrowserManager.getInstance();
     const secretManager = SecretManager.getInstance();
 
@@ -417,7 +430,8 @@ export class BrowserTool implements ITool {
         case "upload": {
           const selector = String(args.selector || "");
           const filePath = String(args.filePath || "");
-          if (!selector || !filePath) throw new Error("Selector and filePath are required for 'upload'.");
+          if (!selector || !filePath)
+            throw new Error("Selector and filePath are required for 'upload'.");
           await browserManager.upload(selector, filePath, context.workspaceDir);
           return {
             toolCallId,

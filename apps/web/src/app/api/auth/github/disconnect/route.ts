@@ -32,4 +32,3 @@ export async function GET(request: Request) {
   const redirect = url.searchParams.get("redirect") || "/app";
   return NextResponse.redirect(new URL(redirect, url.origin));
 }
-

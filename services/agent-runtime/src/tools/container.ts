@@ -2,11 +2,7 @@ import { exec } from "node:child_process";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { promisify } from "node:util";
-import type {
-  ToolDefinition,
-  ToolExecutionResult,
-  ToolMetadata,
-} from "@orbaagent/shared";
+import type { ToolDefinition, ToolExecutionResult, ToolMetadata } from "@orbaagent/shared";
 import { SecretManager } from "../secrets.js";
 import type { ITool, ToolExecutionContext } from "./base.js";
 
@@ -208,7 +204,8 @@ export class ContainerTool implements ITool {
           throw new Error(`Dockerfile '${dockerfilePath}' resolves outside workspace boundary.`);
         }
         const tagFlag = imageName ? `-t ${imageName}` : "";
-        cmd = `docker build -f "${fullDockerfilePath}" ${tagFlag} "${context.workspaceDir}" ${extraArgs}`.trim();
+        cmd =
+          `docker build -f "${fullDockerfilePath}" ${tagFlag} "${context.workspaceDir}" ${extraArgs}`.trim();
         break;
       }
       case "run": {
@@ -226,7 +223,8 @@ export class ContainerTool implements ITool {
         break;
       }
       case "exec": {
-        if (!containerId || !command) throw new Error("containerId and command are required for 'exec'.");
+        if (!containerId || !command)
+          throw new Error("containerId and command are required for 'exec'.");
         cmd = `docker exec ${containerId} ${command}`;
         break;
       }
@@ -284,7 +282,10 @@ export class ContainerTool implements ITool {
       };
     } catch (err: unknown) {
       const execErr = err as { stdout?: string; stderr?: string; message?: string };
-      const rawMsg = [execErr.stderr, execErr.stdout].filter(Boolean).join("\n").trim() || execErr.message || String(err);
+      const rawMsg =
+        [execErr.stderr, execErr.stdout].filter(Boolean).join("\n").trim() ||
+        execErr.message ||
+        String(err);
       const isDaemonDown =
         rawMsg.toLowerCase().includes("docker daemon is not running") ||
         rawMsg.toLowerCase().includes("cannot connect to the docker daemon") ||

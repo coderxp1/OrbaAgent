@@ -71,16 +71,10 @@ export class SecretManager {
     );
 
     // OpenAI / Generic sk- keys
-    redacted = redacted.replace(
-      /(sk-[A-Za-z0-9_\-]{20,})/g,
-      "***REDACTED_API_KEY***",
-    );
+    redacted = redacted.replace(/(sk-[A-Za-z0-9_\-]{20,})/g, "***REDACTED_API_KEY***");
 
     // Bearer tokens
-    redacted = redacted.replace(
-      /(Bearer\s+)[A-Za-z0-9_\-\.]{15,}/gi,
-      "$1***REDACTED_BEARER***",
-    );
+    redacted = redacted.replace(/(Bearer\s+)[A-Za-z0-9_\-\.]{15,}/gi, "$1***REDACTED_BEARER***");
 
     // Private keys
     redacted = redacted.replace(

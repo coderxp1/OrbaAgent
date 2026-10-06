@@ -1,10 +1,6 @@
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
-import type {
-  ToolDefinition,
-  ToolExecutionResult,
-  ToolMetadata,
-} from "@orbaagent/shared";
+import type { ToolDefinition, ToolExecutionResult, ToolMetadata } from "@orbaagent/shared";
 import { SecretManager } from "../secrets.js";
 import type { ITool, ToolExecutionContext } from "./base.js";
 

@@ -1,11 +1,12 @@
+import { CapabilitiesInspectTool } from "../capabilities.js";
 import type { ITool } from "../tools/base.js";
+import { BrowserTool } from "../tools/browser.js";
+import { CITool } from "../tools/ci.js";
+import { ContainerTool } from "../tools/container.js";
+import { DatabaseTool } from "../tools/database.js";
+import { DeploymentTool } from "../tools/deployment.js";
 import { EnvironmentInspectTool } from "../tools/environment.js";
-import {
-  EditFileTool,
-  ListFilesTool,
-  ReadFileTool,
-  WriteFileTool,
-} from "../tools/filesystem.js";
+import { EditFileTool, ListFilesTool, ReadFileTool, WriteFileTool } from "../tools/filesystem.js";
 import {
   FilesystemCopyTool,
   FilesystemDeleteTool,
@@ -15,22 +16,19 @@ import {
 } from "../tools/filesystemExtended.js";
 import { GitTool } from "../tools/git.js";
 import { GitHubTool } from "../tools/github.js";
+import { BackgroundJobTool } from "../tools/jobManager.js";
+import { CodeQualityTool } from "../tools/lintTypecheck.js";
+import { PackageManagerTool } from "../tools/packageManager.js";
 import { ProcessManagerTool } from "../tools/processManager.js";
 import { ShellTool } from "../tools/shell.js";
 import { TaskCompleteTool } from "../tools/taskComplete.js";
-import { WebFetchTool } from "../tools/web.js";
-import { BrowserTool } from "../tools/browser.js";
-import { PackageManagerTool } from "../tools/packageManager.js";
 import { TestRunnerTool } from "../tools/testRunner.js";
-import { CodeQualityTool } from "../tools/lintTypecheck.js";
-import { ContainerTool } from "../tools/container.js";
-import { DatabaseTool } from "../tools/database.js";
-import { CITool } from "../tools/ci.js";
-import { DeploymentTool } from "../tools/deployment.js";
-import { BackgroundJobTool } from "../tools/jobManager.js";
 import type { IToolSearchableRegistry } from "../tools/toolsSearch.js";
+import { MediaImageGenerateTool } from "../tools/mediaImageGenerate.js";
+import { MediaVideoGenerateTool } from "../tools/mediaVideoGenerate.js";
 import { ToolsSearchTool } from "../tools/toolsSearch.js";
-import { CapabilitiesInspectTool } from "../capabilities.js";
+import { WebFetchTool } from "../tools/web.js";
+import { ArtifactListTool, ArtifactReadTool } from "../tools/artifacts.js";
 
 export class NativeProvider {
   private readonly tools: ITool[] = [];
@@ -66,6 +64,10 @@ export class NativeProvider {
       new CITool(),
       new DeploymentTool(),
       new BackgroundJobTool(),
+      new ArtifactListTool(),
+      new ArtifactReadTool(),
+      new MediaImageGenerateTool(),
+      new MediaVideoGenerateTool(),
     );
   }
 

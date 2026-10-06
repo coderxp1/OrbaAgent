@@ -35,15 +35,7 @@ export class BackgroundJobTool implements ITool {
         },
         statusFilter: {
           type: "string",
-          enum: [
-            "QUEUED",
-            "RUNNING",
-            "WAITING",
-            "COMPLETED",
-            "FAILED",
-            "CANCELLED",
-            "PAUSED",
-          ],
+          enum: ["QUEUED", "RUNNING", "WAITING", "COMPLETED", "FAILED", "CANCELLED", "PAUSED"],
           description: "Optional filter for list action.",
         },
         payload: {

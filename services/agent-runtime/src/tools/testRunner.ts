@@ -2,11 +2,7 @@ import { exec } from "node:child_process";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { promisify } from "node:util";
-import type {
-  ToolDefinition,
-  ToolExecutionResult,
-  ToolMetadata,
-} from "@orbaagent/shared";
+import type { ToolDefinition, ToolExecutionResult, ToolMetadata } from "@orbaagent/shared";
 import { SecretManager } from "../secrets.js";
 import type { ITool, ToolExecutionContext } from "./base.js";
 
@@ -38,7 +34,8 @@ export class TestRunnerTool implements ITool {
         action: {
           type: "string",
           enum: ["discover", "run", "run_file", "run_failed"],
-          description: "Action: 'discover' finds test files, 'run' executes full suite, 'run_file' runs single file, 'run_failed' re-runs failures.",
+          description:
+            "Action: 'discover' finds test files, 'run' executes full suite, 'run_file' runs single file, 'run_failed' re-runs failures.",
         },
         file: {
           type: "string",
@@ -63,7 +60,17 @@ export class TestRunnerTool implements ITool {
     category: "testing",
     provider: "native",
     riskTier: "TIER_2_EXEC",
-    keywords: ["test", "runner", "vitest", "jest", "pytest", "playwright", "assert", "unit", "spec"],
+    keywords: [
+      "test",
+      "runner",
+      "vitest",
+      "jest",
+      "pytest",
+      "playwright",
+      "assert",
+      "unit",
+      "spec",
+    ],
     parameters: this.definition.parameters,
     version: "1.0.0",
     isCore: false,
@@ -117,7 +124,7 @@ export class TestRunnerTool implements ITool {
             e.name.endsWith(".test.js") ||
             e.name.endsWith(".spec.ts") ||
             e.name.endsWith(".spec.js") ||
-            e.name.startsWith("test_") && e.name.endsWith(".py") ||
+            (e.name.startsWith("test_") && e.name.endsWith(".py")) ||
             e.name.endsWith("_test.py")
           ) {
             testFiles.push(rel);
@@ -156,7 +163,12 @@ export class TestRunnerTool implements ITool {
       if (skippedMatch) skipped = Number(skippedMatch[1]);
 
       // Capture failure lines
-      if (line.includes("FAIL") || line.includes("AssertionError") || line.includes("Error:") || line.includes("Expected")) {
+      if (
+        line.includes("FAIL") ||
+        line.includes("AssertionError") ||
+        line.includes("Error:") ||
+        line.includes("Expected")
+      ) {
         failureSummary.push(line.trim());
         if (failureSummary.length > 20) break;
       }
@@ -186,7 +198,9 @@ export class TestRunnerTool implements ITool {
   ): Promise<ToolExecutionResult> {
     const startTime = Date.now();
     const toolCallId = String(args._toolCallId || "call_test_run");
-    const action = String(args.action || "run").toLowerCase().trim();
+    const action = String(args.action || "run")
+      .toLowerCase()
+      .trim();
     const testFile = args.file ? String(args.file).trim() : undefined;
     const pattern = args.testNamePattern ? String(args.testNamePattern).trim() : "";
     const extraArgs = String(args.extraArgs || "").trim();
@@ -221,7 +235,10 @@ export class TestRunnerTool implements ITool {
       };
     }
 
-    const hasPnpmLock = await fs.access(path.join(context.workspaceDir, "pnpm-lock.yaml")).then(() => true).catch(() => false);
+    const hasPnpmLock = await fs
+      .access(path.join(context.workspaceDir, "pnpm-lock.yaml"))
+      .then(() => true)
+      .catch(() => false);
     const runnerPrefix = hasPnpmLock ? "pnpm exec" : "npx";
 
     let cmd = "";
@@ -278,9 +295,19 @@ export class TestRunnerTool implements ITool {
       };
     } catch (err: unknown) {
       const execErr = err as { stdout?: string; stderr?: string; code?: number; message?: string };
-      const raw = [execErr.stdout, execErr.stderr].filter(Boolean).join("\n").trim() || execErr.message || String(err);
+      const raw =
+        [execErr.stdout, execErr.stderr].filter(Boolean).join("\n").trim() ||
+        execErr.message ||
+        String(err);
       const files = testFile ? [testFile] : await this.discoverTestFiles(context.workspaceDir);
-      const report = this.parseTestOutput(raw, framework, cmd, files, Date.now() - startTime, execErr.code ?? 1);
+      const report = this.parseTestOutput(
+        raw,
+        framework,
+        cmd,
+        files,
+        Date.now() - startTime,
+        execErr.code ?? 1,
+      );
 
       return {
         toolCallId,

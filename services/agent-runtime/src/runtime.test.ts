@@ -16,7 +16,7 @@ import {
   SecretManager,
   ToolRegistry,
   ToolRouter,
-  ToolsSearchTool,
+  type ToolsSearchTool,
 } from "./index.js";
 
 describe("OrbaAgent Runtime & Security Foundation", () => {
@@ -29,9 +29,15 @@ describe("OrbaAgent Runtime & Security Foundation", () => {
   beforeAll(async () => {
     tempWorkspace = await fs.mkdtemp(path.join(os.tmpdir(), "orbaagent-runtime-test-"));
     // Create some initial files inside workspace
-    await fs.writeFile(path.join(tempWorkspace, "hello.txt"), "Hello OrbaAgent World!\nSecret key is sk-1234567890abcdef1234567890");
+    await fs.writeFile(
+      path.join(tempWorkspace, "hello.txt"),
+      "Hello OrbaAgent World!\nSecret key is sk-1234567890abcdef1234567890",
+    );
     await fs.mkdir(path.join(tempWorkspace, "src"), { recursive: true });
-    await fs.writeFile(path.join(tempWorkspace, "src", "index.ts"), "export const PI = 3.14159;\n// Searchable token");
+    await fs.writeFile(
+      path.join(tempWorkspace, "src", "index.ts"),
+      "export const PI = 3.14159;\n// Searchable token",
+    );
 
     secretManager = SecretManager.getInstance();
     permissionEngine = PermissionEngine.getInstance();
@@ -345,7 +351,8 @@ describe("OrbaAgent Runtime & Security Foundation", () => {
     it("redacts raw tokens and registered credentials in outputs and logs", () => {
       secretManager.registerSecret("super-secret-pat-xyz12345", "TEST_SECRET");
 
-      const textWithSecret = "Found token super-secret-pat-xyz12345 and sk-abcdef01234567890abcdef0 in log";
+      const textWithSecret =
+        "Found token super-secret-pat-xyz12345 and sk-abcdef01234567890abcdef0 in log";
       const redacted = secretManager.redact(textWithSecret);
 
       expect(redacted).not.toContain("super-secret-pat-xyz12345");

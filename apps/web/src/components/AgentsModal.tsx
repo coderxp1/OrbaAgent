@@ -27,7 +27,8 @@ const AGENTS: AgentProfile[] = [
     id: "reviewer",
     name: "Code Review & Security Auditor",
     role: "Static Analysis & Vulnerability Guard",
-    description: "Analyzes pull requests, enforces security best practices, and identifies edge-case bugs.",
+    description:
+      "Analyzes pull requests, enforces security best practices, and identifies edge-case bugs.",
     icon: "🛡️",
     capabilities: ["OWASP auditing", "Type safety", "Performance profiling"],
     status: "active",
@@ -36,7 +37,8 @@ const AGENTS: AgentProfile[] = [
     id: "devops",
     name: "DevOps & Infrastructure Worker",
     role: "CI/CD & Cloud Orchestrator",
-    description: "Configures Docker containers, reverse proxies, GitHub Actions, and production deployments.",
+    description:
+      "Configures Docker containers, reverse proxies, GitHub Actions, and production deployments.",
     icon: "🚀",
     capabilities: ["Docker compose", "Traefik routing", "Environment management"],
     status: "active",
@@ -45,7 +47,8 @@ const AGENTS: AgentProfile[] = [
     id: "researcher",
     name: "Documentation & Technical Researcher",
     role: "Deep Knowledge Synthesis",
-    description: "Researches public API specs, libraries, and open-source documentation to solve integration hurdles.",
+    description:
+      "Researches public API specs, libraries, and open-source documentation to solve integration hurdles.",
     icon: "📚",
     capabilities: ["Web fetching", "API extraction", "Architecture briefs"],
     status: "active",
@@ -71,7 +74,9 @@ export function AgentsModal({ isOpen, onClose, onSelectAgent }: AgentsModalProps
             </div>
             <div>
               <h2 className="text-sm font-bold text-white">OrbaAgent Workforce Roster</h2>
-              <p className="text-[11px] text-zinc-400">Select specialized autonomous agents for your objective</p>
+              <p className="text-[11px] text-zinc-400">
+                Select specialized autonomous agents for your objective
+              </p>
             </div>
           </div>
           <button
@@ -139,4 +144,3 @@ export function AgentsModal({ isOpen, onClose, onSelectAgent }: AgentsModalProps
     </div>
   );
 }
-

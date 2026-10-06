@@ -1,11 +1,10 @@
 "use client";
 
 import type { ChatMessage } from "@orbaagent/shared";
-import { Brain, Check, Copy, User } from "lucide-react";
+import { Brain, Check, Copy, CornerUpLeft, ThumbsDown, ThumbsUp, User } from "lucide-react";
 import { useState } from "react";
 import { FileChangesReview } from "./FileChangesReview";
 import { TerminalSession } from "./TerminalSession";
-import { CopyMessageButton } from "./CopyMessageButton";
 
 interface MessageItemProps {
   message: ChatMessage;
@@ -13,6 +12,7 @@ interface MessageItemProps {
   onRejectChange?: (changeId: string, runId?: string) => void;
   onAcceptAllChanges?: (runId?: string) => void;
   onRejectAllChanges?: (runId?: string) => void;
+  onReply?: (content: string) => void;
 }
 
 export function MessageItem({
@@ -21,10 +21,13 @@ export function MessageItem({
   onRejectChange,
   onAcceptAllChanges,
   onRejectAllChanges,
+  onReply,
 }: MessageItemProps) {
   const isUser = message.role === "user";
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
   const [showThinking, setShowThinking] = useState<boolean>(true);
+  const [messageCopied, setMessageCopied] = useState(false);
+  const [feedback, setFeedback] = useState<"up" | "down" | null>(null);
 
   const handleCopy = (text: string) => {
     navigator.clipboard.writeText(text);
@@ -32,15 +35,26 @@ export function MessageItem({
     setTimeout(() => setCopiedCode(null), 2000);
   };
 
+  const handleCopyMessage = () => {
+    if (!message.content) return;
+    navigator.clipboard.writeText(message.content);
+    setMessageCopied(true);
+    setTimeout(() => setMessageCopied(false), 2000);
+  };
+
+  const handleReply = () => {
+    if (message.content && onReply) {
+      onReply(message.content);
+    }
+  };
+
   return (
     <div
-      className={`flex w-full gap-4 p-4 rounded-xl transition-colors ${
-        isUser
-          ? "bg-zinc-950/40 border border-zinc-900"
-          : "bg-[#161616] border border-[#242424]"
+      className={`group/msg flex w-full gap-4 p-4 rounded-xl transition-colors ${
+        isUser ? "bg-zinc-950/40 border border-zinc-900" : "bg-[#161616] border border-[#242424]"
       }`}
     >
-      {/* Avatar: User icon vs Official Orba Mascot Logo */}
+      {/* Avatar */}
       <div
         className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg overflow-hidden ${
           isUser
@@ -60,17 +74,12 @@ export function MessageItem({
       </div>
 
       <div className="flex flex-1 flex-col gap-3 overflow-hidden text-sm">
-        <div className="flex items-center justify-between font-semibold text-xs text-zinc-400">
-          <div className="flex items-center gap-2">
-            <span>{isUser ? "You" : "OrbaAgent"}</span>
-            {message.timestamp && (
-              <time className="font-mono text-zinc-500 font-normal">
-                {new Date(message.timestamp).toLocaleTimeString()}
-              </time>
-            )}
-          </div>
-          {!isUser && message.content && (
-            <CopyMessageButton message={message.content} />
+        <div className="flex items-center gap-2 font-semibold text-xs text-zinc-400">
+          <span>{isUser ? "You" : "OrbaAgent"}</span>
+          {message.timestamp && (
+            <time className="font-mono text-zinc-500 font-normal">
+              {new Date(message.timestamp).toLocaleTimeString()}
+            </time>
           )}
         </div>
 
@@ -137,6 +146,84 @@ export function MessageItem({
             </span>
           )
         )}
+
+        {/* Message Action Bar — appears on hover / focus */}
+        {(message.content || message.thinking) && (
+          <div className="flex items-center gap-1.5 pt-0.5 opacity-0 group-hover/msg:opacity-100 group-focus-within/msg:opacity-100 transition-opacity duration-150">
+            <ActionIconButton
+              onClick={handleCopyMessage}
+              title={messageCopied ? "Copied!" : "Copy message"}
+              active={messageCopied}
+              activeClass="border-emerald-500/40 bg-emerald-950/30 text-emerald-400"
+            >
+              {messageCopied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+            </ActionIconButton>
+
+            {onReply && (
+              <ActionIconButton onClick={handleReply} title="Quote & reply">
+                <CornerUpLeft className="h-3.5 w-3.5" />
+              </ActionIconButton>
+            )}
+
+            {!isUser && (
+              <>
+                <ActionIconButton
+                  onClick={() => setFeedback(feedback === "up" ? null : "up")}
+                  title="Good response"
+                  active={feedback === "up"}
+                  activeClass="border-emerald-500/40 bg-emerald-950/30 text-emerald-400"
+                >
+                  <ThumbsUp className="h-3.5 w-3.5" />
+                </ActionIconButton>
+                <ActionIconButton
+                  onClick={() => setFeedback(feedback === "down" ? null : "down")}
+                  title="Bad response"
+                  active={feedback === "down"}
+                  activeClass="border-red-500/40 bg-red-950/30 text-red-400"
+                >
+                  <ThumbsDown className="h-3.5 w-3.5" />
+                </ActionIconButton>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ActionIconButton({
+  children,
+  onClick,
+  title,
+  active = false,
+  activeClass = "",
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+  title: string;
+  active?: boolean;
+  activeClass?: string;
+}) {
+  return (
+    <div className="relative group/btn flex items-center justify-center">
+      <button
+        type="button"
+        onClick={onClick}
+        aria-label={title}
+        className={`flex h-7 w-7 items-center justify-center rounded-lg border transition-all duration-150 focus:outline-none focus:ring-1 focus:ring-zinc-500 ${
+          active
+            ? activeClass
+            : "border-[#2c2c30] bg-[#1e1e22] text-zinc-400 hover:border-zinc-600 hover:bg-[#28282e] hover:text-white shadow-sm"
+        }`}
+      >
+        {children}
+      </button>
+      <div className="pointer-events-none absolute bottom-full mb-1.5 hidden group-hover/btn:flex flex-col items-center z-30">
+        <div className="rounded-md bg-[#18181b] border border-zinc-700/60 px-2 py-0.5 text-[11px] font-medium text-zinc-200 shadow-xl whitespace-nowrap">
+          {title}
+        </div>
+        <div className="w-1.5 h-1.5 bg-[#18181b] border-r border-b border-zinc-700/60 transform rotate-45 -mt-1" />
       </div>
     </div>
   );
@@ -202,4 +289,3 @@ function FormattedContent({
     </div>
   );
 }
-

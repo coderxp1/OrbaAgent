@@ -1,8 +1,4 @@
-import type {
-  ToolDefinition,
-  ToolExecutionResult,
-  ToolMetadata,
-} from "@orbaagent/shared";
+import type { ToolDefinition, ToolExecutionResult, ToolMetadata } from "@orbaagent/shared";
 import { SecretManager } from "../secrets.js";
 import type { ITool, ToolExecutionContext } from "../tools/base.js";
 import type { IConnector } from "./types.js";
@@ -85,9 +81,7 @@ export class GitHubServiceTool implements ITool {
 
     const secretManager = SecretManager.getInstance();
     const token =
-      context.env?.GITHUB_TOKEN ||
-      process.env.GITHUB_TOKEN ||
-      (context as any)?.trace?.githubToken;
+      context.env?.GITHUB_TOKEN || process.env.GITHUB_TOKEN || (context as any)?.trace?.githubToken;
 
     if (token) {
       secretManager.registerSecret(token, "GITHUB_TOKEN");

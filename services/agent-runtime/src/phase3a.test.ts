@@ -14,7 +14,7 @@ import {
   TestRunnerTool,
   ToolRegistry,
   ToolRouter,
-  ToolsSearchTool,
+  type ToolsSearchTool,
 } from "./index.js";
 
 describe("Phase 3A: Advanced Tools, MCP Provider, and Execution Engine", () => {
@@ -134,7 +134,9 @@ rl.on('line', (line) => {
 
   afterAll(async () => {
     await mcpProvider.disconnectAll().catch(() => {});
-    await BrowserManager.getInstance().close().catch(() => {});
+    await BrowserManager.getInstance()
+      .close()
+      .catch(() => {});
     try {
       await fs.rm(tempWorkspace, { recursive: true, force: true });
     } catch {
@@ -154,10 +156,7 @@ rl.on('line', (line) => {
       };
 
       // 1. Navigate
-      const navRes = await browserTool.execute(
-        { action: "navigate", url: localUrl },
-        context,
-      );
+      const navRes = await browserTool.execute({ action: "navigate", url: localUrl }, context);
       expect(navRes.success).toBe(true);
       expect(navRes.output).toContain("OrbaAgent Playwright Test");
 
@@ -346,7 +345,9 @@ rl.on('line', (line) => {
       );
 
       expect(result.success).toBe(false);
-      expect(result.error).toContain("Global package installation ('-g' / '--global') is strictly prohibited");
+      expect(result.error).toContain(
+        "Global package installation ('-g' / '--global') is strictly prohibited",
+      );
       expect(auditEvent?.approved).toBe(false);
     });
 

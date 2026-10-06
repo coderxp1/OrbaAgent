@@ -1,8 +1,4 @@
-import type {
-  ToolDefinition,
-  ToolExecutionResult,
-  ToolMetadata,
-} from "@orbaagent/shared";
+import type { ToolDefinition, ToolExecutionResult, ToolMetadata } from "@orbaagent/shared";
 import { SecretManager } from "../secrets.js";
 import type { ITool, ToolExecutionContext } from "./base.js";
 
@@ -90,9 +86,7 @@ export class CITool implements ITool {
 
     const secretManager = SecretManager.getInstance();
     const githubToken =
-      context.env?.GITHUB_TOKEN ||
-      process.env.GITHUB_TOKEN ||
-      (context as any)?.trace?.githubToken;
+      context.env?.GITHUB_TOKEN || process.env.GITHUB_TOKEN || (context as any)?.trace?.githubToken;
 
     if (githubToken) {
       secretManager.registerSecret(githubToken, "GITHUB_TOKEN");

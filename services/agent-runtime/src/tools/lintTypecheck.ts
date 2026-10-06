@@ -2,11 +2,7 @@ import { exec } from "node:child_process";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { promisify } from "node:util";
-import type {
-  ToolDefinition,
-  ToolExecutionResult,
-  ToolMetadata,
-} from "@orbaagent/shared";
+import type { ToolDefinition, ToolExecutionResult, ToolMetadata } from "@orbaagent/shared";
 import { SecretManager } from "../secrets.js";
 import type { ITool, ToolExecutionContext } from "./base.js";
 
@@ -43,7 +39,8 @@ export class CodeQualityTool implements ITool {
         action: {
           type: "string",
           enum: ["lint", "typecheck", "detect"],
-          description: "Action to perform: 'detect' checks available linters/typecheckers; 'lint' checks code style and lint rules; 'typecheck' verifies type correctness.",
+          description:
+            "Action to perform: 'detect' checks available linters/typecheckers; 'lint' checks code style and lint rules; 'typecheck' verifies type correctness.",
         },
         fix: {
           type: "boolean",
@@ -85,7 +82,8 @@ export class CodeQualityTool implements ITool {
     try {
       const files = await fs.readdir(workspaceDir);
       if (files.some((f) => f.startsWith("biome.json"))) return "biome";
-      if (files.some((f) => f.startsWith("eslint.config") || f.startsWith(".eslintrc"))) return "eslint";
+      if (files.some((f) => f.startsWith("eslint.config") || f.startsWith(".eslintrc")))
+        return "eslint";
       if (files.some((f) => f === "ruff.toml" || f === ".ruff.toml")) return "ruff";
 
       // Check package.json scripts
@@ -165,7 +163,9 @@ export class CodeQualityTool implements ITool {
   ): Promise<ToolExecutionResult> {
     const startTime = Date.now();
     const toolCallId = String(args._toolCallId || "call_code_quality");
-    const action = String(args.action || "lint").toLowerCase().trim();
+    const action = String(args.action || "lint")
+      .toLowerCase()
+      .trim();
     const fix = Boolean(args.fix);
     const targetPath = args.filePath ? String(args.filePath).trim() : "";
 
@@ -189,7 +189,10 @@ export class CodeQualityTool implements ITool {
       };
     }
 
-    const hasPnpmLock = await fs.access(path.join(context.workspaceDir, "pnpm-lock.yaml")).then(() => true).catch(() => false);
+    const hasPnpmLock = await fs
+      .access(path.join(context.workspaceDir, "pnpm-lock.yaml"))
+      .then(() => true)
+      .catch(() => false);
     const runnerPrefix = hasPnpmLock ? "pnpm exec" : "npx";
 
     if (action === "lint") {
@@ -203,7 +206,7 @@ export class CodeQualityTool implements ITool {
       } else if (toolName === "ruff") {
         cmd = `ruff check ${fix ? "--fix " : ""}${targetPath || "."}`;
       } else {
-        cmd = `npm run lint`;
+        cmd = "npm run lint";
       }
     } else if (action === "typecheck") {
       const detected = await this.detectTypechecker(context.workspaceDir);
@@ -214,7 +217,7 @@ export class CodeQualityTool implements ITool {
       } else if (toolName === "mypy") {
         cmd = `mypy ${targetPath || "."}`;
       } else {
-        cmd = `npm run typecheck`;
+        cmd = "npm run typecheck";
       }
     } else {
       return {
@@ -260,7 +263,10 @@ export class CodeQualityTool implements ITool {
       };
     } catch (err: unknown) {
       const execErr = err as { stdout?: string; stderr?: string; code?: number; message?: string };
-      const raw = [execErr.stdout, execErr.stderr].filter(Boolean).join("\n").trim() || execErr.message || String(err);
+      const raw =
+        [execErr.stdout, execErr.stderr].filter(Boolean).join("\n").trim() ||
+        execErr.message ||
+        String(err);
       const diagnostics = this.parseDiagnostics(raw, toolName);
       const report: CodeQualityReport = {
         tool: toolName,

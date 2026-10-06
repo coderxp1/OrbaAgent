@@ -1,0 +1,49 @@
+version: '3.8'
+
+services:
+  orbaagent-gpu-worker:
+    container_name: orbaagent-gpu-worker
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8190:8190"
+    environment:
+      # GPU 1 only. GPU 0 runs the CoderXP/ComfyUI workload and must never be
+      # targeted by this worker.
+      - NVIDIA_VISIBLE_DEVICES=GPU-82e03c6c-8c27-c076-eb42-7e37e9a5a878
+      - CUDA_VISIBLE_DEVICES=0
+      - MEDIA_WORKER_PORT=8190
+      # --- Required secrets/config (no source-code defaults) ---
+      # MEDIA_WORKER_TOKEN   REQUIRED. Bearer token clients must present.
+      #                      The worker refuses to start when this is empty.
+      #                      Supply it from the deployment environment or a
+      #                      Docker/Compose secret; never commit a value here.
+      #                      The token is shared with the application through the
+      #                      same MEDIA_WORKER_TOKEN variable name.
+      # MEDIA_GENERATION_BACKEND  Optional. Real generation backend, e.g.
+      #                      `diffusers` or `comfyui`. While unset, the
+      #                      generation endpoints return 503
+      #                      MEDIA_GENERATION_UNAVAILABLE instead of fabricating
+      #                      output, and /health reports generation as false.
+      - MEDIA_WORKER_TOKEN=${MEDIA_WORKER_TOKEN:?MEDIA_WORKER_TOKEN must be set (no default is provided)}
+      - MEDIA_GENERATION_BACKEND=${MEDIA_GENERATION_BACKEND:-}
+      - MEDIA_GENERATION_MODEL=${MEDIA_GENERATION_MODEL:-}
+    volumes:
+      - ./models:/models
+      - ./output:/output
+      - ./data:/data
+    networks:
+      - orbaagent_media_net
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ['GPU-82e03c6c-8c27-c076-eb42-7e37e9a5a878']
+              capabilities: [gpu]
+
+networks:
+  orbaagent_media_net:
+    driver: bridge

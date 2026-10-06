@@ -56,7 +56,7 @@ export function TerminalSession({
       return `curl -sL ${args.url || ""}`;
     }
     if (call.name === "task_complete") {
-      return `complete --verified`;
+      return "complete --verified";
     }
     return `${call.name} ${JSON.stringify(args)}`;
   };
@@ -105,11 +105,7 @@ export function TerminalSession({
           >
             <span
               className={`w-1.5 h-1.5 rounded-full ${
-                isLive
-                  ? "bg-amber-400 animate-ping"
-                  : allSuccess
-                    ? "bg-emerald-400"
-                    : "bg-red-400"
+                isLive ? "bg-amber-400 animate-ping" : allSuccess ? "bg-emerald-400" : "bg-red-400"
               }`}
             />
             {isLive ? "LIVE" : allSuccess ? "COMPLETED" : "FAILED"}
@@ -141,7 +137,11 @@ export function TerminalSession({
             className="text-zinc-400 hover:text-zinc-200 p-1"
             title={isCollapsed ? "Expand" : "Collapse"}
           >
-            {isCollapsed ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+            {isCollapsed ? (
+              <ChevronRight className="w-3.5 h-3.5" />
+            ) : (
+              <ChevronDown className="w-3.5 h-3.5" />
+            )}
           </button>
         </div>
       </div>
@@ -193,4 +193,3 @@ export function TerminalSession({
     </div>
   );
 }
-

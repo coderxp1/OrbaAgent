@@ -1,11 +1,12 @@
-import type {
-  AuditLogEvent,
-  ChatCompletionRequest,
-  NormalizedEvent,
-  ProviderAttempt,
-  ProviderId,
-  ToolCall,
-  UsageStats,
+import {
+  type AuditLogEvent,
+  type ChatCompletionRequest,
+  type NormalizedEvent,
+  OrbaError,
+  type ProviderAttempt,
+  type ProviderId,
+  type ToolCall,
+  type UsageStats,
 } from "@orbaagent/shared";
 import type { IModelProviderAdapter } from "./adapters/base.js";
 import { LangdockAdapter } from "./adapters/langdock.js";
@@ -258,7 +259,26 @@ export class ModelGateway {
           errorMessage: errMsg,
         });
 
-        this.router.recordProviderFailure(currentModel.provider, currentModel.id);
+        const isRateLimit =
+          (err instanceof OrbaError && err.code === "RATE_LIMITED") ||
+          lowerMsg.includes("429") ||
+          lowerMsg.includes("rate limit") ||
+          lowerMsg.includes("quota exceeded");
+
+        const isAuthError =
+          (err instanceof OrbaError && err.code === "MISSING_PRODUCTION_CREDENTIALS") ||
+          lowerMsg.includes("401") ||
+          lowerMsg.includes("403") ||
+          lowerMsg.includes("unauthorized") ||
+          lowerMsg.includes("api key is invalid");
+
+        if (isAuthError) {
+          this.router.recordAuthFailure(currentModel.provider, errMsg);
+        } else if (isRateLimit) {
+          this.router.recordModelRateLimit(currentModel.id);
+        } else {
+          this.router.recordProviderFailure(currentModel.provider, currentModel.id);
+        }
 
         // Handle partial stream failure: issue reset signal if deltas were already emitted
         if (hasYieldedTextDelta) {
@@ -269,16 +289,33 @@ export class ModelGateway {
           };
         }
 
+        // If auth error, fast-skip remaining candidate models belonging to the same provider
+        if (isAuthError) {
+          while (
+            i + 1 < candidateModels.length &&
+            candidateModels[i + 1].provider === currentModel.provider
+          ) {
+            i++;
+          }
+        }
+
         if (i < candidateModels.length - 1) {
-          const currentProvider = candidateModels[i].provider;
-          const nextProvider = candidateModels[i + 1].provider;
-          if (currentProvider !== nextProvider && !emittedFailoverNotice) {
-            emittedFailoverNotice = true;
+          const nextModel = candidateModels[i + 1];
+          if (currentModel.provider !== nextModel.provider) {
+            if (!emittedFailoverNotice) {
+              emittedFailoverNotice = true;
+              yield {
+                type: "thinking_delta",
+                traceId: trace.traceId,
+                thinkingDelta:
+                  "\n[OrbaAgent Engine] Optimizing execution route for task completion...\n",
+              };
+            }
+          } else if (isRateLimit) {
             yield {
               type: "thinking_delta",
               traceId: trace.traceId,
-              thinkingDelta:
-                "\n[OrbaAgent Engine] Optimizing execution route for task completion...\n",
+              thinkingDelta: `\n[OrbaAgent Engine] Model ${currentModel.id} rate-limited. Failing over to ${nextModel.id}...\n`,
             };
           }
         } else {

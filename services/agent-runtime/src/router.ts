@@ -1,13 +1,9 @@
-import type {
-  AuditEvent,
-  ToolExecutionResult,
-  ToolMetadata,
-} from "@orbaagent/shared";
-import { PermissionEngine, type PermissionDecision } from "./permissions.js";
-import { ProcessManager } from "./tools/processManager.js";
+import type { AuditEvent, ToolExecutionResult, ToolMetadata } from "@orbaagent/shared";
+import { type PermissionDecision, PermissionEngine } from "./permissions.js";
 import type { ToolRegistry } from "./registry.js";
 import { SecretManager } from "./secrets.js";
 import type { ToolExecutionContext } from "./tools/base.js";
+import { ProcessManager } from "./tools/processManager.js";
 
 export interface ToolRouterOptions {
   registry: ToolRegistry;

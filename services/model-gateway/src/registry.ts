@@ -122,112 +122,32 @@ export function hasConfirmedCapability(
   return !model.isUnconfirmed;
 }
 
-export const MODEL_REGISTRY: Record<string, ModelSpec> = {
-  // Confirmed Langdock Models (unverified specs marked isUnconfirmed: true)
-  "gpt-5.4": {
-    id: "gpt-5.4",
-    name: "Langdock High Intelligence Engine",
-    provider: "langdock",
-    capabilities: ["text", "vision", "streaming", "tool_calling", "json_mode", "thinking"],
-    isDefault: true,
-    isUnconfirmed: true,
-  },
-  "gpt-5.4-mini": {
-    id: "gpt-5.4-mini",
-    name: "Langdock Fast Execution Engine",
-    provider: "langdock",
-    capabilities: ["text", "streaming", "tool_calling"],
-    isUnconfirmed: true,
-  },
-  "gpt-6-sol": {
-    id: "gpt-6-sol",
-    name: "Langdock Sol Engine",
-    provider: "langdock",
-    capabilities: ["text", "vision", "streaming", "tool_calling", "json_mode", "thinking"],
-    isUnconfirmed: true,
-  },
-  "gpt-5.2-pro": {
-    id: "gpt-5.2-pro",
-    name: "Langdock Pro Reasoning Engine",
-    provider: "langdock",
-    capabilities: ["text", "vision", "streaming", "tool_calling", "json_mode", "thinking"],
-    isUnconfirmed: true,
-  },
-  "gpt-5.2": {
-    id: "gpt-5.2",
-    name: "Langdock Standard Engine",
-    provider: "langdock",
-    capabilities: ["text", "vision", "streaming", "tool_calling", "json_mode"],
-    isUnconfirmed: true,
-  },
-  "gpt-5.1": {
-    id: "gpt-5.1",
-    name: "Langdock Balanced Engine",
-    provider: "langdock",
-    capabilities: ["text", "streaming", "tool_calling"],
-    isUnconfirmed: true,
-  },
-  "gpt-5": {
-    id: "gpt-5",
-    name: "Langdock Base Engine",
-    provider: "langdock",
-    capabilities: ["text", "streaming", "tool_calling"],
-    isUnconfirmed: true,
-  },
-  "gpt-5-mini": {
-    id: "gpt-5-mini",
-    name: "Langdock Fast Engine",
-    provider: "langdock",
-    capabilities: ["text", "streaming", "tool_calling"],
-    isUnconfirmed: true,
-  },
-  "gpt-5-eu": {
-    id: "gpt-5-eu",
-    name: "Langdock EU Regional Engine",
-    provider: "langdock",
-    capabilities: ["text", "streaming", "tool_calling"],
-    isUnconfirmed: true,
-  },
-  "gpt-5-mini-eu": {
-    id: "gpt-5-mini-eu",
-    name: "Langdock Fast EU Regional Engine",
-    provider: "langdock",
-    capabilities: ["text", "streaming", "tool_calling"],
-    isUnconfirmed: true,
-  },
-  o3: {
-    id: "o3",
-    name: "Langdock Reasoning Engine (o3)",
-    provider: "langdock",
-    capabilities: ["text", "vision", "streaming", "tool_calling", "json_mode", "thinking"],
-    isUnconfirmed: true,
-  },
-  "o4-mini": {
-    id: "o4-mini",
-    name: "Langdock Fast Reasoning Engine (o4-mini)",
-    provider: "langdock",
-    capabilities: ["text", "vision", "streaming", "tool_calling"],
-    isUnconfirmed: true,
-  },
+import {
+  MODEL_CATALOG,
+  getUnavailableModelReason,
+  resolveModelDefinition,
+  toModelSpec,
+} from "./catalog.js";
 
-  // OpenRouter Secondary & Fallback Models
-  "openrouter/auto": {
-    id: "openrouter/auto",
-    name: "OpenRouter Unified Engine",
-    provider: "openrouter",
-    capabilities: ["text", "vision", "streaming", "tool_calling", "json_mode", "thinking"],
-  },
-  "openrouter/free": {
-    id: "openrouter/free",
-    name: "OpenRouter Free Fallback Engine",
-    provider: "openrouter",
-    capabilities: ["text", "streaming", "tool_calling"],
-  },
-};
+export const MODEL_REGISTRY: Record<string, ModelSpec> = {};
+for (const def of Object.values(MODEL_CATALOG)) {
+  MODEL_REGISTRY[def.id] = toModelSpec(def);
+}
 
 export function getModelSpec(modelId: string): ModelSpec {
   if (modelId === "auto" || modelId === "" || !modelId) {
-    return MODEL_REGISTRY["gpt-5.4"];
+    return MODEL_REGISTRY["gpt-5.4"] || Object.values(MODEL_REGISTRY)[0];
+  }
+
+  // Known-but-unavailable models must NOT silently resolve to a substitute.
+  const unavailableReason = getUnavailableModelReason(modelId);
+  if (unavailableReason) {
+    throw new Error(`Model "${modelId}" is unavailable. ${unavailableReason}`);
+  }
+
+  const resolved = resolveModelDefinition(modelId);
+  if (resolved) {
+    return toModelSpec(resolved);
   }
   const model = MODEL_REGISTRY[modelId];
   if (!model) {
@@ -237,7 +157,9 @@ export function getModelSpec(modelId: string): ModelSpec {
 }
 
 export function listAvailableModels(providerFilter?: ProviderId): ModelSpec[] {
-  const models = Object.values(MODEL_REGISTRY);
+  const models = Object.values(MODEL_CATALOG)
+    .filter((m) => m.enabled)
+    .map((m) => toModelSpec(m));
   if (providerFilter) {
     return models.filter((m) => m.provider === providerFilter);
   }

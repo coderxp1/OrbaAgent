@@ -1,10 +1,6 @@
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
-import type {
-  ToolDefinition,
-  ToolExecutionResult,
-  ToolMetadata,
-} from "@orbaagent/shared";
+import type { ToolDefinition, ToolExecutionResult, ToolMetadata } from "@orbaagent/shared";
 import type { ITool, ToolExecutionContext } from "./base.js";
 
 const execAsync = promisify(exec);
@@ -62,7 +58,8 @@ export class GitTool implements ITool {
         },
         extraArgs: {
           type: "string",
-          description: "Additional safe git arguments (e.g. '--oneline', '-n 5', '--tags'). Force push flags are blocked.",
+          description:
+            "Additional safe git arguments (e.g. '--oneline', '-n 5', '--tags'). Force push flags are blocked.",
         },
       },
       required: ["action"],
@@ -102,7 +99,9 @@ export class GitTool implements ITool {
   ): Promise<ToolExecutionResult> {
     const startTime = Date.now();
     const toolCallId = (args._toolCallId as string) || `tc_git_${Date.now()}`;
-    const action = String(args.action || "").toLowerCase().trim();
+    const action = String(args.action || "")
+      .toLowerCase()
+      .trim();
     const extraArgs = String(args.extraArgs || "").trim();
 
     // Prevent unverified force pushes
@@ -117,7 +116,8 @@ export class GitTool implements ITool {
           name: this.definition.name,
           success: false,
           output: "",
-          error: "Unverified force push ('--force' or '--force-with-lease') is strictly prohibited.",
+          error:
+            "Unverified force push ('--force' or '--force-with-lease') is strictly prohibited.",
           executionTimeMs: Date.now() - startTime,
         };
       }
@@ -189,7 +189,10 @@ export class GitTool implements ITool {
       }
       case "add": {
         const filePath = String(args.filePath || ".").trim();
-        gitCmd = filePath === "." || filePath === "-A" || !filePath ? "git add -A" : `git add "${filePath}"`;
+        gitCmd =
+          filePath === "." || filePath === "-A" || !filePath
+            ? "git add -A"
+            : `git add "${filePath}"`;
         break;
       }
       case "commit": {

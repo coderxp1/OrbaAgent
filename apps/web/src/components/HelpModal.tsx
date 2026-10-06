@@ -20,7 +20,9 @@ export function HelpModal({ isOpen, onClose }: HelpModalProps) {
             </div>
             <div>
               <h2 className="text-sm font-bold text-white">OrbaAgent Help &amp; Guides</h2>
-              <p className="text-[11px] text-zinc-400">Keyboard shortcuts and autonomous workflow guide</p>
+              <p className="text-[11px] text-zinc-400">
+                Keyboard shortcuts and autonomous workflow guide
+              </p>
             </div>
           </div>
           <button
@@ -41,19 +43,27 @@ export function HelpModal({ isOpen, onClose }: HelpModalProps) {
             <div className="grid grid-cols-2 gap-2 text-[11px]">
               <div className="p-2 rounded-lg bg-[#202020] border border-[#2d2d2d] flex justify-between items-center">
                 <span className="text-zinc-400">New Chat</span>
-                <kbd className="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-200 font-mono text-[10px]">Ctrl+O</kbd>
+                <kbd className="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-200 font-mono text-[10px]">
+                  Ctrl+O
+                </kbd>
               </div>
               <div className="p-2 rounded-lg bg-[#202020] border border-[#2d2d2d] flex justify-between items-center">
                 <span className="text-zinc-400">Send Message</span>
-                <kbd className="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-200 font-mono text-[10px]">Enter</kbd>
+                <kbd className="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-200 font-mono text-[10px]">
+                  Enter
+                </kbd>
               </div>
               <div className="p-2 rounded-lg bg-[#202020] border border-[#2d2d2d] flex justify-between items-center">
                 <span className="text-zinc-400">New Line</span>
-                <kbd className="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-200 font-mono text-[10px]">Shift+Enter</kbd>
+                <kbd className="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-200 font-mono text-[10px]">
+                  Shift+Enter
+                </kbd>
               </div>
               <div className="p-2 rounded-lg bg-[#202020] border border-[#2d2d2d] flex justify-between items-center">
                 <span className="text-zinc-400">Cancel Loop</span>
-                <kbd className="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-200 font-mono text-[10px]">Stop Button</kbd>
+                <kbd className="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-200 font-mono text-[10px]">
+                  Stop Button
+                </kbd>
               </div>
             </div>
           </div>
@@ -64,7 +74,9 @@ export function HelpModal({ isOpen, onClose }: HelpModalProps) {
               Autonomous Agent Runtime
             </h3>
             <p className="text-[11px] leading-relaxed text-zinc-400">
-              OrbaAgent runs inside an isolated container with an autonomous execution loop. When given a repository, task, or bug, it clones code, runs type checks, installs dependencies, and executes linters automatically without manual intervention.
+              OrbaAgent runs inside an isolated container with an autonomous execution loop. When
+              given a repository, task, or bug, it clones code, runs type checks, installs
+              dependencies, and executes linters automatically without manual intervention.
             </p>
           </div>
 
@@ -74,7 +86,9 @@ export function HelpModal({ isOpen, onClose }: HelpModalProps) {
               Connected Tools &amp; Permissions
             </h3>
             <p className="text-[11px] leading-relaxed text-zinc-400">
-              Only authorized and connected third-party integrations (like GitHub) can be interacted with. If an integration is not connected, OrbaAgent will inform you and provide a 1-click connect button.
+              Only authorized and connected third-party integrations (like GitHub) can be interacted
+              with. If an integration is not connected, OrbaAgent will inform you and provide a
+              1-click connect button.
             </p>
           </div>
         </div>
@@ -92,4 +106,3 @@ export function HelpModal({ isOpen, onClose }: HelpModalProps) {
     </div>
   );
 }
-

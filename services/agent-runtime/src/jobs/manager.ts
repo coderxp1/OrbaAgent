@@ -83,11 +83,7 @@ export class JobManager {
     return true;
   }
 
-  public scheduleJob(
-    name: string,
-    delayMs: number,
-    payload?: Record<string, unknown>,
-  ): JobRecord {
+  public scheduleJob(name: string, delayMs: number, payload?: Record<string, unknown>): JobRecord {
     const job = this.createJob(name, payload);
     const waitingJob = this.updateJob(job.id, { status: "WAITING" }) || job;
 

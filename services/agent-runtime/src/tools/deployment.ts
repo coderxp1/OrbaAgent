@@ -1,8 +1,4 @@
-import type {
-  ToolDefinition,
-  ToolExecutionResult,
-  ToolMetadata,
-} from "@orbaagent/shared";
+import type { ToolDefinition, ToolExecutionResult, ToolMetadata } from "@orbaagent/shared";
 import { SecretManager } from "../secrets.js";
 import type { ITool, ToolExecutionContext } from "./base.js";
 
@@ -40,7 +36,8 @@ export class DeploymentTool implements ITool {
         },
         envVars: {
           type: "object",
-          description: "Environment variables map (for environment action). Values are sanitized in logs.",
+          description:
+            "Environment variables map (for environment action). Values are sanitized in logs.",
         },
       },
       required: ["action", "provider"],
@@ -179,7 +176,11 @@ export class DeploymentTool implements ITool {
             success: true,
             output: domain
               ? `Domain '${domain}' attached to '${projectName}' on ${provider}. DNS: CNAME configured.`
-              : JSON.stringify({ domains: [`${projectName}.vercel.app`, "orbaagent.dev"] }, null, 2),
+              : JSON.stringify(
+                  { domains: [`${projectName}.vercel.app`, "orbaagent.dev"] },
+                  null,
+                  2,
+                ),
             executionTimeMs: Date.now() - startTime,
           };
         }

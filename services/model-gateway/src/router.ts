@@ -1,5 +1,7 @@
 import type { ChatCompletionRequest, ModelSpec, ProviderId } from "@orbaagent/shared";
-import { MODEL_REGISTRY, hasConfirmedCapability, isLocalQuotaExhausted } from "./registry.js";
+import { MODEL_CATALOG, type ModelDefinition, toModelSpec } from "./catalog.js";
+import { ModelHealthTracker, type ModelHealthStatus } from "./health.js";
+import { hasConfirmedCapability, isLocalQuotaExhausted } from "./registry.js";
 
 export type TaskComplexity = "high_reasoning" | "coding" | "vision" | "fast_response" | "general";
 
@@ -7,6 +9,8 @@ export interface ProviderHealth {
   consecutiveFailures: number;
   lastFailureTime?: number;
   isHealthy: boolean;
+  isAuthenticated: boolean;
+  authError?: string;
 }
 
 export interface RoutingDecision {
@@ -18,17 +22,55 @@ export interface RoutingDecision {
 
 export class IntelligenceRouter {
   private readonly providerHealthMap: Map<ProviderId, ProviderHealth> = new Map([
-    ["langdock", { consecutiveFailures: 0, isHealthy: true }],
-    ["openrouter", { consecutiveFailures: 0, isHealthy: true }],
+    ["langdock", { consecutiveFailures: 0, isHealthy: true, isAuthenticated: true }],
+    ["openrouter", { consecutiveFailures: 0, isHealthy: true, isAuthenticated: true }],
   ]);
 
-  private readonly modelFailureMap: Map<string, number> = new Map();
+  private readonly healthTracker: ModelHealthTracker;
   private readonly cooldownMs = 60000; // 1 minute circuit breaker cooldown
+
+  constructor(customHealthTracker?: ModelHealthTracker) {
+    this.healthTracker = customHealthTracker || new ModelHealthTracker(this.cooldownMs);
+  }
+
+  public getHealthTracker(): ModelHealthTracker {
+    return this.healthTracker;
+  }
+
+  isProviderConfigured(providerId: ProviderId): boolean {
+    if (process.env.NODE_ENV === "test") {
+      return true;
+    }
+    if (providerId === "langdock") {
+      const key = process.env.LANGDOCK_API_KEY || process.env.Langdock_API_KEY;
+      return Boolean(key && key !== "undefined" && key.trim().length > 0);
+    }
+    if (providerId === "openrouter") {
+      const key = process.env.OPENROUTER_API_KEY || process.env.OPENROUTER_API;
+      return Boolean(key && key !== "undefined" && key.trim().length > 0);
+    }
+    return false;
+  }
+
+  recordAuthFailure(providerId: ProviderId, error: string): void {
+    const health = this.providerHealthMap.get(providerId) || {
+      consecutiveFailures: 0,
+      isHealthy: true,
+      isAuthenticated: true,
+    };
+    health.consecutiveFailures += 3;
+    health.isHealthy = false;
+    health.isAuthenticated = false;
+    health.authError = error;
+    health.lastFailureTime = Date.now();
+    this.providerHealthMap.set(providerId, health);
+  }
 
   recordProviderFailure(providerId: ProviderId, modelId?: string): void {
     const health = this.providerHealthMap.get(providerId) || {
       consecutiveFailures: 0,
       isHealthy: true,
+      isAuthenticated: true,
     };
     health.consecutiveFailures += 1;
     health.lastFailureTime = Date.now();
@@ -38,30 +80,47 @@ export class IntelligenceRouter {
     this.providerHealthMap.set(providerId, health);
 
     if (modelId) {
-      const fails = (this.modelFailureMap.get(modelId) || 0) + 1;
-      this.modelFailureMap.set(modelId, fails);
+      this.healthTracker.recordModelFailure(modelId, "TEMPORARILY_FAILED", undefined);
     }
+  }
+
+  recordModelRateLimit(modelId: string, retryAfterMs?: number): void {
+    this.healthTracker.recordModelFailure(modelId, "RATE_LIMITED", retryAfterMs);
   }
 
   recordProviderSuccess(providerId: ProviderId, modelId?: string): void {
     this.providerHealthMap.set(providerId, {
       consecutiveFailures: 0,
       isHealthy: true,
+      isAuthenticated: true,
     });
+
     if (modelId) {
-      this.modelFailureMap.delete(modelId);
+      this.healthTracker.recordModelSuccess(modelId);
+    } else {
+      this.healthTracker.clearProviderFailures(providerId);
     }
+  }
+
+  getModelFailures(modelId: string): number {
+    const rec = this.healthTracker.getRecord(modelId);
+    return rec.failureCount;
   }
 
   getProviderHealth(providerId: ProviderId): ProviderHealth {
     const health = this.providerHealthMap.get(providerId) || {
       consecutiveFailures: 0,
       isHealthy: true,
+      isAuthenticated: true,
     };
     if (!health.isHealthy && health.lastFailureTime) {
       if (Date.now() - health.lastFailureTime > this.cooldownMs) {
         health.isHealthy = true;
         health.consecutiveFailures = 0;
+        health.isAuthenticated = true;
+        health.authError = undefined;
+
+        this.healthTracker.clearProviderFailures(providerId);
       }
     }
     return health;
@@ -71,7 +130,8 @@ export class IntelligenceRouter {
    * Classify user prompt, task complexity, context requirements, tool dependencies, and capabilities.
    */
   classifyTask(request: ChatCompletionRequest): TaskComplexity {
-    const fullText = request.messages
+    const userMessages = request.messages.filter((m) => m.role === "user");
+    const fullText = (userMessages.length > 0 ? userMessages : request.messages)
       .map((m: { content: string }) => m.content)
       .join(" ")
       .toLowerCase();
@@ -109,7 +169,7 @@ export class IntelligenceRouter {
     ];
     const isCodingTask =
       codingKeywords.some((kw) => fullText.includes(kw)) ||
-      (request.tools && request.tools.length > 0);
+      Boolean(request.tools && request.tools.length > 0);
     if (isCodingTask) {
       return "coding";
     }
@@ -130,8 +190,8 @@ export class IntelligenceRouter {
 
   /**
    * Dynamic Capability-Based Intelligence Routing:
-   * Evaluates task requirements, model capabilities, local quota limits, runtime model failure penalties,
-   * and provider circuit-breaker health dynamically without hardcoded static lists.
+   * Selects eligible models from the Langdock Model Pool ordered by task-specific priority.
+   * If Langdock models are exhausted or unauthenticated, seamlessly falls back to OpenRouter pool.
    */
   selectRouting(request: ChatCompletionRequest): RoutingDecision {
     const complexity = this.classifyTask(request);
@@ -144,61 +204,94 @@ export class IntelligenceRouter {
     const needsTools =
       Boolean(request.tools && request.tools.length > 0) || complexity === "coding";
 
-    // Retrieve all registered Langdock models
-    const allLangdockModels = Object.values(MODEL_REGISTRY).filter(
-      (m) => m.provider === "langdock",
+    const isLangdockConfigured = this.isProviderConfigured("langdock") || this.isMockAllowed();
+    const isLangdockAvailable =
+      langdockHealth.isHealthy && langdockHealth.isAuthenticated && isLangdockConfigured;
+
+    const isOpenRouterConfigured =
+      this.isProviderConfigured("openrouter") || this.isMockAllowed();
+    const isOpenRouterAvailable =
+      openrouterHealth.isHealthy &&
+      openrouterHealth.isAuthenticated &&
+      isOpenRouterConfigured;
+
+    // Filter eligible Langdock models from the Model Catalog
+    const allLangdockDefs = Object.values(MODEL_CATALOG).filter(
+      (m) => m.provider === "langdock" && m.enabled,
     );
 
-    // Filter eligible Langdock models by confirmed capabilities, quota limits, and failure count
-    const eligibleLangdock = langdockHealth.isHealthy
-      ? allLangdockModels
-          .filter((m) => !needsVision || hasConfirmedCapability(m, "vision"))
-          .filter((m) => !needsTools || hasConfirmedCapability(m, "tool_calling"))
-          .filter((m) => !isLocalQuotaExhausted(m.id, tenantId))
-          .filter((m) => (this.modelFailureMap.get(m.id) || 0) < 3)
+    const eligibleLangdockDefs = isLangdockAvailable
+      ? allLangdockDefs
+          .filter((def) => !needsVision || def.capabilities.vision)
+          .filter((def) => !needsTools || def.capabilities.toolCalling)
+          .filter((def) => !isLocalQuotaExhausted(def.id, tenantId))
+          .filter((def) => this.healthTracker.isModelEligible(def.id))
       : [];
 
-    // Score eligible models dynamically based on task complexity alignment
-    const scoredLangdock = eligibleLangdock.map((m) => {
-      let score = 10;
-      if (complexity === "high_reasoning" && hasConfirmedCapability(m, "thinking")) score += 15;
-      if (complexity === "coding" && hasConfirmedCapability(m, "tool_calling")) score += 10;
-      if (complexity === "vision" && hasConfirmedCapability(m, "vision")) score += 15;
-      if (complexity === "fast_response" && m.id.includes("mini")) score += 10;
-
-      const failures = this.modelFailureMap.get(m.id) || 0;
-      score -= failures * 5;
-      return { model: m, score };
+    // Sort Langdock models by task-specific priority (lower number = higher priority)
+    eligibleLangdockDefs.sort((a, b) => {
+      let prioA = a.priority.general;
+      let prioB = b.priority.general;
+      if (complexity === "coding") {
+        prioA = a.priority.coding;
+        prioB = b.priority.coding;
+      } else if (complexity === "high_reasoning") {
+        prioA = a.priority.reasoning;
+        prioB = b.priority.reasoning;
+      } else if (complexity === "fast_response") {
+        prioA = a.priority.fast;
+        prioB = b.priority.fast;
+      }
+      return prioA - prioB;
     });
 
-    scoredLangdock.sort((a, b) => b.score - a.score);
-    const sortedLangdockModels = scoredLangdock.map((sm) => sm.model);
+    const sortedLangdockModels: ModelSpec[] = eligibleLangdockDefs.map((def) => toModelSpec(def));
 
-    // Retrieve eligible OpenRouter models if OpenRouter provider is healthy
-    const eligibleOpenRouter = openrouterHealth.isHealthy
-      ? [MODEL_REGISTRY["openrouter/auto"], MODEL_REGISTRY["openrouter/free"]]
-          .filter((m): m is ModelSpec => Boolean(m))
-          .filter((m) => !needsVision || hasConfirmedCapability(m, "vision"))
-          .filter((m) => !needsTools || hasConfirmedCapability(m, "tool_calling"))
-          .filter((m) => !isLocalQuotaExhausted(m.id, tenantId))
-          .filter((m) => (this.modelFailureMap.get(m.id) || 0) < 3)
+    // Filter eligible OpenRouter models from catalog
+    const allOpenRouterDefs = Object.values(MODEL_CATALOG).filter(
+      (m) => m.provider === "openrouter" && m.enabled,
+    );
+
+    const eligibleOpenRouterDefs = isOpenRouterAvailable
+      ? allOpenRouterDefs
+          .filter((def) => !needsVision || def.capabilities.vision)
+          .filter((def) => !needsTools || def.capabilities.toolCalling)
+          .filter((def) => !isLocalQuotaExhausted(def.id, tenantId))
+          .filter((def) => this.healthTracker.isModelEligible(def.id))
       : [];
+
+    eligibleOpenRouterDefs.sort((a, b) => a.priority.general - b.priority.general);
+    const eligibleOpenRouter: ModelSpec[] = eligibleOpenRouterDefs.map((def) => toModelSpec(def));
 
     let primaryModel: ModelSpec;
     let fallbackChain: ModelSpec[];
 
-    if (langdockHealth.isHealthy && sortedLangdockModels.length > 0) {
+    if (sortedLangdockModels.length > 0) {
       primaryModel = sortedLangdockModels[0];
       const remainingLangdock = sortedLangdockModels.slice(1);
       fallbackChain = [...remainingLangdock, ...eligibleOpenRouter];
-    } else if (openrouterHealth.isHealthy && eligibleOpenRouter.length > 0) {
+    } else if (eligibleOpenRouter.length > 0) {
       primaryModel = eligibleOpenRouter[0];
       fallbackChain = eligibleOpenRouter.slice(1);
     } else {
+      const langdockStatus = !isLangdockConfigured
+        ? "unconfigured"
+        : !langdockHealth.isAuthenticated
+          ? "unauthenticated"
+          : !langdockHealth.isHealthy
+            ? "cooldown"
+            : "no eligible models";
+
+      const openrouterStatus = !isOpenRouterConfigured
+        ? "unconfigured"
+        : !openrouterHealth.isAuthenticated
+          ? "unauthenticated"
+          : !openrouterHealth.isHealthy
+            ? "cooldown"
+            : "no eligible models";
+
       throw new Error(
-        `All provider routes are unavailable or in circuit breaker cooldown (Langdock health: ${
-          langdockHealth.isHealthy ? "healthy (no eligible models)" : "cooldown"
-        }, OpenRouter health: ${openrouterHealth.isHealthy ? "healthy (no eligible models)" : "cooldown"}).`,
+        `All provider routes are unavailable or in circuit breaker cooldown (Langdock: ${langdockStatus}, OpenRouter: ${openrouterStatus}).`,
       );
     }
 
@@ -225,6 +318,8 @@ export class IntelligenceRouter {
     if (isProd) {
       return false; // NEVER allow mocks in production
     }
-    return process.env.USE_MOCK_PROVIDERS === "true" || process.env.ALLOW_MOCK_PROVIDERS === "true";
+    return (
+      process.env.USE_MOCK_PROVIDERS === "true" || process.env.ALLOW_MOCK_PROVIDERS === "true"
+    );
   }
 }

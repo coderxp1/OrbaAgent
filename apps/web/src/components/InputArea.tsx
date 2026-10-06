@@ -1,22 +1,69 @@
 "use client";
 
-import { Paperclip, Send, Square } from "lucide-react";
+import { Send, Square } from "lucide-react";
 import { type KeyboardEvent, useRef, useState } from "react";
+import { AttachmentMenu, type AttachedFile } from "./AttachmentMenu";
 
 interface InputAreaProps {
-  onSendMessage: (text: string) => void;
+  onSendMessage: (text: string, attachments?: AttachedFile[]) => void;
   isGenerating: boolean;
   onCancelGeneration: () => void;
 }
 
 export function InputArea({ onSendMessage, isGenerating, onCancelGeneration }: InputAreaProps) {
   const [text, setText] = useState<string>("");
+  const [attachments, setAttachments] = useState<AttachedFile[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const handleSend = () => {
-    if (!text.trim() || isGenerating) return;
-    onSendMessage(text);
+  const handleSend = async () => {
+    if ((!text.trim() && attachments.length === 0) || isGenerating) return;
+    let content = text;
+    let uploaded = attachments;
+    // Upload files if present
+    const filesToUpload = attachments.filter((a) => a.file).map((a) => a);
+    if (filesToUpload.length > 0) {
+      const form = new FormData();
+      const bundle = `bundle_${Date.now()}`;
+      form.set("bundle", bundle);
+      for (const att of filesToUpload) {
+        const f = att.file as File;
+        // Preserve relative path when available by renaming the File with path; browsers ignore path but server relies on webkitRelativePath sent by the browser
+        form.append("files", f);
+      }
+      try {
+        const res = await fetch("/api/uploads", { method: "POST", body: form });
+        if (res.ok) {
+          const data = await res.json();
+          const urls: string[] = (data.artifacts || []).map((a: any) => a.url);
+          const structured = (data.artifacts || []).map((a: any) => ({
+            artifactId: a.id,
+            name: a.name,
+            type: a.type,
+            size: a.size,
+            relPath: a.relPath,
+          }));
+          if (urls.length > 0) {
+            const prefix = urls.map((u) => `[Attachment]: ${u}`).join("\n");
+            content = content ? `${prefix}\n\n${content}` : prefix;
+            // Replace attachments with metadata-only entries post-upload
+            uploaded = attachments.map((a) => ({ ...a, file: undefined, content: undefined }));
+          }
+          // Send structured attachments to /api/chat
+          onSendMessage(content, structured);
+          setText("");
+          setAttachments([]);
+          if (textareaRef.current) {
+            textareaRef.current.style.height = "auto";
+          }
+          return;
+        }
+      } catch {
+        // If upload fails, send without URLs (agent will lack artifact access)
+      }
+    }
+    onSendMessage(content, undefined);
     setText("");
+    setAttachments([]);
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
     }
@@ -37,17 +84,53 @@ export function InputArea({ onSendMessage, isGenerating, onCancelGeneration }: I
     }
   };
 
+  const handleAttachFiles = (files: AttachedFile[]) => {
+    setAttachments((prev) => [...prev, ...files]);
+  };
+
+  const handleInsertSnippet = (snippet: string) => {
+    setText((prev) => (prev ? `${prev}\n${snippet}` : snippet));
+    textareaRef.current?.focus();
+  };
+
+  const removeAttachment = (id: string) => {
+    setAttachments((prev) => prev.filter((a) => a.id !== id));
+  };
+
   return (
     <div className="border-t border-zinc-800 bg-zinc-950 p-4">
       <div className="mx-auto flex max-w-4xl flex-col gap-2">
+
+        {/* Attachment Chips */}
+        {attachments.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 px-1">
+            {attachments.map((att) => (
+              <div
+                key={att.id}
+                className="flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-800 px-2 py-1 text-[11px] text-zinc-300"
+              >
+                <span className="max-w-[120px] truncate">{att.name}</span>
+                <button
+                  type="button"
+                  onClick={() => removeAttachment(att.id)}
+                  className="text-zinc-500 hover:text-zinc-200 transition-colors leading-none"
+                  aria-label="Remove attachment"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
         <div className="relative flex items-end rounded-2xl border border-zinc-800 bg-zinc-900/90 p-2 shadow-inner focus-within:border-cyan-500/50 transition-colors">
-          <button
-            type="button"
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors"
-            title="Attach file or image"
-          >
-            <Paperclip className="h-5 w-5" />
-          </button>
+          {/* Attachment Menu (+ button) */}
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center">
+            <AttachmentMenu
+              onAttachFiles={handleAttachFiles}
+              onInsertSnippet={handleInsertSnippet}
+            />
+          </div>
 
           <textarea
             ref={textareaRef}
@@ -71,7 +154,7 @@ export function InputArea({ onSendMessage, isGenerating, onCancelGeneration }: I
           ) : (
             <button
               onClick={handleSend}
-              disabled={!text.trim()}
+              disabled={!text.trim() && attachments.length === 0}
               type="button"
               className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-tr from-cyan-600 to-indigo-600 text-white shadow-md shadow-cyan-950/50 hover:from-cyan-500 hover:to-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
               title="Send Message"

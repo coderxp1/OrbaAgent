@@ -166,12 +166,7 @@ export const ToolExecutionResultSchema = z.object({
 });
 export type ToolExecutionResult = z.infer<typeof ToolExecutionResultSchema>;
 
-export const AgentFileChangeStatusSchema = z.enum([
-  "created",
-  "modified",
-  "deleted",
-  "renamed",
-]);
+export const AgentFileChangeStatusSchema = z.enum(["created", "modified", "deleted", "renamed"]);
 export type AgentFileChangeStatus = z.infer<typeof AgentFileChangeStatusSchema>;
 
 export const AgentFileChangeSchema = z.object({
@@ -237,6 +232,17 @@ export const ChatCompletionRequestSchema = z.object({
   maxTokens: z.number().int().positive().optional(),
   stream: z.boolean().default(true),
   trace: TraceMetadataSchema,
+  attachments: z
+    .array(
+      z.object({
+        artifactId: z.string(),
+        name: z.string().optional(),
+        type: z.string().optional(),
+        size: z.number().int().nonnegative().optional(),
+        relPath: z.string().optional(),
+      }),
+    )
+    .optional(),
 });
 export type ChatCompletionRequest = z.infer<typeof ChatCompletionRequestSchema>;
 
@@ -410,3 +416,9 @@ export const AuditLogEventSchema = z.object({
   providerAttempts: z.array(ProviderAttemptSchema).optional(),
 });
 export type AuditLogEvent = z.infer<typeof AuditLogEventSchema>;
+
+export {
+  PathContainmentError,
+  resolveWithinBase,
+  tryResolveWithinBase,
+} from "./lib/safePath.js";

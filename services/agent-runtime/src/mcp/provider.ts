@@ -1,10 +1,6 @@
-import type {
-  ToolDefinition,
-  ToolExecutionResult,
-  ToolMetadata,
-} from "@orbaagent/shared";
+import type { ToolDefinition, ToolExecutionResult, ToolMetadata } from "@orbaagent/shared";
 import type { ITool, ToolExecutionContext } from "../tools/base.js";
-import { McpStdioClient, type McpServerConfig } from "./transport.js";
+import { type McpServerConfig, McpStdioClient } from "./transport.js";
 
 export class McpToolWrapper implements ITool {
   public readonly definition: ToolDefinition;
@@ -45,8 +41,8 @@ export class McpToolWrapper implements ITool {
 
     try {
       const cleanArgs = { ...args };
-      delete cleanArgs._toolCallId;
-      delete cleanArgs._managedPids;
+      cleanArgs._toolCallId = undefined;
+      cleanArgs._managedPids = undefined;
 
       const response = await this.client.callTool(this.originalName, cleanArgs);
       const textOutput =
@@ -89,7 +85,9 @@ export class MCPProvider {
     const tools: ITool[] = [];
 
     for (const t of mcpTools) {
-      const registeredName = `mcp_${config.name}_${t.name}`.toLowerCase().replace(/[^a-z0-9_]/g, "_");
+      const registeredName = `mcp_${config.name}_${t.name}`
+        .toLowerCase()
+        .replace(/[^a-z0-9_]/g, "_");
       const wrapper = new McpToolWrapper(
         client,
         t.name,

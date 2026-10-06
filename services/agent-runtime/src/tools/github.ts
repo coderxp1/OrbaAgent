@@ -1,8 +1,4 @@
-import type {
-  ToolDefinition,
-  ToolExecutionResult,
-  ToolMetadata,
-} from "@orbaagent/shared";
+import type { ToolDefinition, ToolExecutionResult, ToolMetadata } from "@orbaagent/shared";
 import { SecretManager } from "../secrets.js";
 import type { ITool, ToolExecutionContext } from "./base.js";
 
@@ -166,21 +162,19 @@ export class GitHubTool implements ITool {
         if (!Array.isArray(data) || data.length === 0) {
           summary = "No repositories found for authenticated user.";
         } else {
-          summary =
-            `Authenticated User Repositories (${data.length} found):\n` +
-            data
-              .map(
-                (r: {
-                  full_name: string;
-                  private: boolean;
-                  html_url: string;
-                  description: string;
-                }) =>
-                  `- ${r.full_name} (${r.private ? "Private" : "Public"})${
-                    r.description ? `: ${r.description}` : ""
-                  }\n  URL: ${r.html_url}`,
-              )
-              .join("\n");
+          summary = `Authenticated User Repositories (${data.length} found):\n${data
+            .map(
+              (r: {
+                full_name: string;
+                private: boolean;
+                html_url: string;
+                description: string;
+              }) =>
+                `- ${r.full_name} (${r.private ? "Private" : "Public"})${
+                  r.description ? `: ${r.description}` : ""
+                }\n  URL: ${r.html_url}`,
+            )
+            .join("\n")}`;
         }
       } else if (action === "inspect_repo") {
         summary = `Repository: ${data.full_name}\nDescription: ${data.description || "N/A"}\nDefault Branch: ${data.default_branch}\nStars: ${data.stargazers_count}\nOpen Issues: ${data.open_issues_count}\nURL: ${data.html_url}`;
@@ -223,4 +217,3 @@ export class GitHubTool implements ITool {
     }
   }
 }
-

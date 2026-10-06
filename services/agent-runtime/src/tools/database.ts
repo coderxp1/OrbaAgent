@@ -1,11 +1,7 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type {
-  ToolDefinition,
-  ToolExecutionResult,
-  ToolMetadata,
-} from "@orbaagent/shared";
+import type { ToolDefinition, ToolExecutionResult, ToolMetadata } from "@orbaagent/shared";
 import { SecretManager } from "../secrets.js";
 import type { ITool, ToolExecutionContext } from "./base.js";
 
@@ -31,7 +27,8 @@ export class DatabaseTool implements ITool {
         },
         connectionString: {
           type: "string",
-          description: "Database connection URL (e.g. postgres://user:pass@localhost:5432/db or redis://localhost:6379).",
+          description:
+            "Database connection URL (e.g. postgres://user:pass@localhost:5432/db or redis://localhost:6379).",
         },
         databasePath: {
           type: "string",
@@ -121,7 +118,7 @@ export class DatabaseTool implements ITool {
     // Register sensitive database credentials in SecretManager
     if (rawConnStr) {
       const match = rawConnStr.match(/([a-z]+:\/\/[^:]+:)([^@]+)(@.+)/i);
-      if (match && match[2]) {
+      if (match?.[2]) {
         secretManager.registerSecret(match[2], "DATABASE_PASSWORD");
       }
     }
@@ -171,14 +168,20 @@ export class DatabaseTool implements ITool {
               toolCallId,
               name: this.definition.name,
               success: true,
-              output: JSON.stringify({ tables: tables.map((t) => t.name), schema: schemaDetails }, null, 2),
+              output: JSON.stringify(
+                { tables: tables.map((t) => t.name), schema: schemaDetails },
+                null,
+                2,
+              ),
               metadata: { tablesCount: tables.length },
               executionTimeMs: Date.now() - startTime,
             };
           }
           case "query": {
             if (!query) throw new Error("Query statement is required for 'query' action.");
-            const isSelect = query.trim().toUpperCase().startsWith("SELECT") || query.trim().toUpperCase().startsWith("PRAGMA");
+            const isSelect =
+              query.trim().toUpperCase().startsWith("SELECT") ||
+              query.trim().toUpperCase().startsWith("PRAGMA");
 
             if (isSelect) {
               const stmt = db.prepare(query);
@@ -191,16 +194,15 @@ export class DatabaseTool implements ITool {
                 metadata: { rowCount: rows.length },
                 executionTimeMs: Date.now() - startTime,
               };
-            } else {
-              db.exec(query);
-              return {
-                toolCallId,
-                name: this.definition.name,
-                success: true,
-                output: "Statement executed successfully.",
-                executionTimeMs: Date.now() - startTime,
-              };
             }
+            db.exec(query);
+            return {
+              toolCallId,
+              name: this.definition.name,
+              success: true,
+              output: "Statement executed successfully.",
+              executionTimeMs: Date.now() - startTime,
+            };
           }
           case "explain": {
             if (!query) throw new Error("Query statement is required for 'explain'.");
@@ -218,7 +220,9 @@ export class DatabaseTool implements ITool {
             if (!migrationPath) throw new Error("migrationPath is required for 'migrate'.");
             const fullMigPath = path.resolve(context.workspaceDir, migrationPath);
             if (!fullMigPath.startsWith(path.resolve(context.workspaceDir))) {
-              throw new Error(`Migration path '${migrationPath}' resolves outside workspace boundary.`);
+              throw new Error(
+                `Migration path '${migrationPath}' resolves outside workspace boundary.`,
+              );
             }
 
             const sql = await fs.readFile(fullMigPath, "utf-8");
@@ -239,8 +243,13 @@ export class DatabaseTool implements ITool {
             }
 
             // Export sqlite_master and table data dump
-            const tables = (db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all() as any[])
-              .map((t) => t.name);
+            const tables = (
+              db
+                .prepare(
+                  "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
+                )
+                .all() as any[]
+            ).map((t) => t.name);
 
             let dumpSql = `-- SQLite Backup ${new Date().toISOString()}\n`;
             for (const table of tables) {
@@ -273,17 +282,16 @@ export class DatabaseTool implements ITool {
               executionTimeMs: Date.now() - startTime,
             };
         }
-      } else {
-        // Postgres & Redis adapter handlers
-        return {
-          toolCallId,
-          name: this.definition.name,
-          success: true,
-          output: `Engine '${engine}' connected successfully via endpoint '${secretManager.redact(rawConnStr || "default")}'.`,
-          metadata: { engine, action },
-          executionTimeMs: Date.now() - startTime,
-        };
       }
+      // Postgres & Redis adapter handlers
+      return {
+        toolCallId,
+        name: this.definition.name,
+        success: true,
+        output: `Engine '${engine}' connected successfully via endpoint '${secretManager.redact(rawConnStr || "default")}'.`,
+        metadata: { engine, action },
+        executionTimeMs: Date.now() - startTime,
+      };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       return {
