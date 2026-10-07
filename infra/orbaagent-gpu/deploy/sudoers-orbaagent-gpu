@@ -29,8 +29,10 @@ klaus ALL=(root) NOPASSWD: /usr/local/sbin/orbaagent-gpu build
 klaus ALL=(root) NOPASSWD: /usr/local/sbin/orbaagent-gpu validate
 klaus ALL=(root) NOPASSWD: /usr/local/sbin/orbaagent-gpu health
 
-# `logs` takes one bounded numeric argument. The `[0-9]*` pattern constrains it
-# to digits only, so no flags or service names can be smuggled in.
-klaus ALL=(root) NOPASSWD: /usr/local/sbin/orbaagent-gpu logs [0-9]*
+# `logs` takes an optional bounded numeric line count. sudo-rs on Ubuntu 26.04
+# allows trailing arguments via `*` but rejects character class patterns `[...]`.
+# The wrapper itself strictly enforces that the argument is a positive integer
+# bounded between 1 and 2000, rejecting flags, non-digits, and injection attempts.
+klaus ALL=(root) NOPASSWD: /usr/local/sbin/orbaagent-gpu logs *
 klaus ALL=(root) NOPASSWD: /usr/local/sbin/orbaagent-gpu logs
 klaus ALL=(root) NOPASSWD: /usr/local/sbin/orbaagent-gpu help

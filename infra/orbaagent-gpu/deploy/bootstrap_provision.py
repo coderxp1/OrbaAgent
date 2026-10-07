@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Iterable
 
 # Expected archive SHA-256 (the actual hardened archive SHA-256)
-EXPECTED_SHA256 = "8b4c8c3126b269984f21c46027527597726113c5bf0b08ab9371d37d58916277"
+EXPECTED_SHA256 = "41d99b2a9e3aa9baddfeeb924542d844882f4e6f9403ab5867155ec4be84bf30"
 
 # Exact file whitelist (relative paths inside archive)
 ALLOWED_EXACT: tuple[str, ...] = (

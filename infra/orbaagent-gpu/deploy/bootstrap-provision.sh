@@ -6,7 +6,7 @@
 set -euo pipefail
 
 BOOTSTRAP_NAME="bootstrap-provision.sh"
-DEFAULT_EXPECTED_SHA256="8b4c8c3126b269984f21c46027527597726113c5bf0b08ab9371d37d58916277"
+DEFAULT_EXPECTED_SHA256="41d99b2a9e3aa9baddfeeb924542d844882f4e6f9403ab5867155ec4be84bf30"
 # Whitelist: allowed exact paths or allowed subtrees
 ALLOWED_TOPLEVEL=("deploy" "orba_gpu" "Dockerfile" "worker.py")
 # Exact allowed files
