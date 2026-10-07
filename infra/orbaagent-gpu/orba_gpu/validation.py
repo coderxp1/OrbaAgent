@@ -3,6 +3,11 @@
 Nothing is reported as successful until the bytes on disk have been read back and
 verified. A generation job that produces a truncated, empty, or wrong-format file
 is a failure, and the partial artifact is removed.
+
+Added hardening measures for TOCTOU protection:
+- check_symlinks_in_source: Detects symlinks in source directories
+- enforce_hash_verification: Ensures bundle integrity before extraction
+- validate_filesystem_permissions: Verifies no group/world-writable files
 """
 
 from __future__ import annotations
@@ -37,6 +42,73 @@ def sha256_of(path: Path, chunk_size: int = 1024 * 1024) -> str:
         for chunk in iter(lambda: handle.read(chunk_size), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def check_symlinks_in_source(path: str) -> bool:
+    """Check if a path contains symlinks (TOCTOU protection).
+    
+    Args:
+        path: Path to check for symlinks
+        
+    Returns:
+        True if symlinks are found, False otherwise
+    """
+    try:
+        for root, dirs, files in os.walk(path):
+            for item in dirs + files:
+                full_path = os.path.join(root, item)
+                if os.path.islink(full_path):
+                    return True
+        return False
+    except Exception:
+        # If we can't check, assume there might be symlinks for safety
+        return True
+
+
+def enforce_hash_verification(bundle_path: str, expected_sha256: str) -> bool:
+    """Verify bundle integrity using SHA-256 hash.
+    
+    Args:
+        bundle_path: Path to the bundle directory
+        expected_sha256: Expected SHA-256 hash
+        
+    Returns:
+        True if hash matches, False otherwise
+    """
+    try:
+        actual_sha256 = (
+            subprocess.check_output(
+                ["sha256sum", bundle_path], text=True, stderr=subprocess.DEVNULL
+            )
+            .split()[0]
+        )
+        return actual_sha256 == expected_sha256
+    except Exception:
+        return False
+
+
+def validate_filesystem_permissions(path: str) -> bool:
+    """Check that no files in the path are group/world-writable.
+    
+    Args:
+        path: Path to check permissions
+        
+    Returns:
+        True if all files are properly secured, False otherwise
+    """
+    try:
+        for root, dirs, files in os.walk(path):
+            for item in dirs + files:
+                full_path = os.path.join(root, item)
+                try:
+                    stat_info = os.stat(full_path)
+                    if stat_info.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+                        return False
+                except OSError:
+                    continue
+        return True
+    except Exception:
+        return False
 
 
 def validate_image(
@@ -230,6 +302,111 @@ def validate_video(
     )
 
 
+FORBIDDEN_SYSTEM_ROOTS: tuple[str, ...] = (
+    "/",
+    "/root",
+    "/home",
+    "/etc",
+    "/usr",
+    "/bin",
+    "/sbin",
+    "/lib",
+    "/lib64",
+    "/var",
+    "/srv",
+    "/srv/projects",
+    "/srv/projects/coderxp",
+)
+
+
+def _normalize_path_str(p: str | Path) -> str:
+    s = str(p).replace("\\", "/")
+    # Remove Windows drive letter if present
+    if len(s) >= 2 and s[1] == ":" and s[0].isalpha():
+        s = s[2:]
+    s = os.path.normpath(s).replace("\\", "/")
+    if not s.startswith("/"):
+        s = "/" + s
+    return s
+
+
+def validate_privileged_path(
+    path: str | Path,
+    allowed_roots: Sequence[str | Path] = (
+        "/srv/projects/orbaagent-gpu",
+        "/etc/orbaagent/gpu-worker",
+    ),
+) -> bool:
+    """Validate that a privileged path strictly belongs to allowed application roots.
+    
+    Rejects:
+    - Traversal (..)
+    - Root or top-level system directories
+    - Protected workload roots (e.g. /srv/projects/coderxp)
+    - Paths outside allowed_roots
+    """
+    try:
+        if not path:
+            return False
+        norm = _normalize_path_str(path)
+
+        # Check against forbidden protected workload root
+        if "/coderxp" in norm:
+            return False
+
+        # Reject top-level roots directly
+        if norm in ("/", "/root", "/home", "/etc", "/usr", "/bin", "/sbin", "/lib", "/var", "/srv", "/srv/projects"):
+            return False
+
+        # Must match at least one allowed root prefix
+        for allowed in allowed_roots:
+            allowed_norm = _normalize_path_str(allowed)
+            if norm == allowed_norm or norm.startswith(allowed_norm + "/"):
+                return True
+        return False
+    except Exception:
+        return False
+
+
+def validate_destructive_target(
+    path: str | Path,
+    allowed_parent: str | Path,
+) -> bool:
+    """Validate that a target to be deleted is strictly contained within an allowed parent.
+    
+    Prevents deletion of:
+    - Root directory or empty path
+    - Traversals
+    - Paths equal to the allowed parent itself (must be a child)
+    - Protected system paths or CoderXP
+    - Anything outside allowed_parent
+    """
+    try:
+        if not path or not allowed_parent:
+            return False
+        norm_target = _normalize_path_str(path)
+        norm_parent = _normalize_path_str(allowed_parent)
+
+        # Forbidden protected workload
+        if "/coderxp" in norm_target:
+            return False
+
+        # Forbidden system directories
+        for forbidden in FORBIDDEN_SYSTEM_ROOTS:
+            if norm_target == forbidden:
+                return False
+
+        # Target must be strictly inside parent (not parent itself)
+        if norm_target == norm_parent:
+            return False
+        if not norm_target.startswith(norm_parent + "/"):
+            return False
+
+        return True
+    except Exception:
+        return False
+
+
 def cleanup_artifact(path: Path) -> None:
     """Best-effort removal of a partial or invalid artifact."""
     try:
@@ -237,3 +414,19 @@ def cleanup_artifact(path: Path) -> None:
             os.remove(path)
     except OSError:
         pass
+
+# Backwards compatibility: export the original function
+__all__ = [
+    "ValidationResult",
+    "sha256_of",
+    "validate_image",
+    "probe_video",
+    "validate_video",
+    "cleanup_artifact",
+    "check_symlinks_in_source",
+    "enforce_hash_verification",
+    "validate_filesystem_permissions",
+    "validate_privileged_path",
+    "validate_destructive_target",
+    "FORBIDDEN_SYSTEM_ROOTS",
+]

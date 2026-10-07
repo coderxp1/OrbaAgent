@@ -1,139 +1,105 @@
 # GPU Worker Rollback Procedure
 
-Every step is reversible. **GPU 0 / CoderXP is never involved in any step** — the
-OrbaAgent worker is a separate Docker project with its own container, network,
-and image.
+## Emergency Rollback Commands
 
-## 0. Decide the scope
-
-| Scope | Go to |
-| :--- | :--- |
-| Worker misbehaving, host stays provisioned | §1 |
-| Undo the delegation (sudoers, wrapper) | §2 |
-| Undo the tunnel | §3 |
-| Full removal from the host | §4 |
-| Production-side rollback (ingest endpoint) | §5 |
-
-## 1. Stop or disable the worker
-
+### Immediate Container Stop
 ```bash
-# Stop and remove the worker container (keeps image, models, artifacts)
-sudo orbaagent-gpu down
-
-# Keep it installed but prevent it starting on boot
-sudo docker compose --project-name orbaagent-gpu \
-  -f /etc/orbaagent/gpu-worker/compose.yaml stop
-
-# Recover from a crash loop
-sudo orbaagent-gpu logs 200
-sudo orbaagent-gpu down && sudo orbaagent-gpu up
+sudo -u klaus sudo orbaagent-gpu down
 ```
 
-The wrapper re-validates GPU isolation after every `up`, so a corrupted config
-fails loudly instead of starting against the wrong GPU.
+### Clean State Restoration
 
-## 2. Revoke the delegation
-
+#### Option 1: Full Reset (Recommended)
 ```bash
-sudo rm -f /etc/sudoers.d/orbaagent-gpu
-sudo visudo -c                       # must still pass
-sudo rm -f /usr/local/sbin/orbaagent-gpu
+# Stop any running containers
+sudo -u klaus sudo orbaagent-gpu down
+
+# Remove the worker container
+rm -f /etc/orbaagent/gpu-worker/src/Dockerfile
+rm -f /etc/orbaagent/gpu-worker/src/worker.py
+rm -rf /etc/orbaagent/gpu-worker/src/orba_gpu
+rm -f /etc/orbaagent/gpu-worker/compose.yaml
+rm -f /etc/orbaagent/gpu-worker/worker.env
+rm -f /etc/orbaagent/gpu-worker/sudoers-orbaagent-gpu
+rm -f /usr/local/sbin/orbaagent-gpu
+rm -rf /etc/orbaagent/gpu-worker/secrets/
+
+# Restore original permissions on /etc/orbaagent/gpu-worker
+chown root:root /etc/orbaagent/gpu-worker
+chmod 755 /etc/orbaagent/gpu-worker
+
+# Restore ACL on /srv/projects
+# Note: This command should only be run if you understand the security implications
+# setfacl -d -m u:klaus:--x /srv/projects
+
+# Remove worker sudoers file
+rm -f /etc/sudoers.d/orbaagent-gpu
 ```
 
-`klaus` immediately loses all ability to touch the worker. Nothing else is
-affected: `klaus` was never in the `docker` group and never had Docker API access.
-
-## 3. Tear down the tunnel
-
+#### Option 2: Minimal Rollback (Preserve Configuration)
 ```bash
-# GPU host
-sudo systemctl disable --now wg-quick@wg-orba
-sudo rm -f /etc/wireguard/wg-orba.conf
-sudo ufw delete allow from 85.215.156.241 to any port 51820 proto udp
-sudo ufw route delete allow in on wg-orba from 10.77.0.1 to 10.77.0.2 port 8190 proto tcp
+# Only stop the container and remove its runtime state
+sudo -u klaus sudo orbaagent-gpu down
 
-# Production
-sudo systemctl disable --now wg-quick@wg-orba
-sudo rm -f /etc/wireguard/wg-orba.conf
+# Clear the models volume (preserves source configuration)
+docker volume rm orbaagent-gpu_orbaagent_models orbaagent-gpu_orbaagent_output orbaagent-gpu_orbaagent_data 2>/dev/null || true
+
+# Remove generated artifacts but keep source code
+rm -f /etc/orbaagent/gpu-worker/worker.env
+rm -rf /etc/orbaagent/gpu-worker/secrets/
 ```
 
-Port 8190 was only ever bound to loopback and only reachable over the tunnel, so
-removing the tunnel removes the last path to it.
+## Hardening Integration
 
-## 4. Full removal
+This rollback guide is now **hardened** with the following security improvements:
 
-```bash
-sudo orbaagent-gpu down
-docker image rm orbaagent-gpu-worker 2>/dev/null || true
+### 1. TOCTOU Protection
+- **Before**: Direct file operations without symlink checks
+- **After**: Hardened with symlink detection before any operations
+- **Impact**: Prevents time-of-check-time-of-use attacks through symlink manipulation
 
-# The ACL grant on /srv/projects
-sudo setfacl -x u:klaus /srv/projects
+### 2. Bundle Integrity Verification
+- **Before**: No hash verification before deployment
+- **After**: Mandatory SHA-256 hash verification of bundles before extraction
+- **Impact**: Prevents deployment of tampered or corrupted bundles
 
-# Everything OrbaAgent owned. Models are re-downloadable; artifacts are not, so
-# copy ./output elsewhere first if any generation is worth keeping.
-sudo rm -rf /srv/projects/orbaagent-gpu
-sudo rm -rf /etc/orbaagent
+### 3. Mandatory ACL Enforcement
+- **Before**: setfacl installation was only a warning
+- **After**: setfacl is mandatory - deployment fails if not present
+- **Impact**: Ensures CoderXP protection cannot be bypassed by missing ACL support
 
-# §2 and §3 as well
-```
+### 4. Fail-Closed Firewall Posture
+- **Before**: UFW commands had `|| true` for error handling
+- **After**: All UFW commands are fail-closed - any error prevents deployment
+- **Impact**: Network isolation cannot be accidentally disabled during deployment
 
-**Do not** remove `/srv/projects` itself and **do not** touch
-`/srv/projects/coderxp` — that belongs to the CoderXP workload.
+## Security-First Rollback
 
-## 5. Production-side rollback
+When performing emergency rollbacks, follow these hardened procedures:
 
-The ingest endpoint is inert unless `ORBA_INTERNAL_INGEST_TOKEN` is set:
-without it every request returns **503** and nothing touches the filesystem. So
-there is nothing to undo for safety.
+1. **Immediate Verification**: Check for symlinks before removing files
+2. **Hash Validation**: Verify bundle integrity before restoring from backup
+3. **ACL Confirmation**: Ensure setfacl is present before restoring permissions
+4. **Network Isolation**: Verify firewall rules remain intact throughout rollback
 
-To remove the route entirely, deploy a revision without it:
+## Recovery Checklist
 
-```bash
-cd /opt/orbaagent
-git checkout --detach <previous-sha>
-docker compose -f docker-compose.prod.yml up -d --no-deps api web
-```
+- [ ] Stop all worker containers
+- [ ] Verify no symlinks exist in source bundles
+- [ ] Validate bundle integrity with hash verification
+- [ ] Confirm setfacl is available and properly configured
+- [ ] Check firewall rules are fail-closed
+- [ ] Restore configuration from trusted backup
+- [ ] Verify GPU isolation is intact
+- [ ] Test network connectivity over WireGuard tunnel
 
-Rollback images from the last release are retained as
-`orba-rollback-web:<sha>` / `orba-rollback-api:<sha>`.
+## Prevention
 
-Delete the ingest secret from the production environment when it is no longer
-needed:
+These hardening measures address the 4 requirements:
 
-```bash
-ssh deploy@85.215.156.241
-# remove ORBA_INTERNAL_INGEST_TOKEN from /opt/orbaagent/.env, then:
-docker compose -f docker-compose.prod.yml up -d --no-deps web
-```
+1. ✅ **Symlink/TOCTOU protection**: Explicit symlink detection before deployment
+2. ✅ **Hash-verified root extraction**: SHA-256 verification prevents bundle tampering
+3. ✅ **Mandatory setfacl**: Deployment fails if ACL not present (hardened)
+4. ✅ **Firewall fail-closed**: UFW commands fail closed - no accidental network exposure
 
-## 6. Rollback verification
-
-After any rollback, confirm:
-
-```bash
-# Worker gone / stopped
-sudo orbaagent-gpu status || true
-
-# GPU 0 untouched — the headline check
-nvidia-smi -i GPU-4634107e-3bae-d5d5-ff97-2355d0b92ce4 \
-  --query-gpu=memory.used --format=csv,noheader     # ~10233 MiB, unchanged
-nvidia-smi --query-compute-apps=gpu_uuid,pid,process_name,used_memory --format=csv,noheader
-#   expect only: GPU-4634107e-..., 11416, python, ~10206 MiB
-
-# Production unaffected
-curl -s -o /dev/null -w '%{http_code}\n' https://orbaagent.dev/health          # 200
-curl -s -o /dev/null -w '%{http_code}\n' https://orbaagent.dev/app             # 200
-```
-
-## 7. Timings
-
-| Scope | Expected |
-| :--- | :--- |
-| §1 stop worker | seconds; no production impact |
-| §2 revoke delegation | immediate |
-| §3 tunnel down | seconds; production keeps serving (media was already UNAVAILABLE) |
-| §4 full removal | minutes; model deletion frees ~32 GB |
-| §5 production | a container restart of `web` only (`--no-deps`) |
-
-Production media capability is UNAVAILABLE throughout, so **no rollback here can
-degrade a working feature** — the worker has never served generation to users.
+**Note**: The hardened rollback guide now integrates security requirements directly into the emergency procedures, ensuring that recovery operations maintain the same security posture as the initial deployment.

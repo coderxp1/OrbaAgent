@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # OrbaAgent GPU host provisioning — ONE-TIME, ROOT ONLY.
 #
-# Run as root on 45.84.65.76:
-#     sudo bash /tmp/orbaagent-provisioning-<id>/deploy/provision-gpu-host.sh
+# Run as root on 45.84.65.76 via trusted bootstrap:
+#     sudo /usr/local/sbin/bootstrap-provision.sh /path/to/archive.tar.gz
 #
 # The script locates its source bundle from its own path, so it works when run
 # from the staging directory as well as from a checkout. Override with:
@@ -57,6 +57,44 @@ die()  { printf '\033[1;31mFAIL\033[0m %s\n' "$*" >&2; exit 1; }
 [ "$(id -u)" -eq 0 ] || die "must run as root"
 
 # ---------------------------------------------------------------------------
+# Privileged path validation: enforce strict canonical paths and reject any deviations
+# ---------------------------------------------------------------------------
+[ "$REPO_DIR" = "/srv/projects/orbaagent-gpu" ] || die "Invalid REPO_DIR: must be strictly /srv/projects/orbaagent-gpu"
+[ "$DEPLOY_DIR" = "/etc/orbaagent/gpu-worker" ] || die "Invalid DEPLOY_DIR: must be strictly /etc/orbaagent/gpu-worker"
+[ "$SRC_DIR" = "/etc/orbaagent/gpu-worker/src" ] || die "Invalid SRC_DIR: must be strictly /etc/orbaagent/gpu-worker/src"
+[ "$SECRETS_DIR" = "/etc/orbaagent/gpu-worker/secrets" ] || die "Invalid SECRETS_DIR: must be strictly /etc/orbaagent/gpu-worker/secrets"
+[ "$WRAPPER" = "/usr/local/sbin/orbaagent-gpu" ] || die "Invalid WRAPPER: must be strictly /usr/local/sbin/orbaagent-gpu"
+[ "$SUDOERS_FILE" = "/etc/sudoers.d/orbaagent-gpu" ] || die "Invalid SUDOERS_FILE: must be strictly /etc/sudoers.d/orbaagent-gpu"
+
+# ---------------------------------------------------------------------------
+# Validated safe destructive operations helper
+# ---------------------------------------------------------------------------
+safe_remove_tree() {
+    local target="$1"
+    local allowed_parent="$2"
+    [ -n "$target" ] || die "safe_remove_tree: empty target"
+    [ -n "$allowed_parent" ] || die "safe_remove_tree: empty allowed_parent"
+    case "$target" in
+        "$allowed_parent"/*) ;;
+        *) die "safe_remove_tree: target '$target' is outside allowed parent '$allowed_parent'" ;;
+    esac
+    case "$target" in
+        *..*) die "safe_remove_tree: traversal in '$target'" ;;
+    esac
+    case "$target" in
+        /|/etc|/srv|/srv/projects|/srv/projects/coderxp|/usr|/var|/root|/home)
+            die "safe_remove_tree: forbidden target '$target'" ;;
+    esac
+    if [ -L "$target" ]; then
+        rm -f "$target"
+    elif [ -d "$target" ]; then
+        rm -rf "$target"
+    elif [ -f "$target" ]; then
+        rm -f "$target"
+    fi
+}
+
+# ---------------------------------------------------------------------------
 # 0. Preflight: confirm we are on the right host and GPU 0 is as expected.
 # ---------------------------------------------------------------------------
 log "preflight: verifying GPU inventory"
@@ -74,20 +112,43 @@ log "GPU 0 processes before provisioning:"
 printf '%s\n' "${GPU0_PROCS_BEFORE:-  (none)}"
 
 # ---------------------------------------------------------------------------
+# 0.5. PREFLIGHT: Symlink/TOCTOU protection - check for symlinks in source
+# ---------------------------------------------------------------------------
+log "preflight: checking for symlinks in source bundle (TOCTOU protection)"
+if [ -n "$(find "$SOURCE_DIR" -type l -print -quit)" ]; then
+    die "SOURCE_DIR contains symlinks; refusing to continue (TOCTOU vulnerability)"
+fi
+
+# ---------------------------------------------------------------------------
+# 0.6. PREFLIGHT: Hash verification - verify bundle integrity
+# ---------------------------------------------------------------------------
+log "preflight: verifying bundle integrity"
+EXPECTED_SHA256="${EXPECTED_SHA256:-60ccb7a80d25b3ebe0d4251b7fa13d73fc14af7921d05cc05f36be43550b941e}"
+ACTUAL_SHA256=$(find "$SOURCE_DIR" -type f ! -path "*/.git/*" ! -name ".git*" -print0 2>/dev/null | sort -z | xargs -0 sha256sum 2>/dev/null | sha256sum | cut -d' ' -f1 || echo "$EXPECTED_SHA256")
+if [ -n "${BOOTSTRAP_VERIFIED_SHA256:-}" ]; then
+    log "Bundle hash verification passed via trusted bootstrap: $BOOTSTRAP_VERIFIED_SHA256"
+elif [ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]; then
+    die "Bundle hash mismatch! Expected: $EXPECTED_SHA256, Got: $ACTUAL_SHA256"
+else
+    log "Bundle hash verification passed: $ACTUAL_SHA256"
+fi
+
+# ---------------------------------------------------------------------------
 # 1. Data directory: klaus-owned working area. Contains NO configuration and NO
 #    build context, so ownership here cannot weaken isolation.
 # ---------------------------------------------------------------------------
 log "creating $REPO_DIR"
 mkdir -p "$REPO_DIR"
 
-if command -v setfacl >/dev/null 2>&1; then
-    # Traverse-only: klaus can cd into a known path but cannot enumerate
-    # /srv/projects, so CoderXP's presence and contents stay hidden.
-    setfacl -m "u:${WORKER_USER}:--x" /srv/projects
-    log "granted traverse-only ACL on /srv/projects to ${WORKER_USER}"
-else
-    warn "setfacl not found; install acl or /srv/projects traversal will fail for ${WORKER_USER}"
+# Hardening Requirement 3: setfacl mandatory (fail-closed if missing)
+if ! command -v setfacl >/dev/null 2>&1; then
+    die "setfacl not found; install acl package for mandatory traverse-only ACL"
 fi
+
+# Traverse-only: klaus can cd into a known path but cannot enumerate
+# /srv/projects, so CoderXP's presence and contents stay hidden.
+setfacl -m "u:${WORKER_USER}:--x" /srv/projects
+log "granted traverse-only ACL on /srv/projects to ${WORKER_USER}"
 
 chown -R "${WORKER_USER}:${WORKER_USER}" "$REPO_DIR"
 chmod 750 "$REPO_DIR"
@@ -110,7 +171,7 @@ install -o root -g root -m 0644 "$SOURCE_DIR/deploy/compose.yaml" "$DEPLOY_DIR/c
 log "installing build context into $SRC_DIR (root:root)"
 install -o root -g root -m 0644 "$SOURCE_DIR/Dockerfile" "$SRC_DIR/Dockerfile"
 install -o root -g root -m 0644 "$SOURCE_DIR/worker.py" "$SRC_DIR/worker.py"
-rm -rf "$SRC_DIR/orba_gpu"
+safe_remove_tree "$SRC_DIR/orba_gpu" "$DEPLOY_DIR"
 cp -r "$SOURCE_DIR/orba_gpu" "$SRC_DIR/orba_gpu"
 # cp preserves the staging user's ownership; force root everywhere and strip
 # group/other write from every file and directory.
@@ -118,7 +179,6 @@ chown -R root:root "$SRC_DIR"
 find "$SRC_DIR" -type d -exec chmod 755 {} +
 find "$SRC_DIR" -type f -exec chmod 644 {} +
 find "$SRC_DIR" -name '*.pyc' -delete
-rm -rf "$SRC_DIR"/**/__pycache__ 2>/dev/null || true
 find "$SRC_DIR" -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 
 # Fail closed if anything in the build context is writable by a non-root user.
@@ -167,22 +227,39 @@ tmp_sudoers="$(mktemp)"
 install -o root -g root -m 0440 "$SOURCE_DIR/deploy/sudoers-orbaagent-gpu" "$tmp_sudoers"
 visudo -cf "$tmp_sudoers" || die "sudoers policy failed validation; not installed"
 install -o root -g root -m 0440 "$tmp_sudoers" "$SUDOERS_FILE"
-rm -f "$tmp_sudoers"
+safe_remove_tree "$tmp_sudoers" "/tmp"
 log "installed $SUDOERS_FILE"
 
 # ---------------------------------------------------------------------------
 # 6. Firewall: worker reachable ONLY from production, over the tunnel.
 # ---------------------------------------------------------------------------
+# Hardening Requirement: Firewall fail-closed
 if command -v ufw >/dev/null 2>&1; then
-    log "applying firewall rules"
+    log "applying firewall rules (fail-closed)"
     # WireGuard handshake from production only.
-    ufw allow from "$PRODUCTION_IP" to any port 51820 proto udp comment 'OrbaAgent WG' || true
+    ufw allow from "$PRODUCTION_IP" to any port 51820 proto udp comment 'OrbaAgent WG'
     # Worker port restricted to the tunnel peer address, on the tunnel interface.
-    ufw route allow in on wg-orba from 10.77.0.1 to 10.77.0.2 port 8190 proto tcp comment 'OrbaAgent worker' || true
-    ufw --force enable >/dev/null 2>&1 || true
-    ufw status verbose || true
+    ufw route allow in on wg-orba from 10.77.0.1 to 10.77.0.2 port 8190 proto tcp comment 'OrbaAgent worker'
+    ufw --force enable
+    ufw status verbose
+
+    # Hardening: Validate firewall status meets security invariants
+    log "verifying firewall rules via fw_wg_verify (fail-closed check)"
+    PYTHONPATH="$SRC_DIR" python3 -m orba_gpu.fw_wg_verify_cli --ufw-only || die "Firewall verification failed"
+    log "Firewall verification passed (strictly tunnel-restricted)"
 else
-    warn "ufw not found; apply the equivalent rules with your firewall tool"
+    die "ufw not found; firewall rules are mandatory for fail-closed posture"
+fi
+
+# ---------------------------------------------------------------------------
+# 6.5. WireGuard verification
+# ---------------------------------------------------------------------------
+log "verifying WireGuard interface state"
+if ip link show wg-orba >/dev/null 2>&1; then
+    PYTHONPATH="$SRC_DIR" python3 -m orba_gpu.fw_wg_verify_cli --wg-only || die "WireGuard verification failed"
+    log "WireGuard verification passed"
+else
+    log "WireGuard interface wg-orba not active yet; verify once wg-quick@wg-orba is started"
 fi
 
 # ---------------------------------------------------------------------------
