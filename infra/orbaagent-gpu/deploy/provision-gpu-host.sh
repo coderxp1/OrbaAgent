@@ -123,11 +123,12 @@ fi
 # 0.6. PREFLIGHT: Hash verification - verify bundle integrity
 # ---------------------------------------------------------------------------
 log "preflight: verifying bundle integrity"
-EXPECTED_SHA256="${EXPECTED_SHA256:-60ccb7a80d25b3ebe0d4251b7fa13d73fc14af7921d05cc05f36be43550b941e}"
-ACTUAL_SHA256=$(find "$SOURCE_DIR" -type f ! -path "*/.git/*" ! -name ".git*" -print0 2>/dev/null | sort -z | xargs -0 sha256sum 2>/dev/null | sha256sum | cut -d' ' -f1 || echo "$EXPECTED_SHA256")
+EXPECTED_SHA256="${EXPECTED_SHA256:-4fb572e4564e0766ac5cf9110026f0e90fa8c21709559a9cc5db27503dc58e85}"
+ACTUAL_SHA256=$(cd "$SOURCE_DIR" && find . -type f ! -path "./.git/*" ! -name ".git*" ! -name "*.pyc" ! -name "provision-gpu-host.sh" -print0 2>/dev/null | sort -z | xargs -0 sha256sum 2>/dev/null | sha256sum | awk '{print $1}')
 if [ -n "${BOOTSTRAP_VERIFIED_SHA256:-}" ]; then
     log "Bundle hash verification passed via trusted bootstrap: $BOOTSTRAP_VERIFIED_SHA256"
-elif [ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]; then
+fi
+if [ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]; then
     die "Bundle hash mismatch! Expected: $EXPECTED_SHA256, Got: $ACTUAL_SHA256"
 else
     log "Bundle hash verification passed: $ACTUAL_SHA256"

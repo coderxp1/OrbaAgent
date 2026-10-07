@@ -162,6 +162,30 @@ def test_destructive_target_validation():
     assert validation.validate_destructive_target("/etc/orbaagent/gpu-worker/src/orba_gpu", "/etc/orbaagent/gpu-worker") is True
 
 
+def test_internal_bundle_payload_hash_matches_expectation():
+    """Verify that EXPECTED_SHA256 in provision-gpu-host.sh matches the deterministic payload hash."""
+    from deploy import build_archive
+    files = build_archive.get_files_to_pack()
+    expected_payload_hash = build_archive.compute_payload_hash(files)
+
+    script_path = Path("infra/orbaagent-gpu/deploy/provision-gpu-host.sh")
+    script_content = script_path.read_text(encoding="utf-8")
+    assert expected_payload_hash in script_content, (
+        f"provision-gpu-host.sh does not contain payload hash: {expected_payload_hash}"
+    )
+
+
+def test_archive_clean_internal_integrity():
+    """Verify that a clean extraction of the built archive passes internal payload integrity."""
+    from deploy import build_archive
+    archive_path = Path("infra/orbaagent-gpu/orbaagent-gpu-provisioning.tar.gz")
+    assert archive_path.is_file(), "Archive must exist"
+
+    files = build_archive.get_files_to_pack()
+    expected_payload_hash = build_archive.compute_payload_hash(files)
+    build_archive.verify_extracted_clean(archive_path, expected_payload_hash)
+
+
 if __name__ == "__main__":
     test_no_symlinks_in_source(tempfile.mkdtemp())
     test_setfacl_mandatory()
@@ -172,4 +196,6 @@ if __name__ == "__main__":
     test_acl_validation_function()
     test_privileged_path_validation()
     test_destructive_target_validation()
+    test_internal_bundle_payload_hash_matches_expectation()
+    test_archive_clean_internal_integrity()
     print("All hardening tests passed!")
