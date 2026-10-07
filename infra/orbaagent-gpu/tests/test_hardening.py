@@ -186,6 +186,19 @@ def test_archive_clean_internal_integrity():
     build_archive.verify_extracted_clean(archive_path, expected_payload_hash)
 
 
+def test_wrapper_immutability_verification_logic():
+    """Verify that provision-gpu-host.sh enforces strict root:root 0755 and rejects unprivileged writability."""
+    script_path = Path("infra/orbaagent-gpu/deploy/provision-gpu-host.sh")
+    script_content = script_path.read_text(encoding="utf-8")
+
+    assert 'install -o root -g root -m 0755 "$SOURCE_DIR/deploy/orbaagent-gpu" "$WRAPPER"' in script_content
+    assert "stat -c '%u:%g' \"$WRAPPER\"" in script_content
+    assert "stat -c '%a' \"$WRAPPER\"" in script_content
+    assert "-perm /022" in script_content
+    assert "test -w '$WRAPPER'" in script_content
+    assert "wrapper is writable by $WORKER_USER" in script_content
+
+
 if __name__ == "__main__":
     test_no_symlinks_in_source(tempfile.mkdtemp())
     test_setfacl_mandatory()
@@ -198,4 +211,5 @@ if __name__ == "__main__":
     test_destructive_target_validation()
     test_internal_bundle_payload_hash_matches_expectation()
     test_archive_clean_internal_integrity()
+    test_wrapper_immutability_verification_logic()
     print("All hardening tests passed!")

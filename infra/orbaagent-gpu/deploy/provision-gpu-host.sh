@@ -218,7 +218,15 @@ done
 # ---------------------------------------------------------------------------
 log "installing wrapper $WRAPPER"
 install -o root -g root -m 0755 "$SOURCE_DIR/deploy/orbaagent-gpu" "$WRAPPER"
-[ -w "$WRAPPER" ] && die "wrapper is writable — refusing to continue"
+[ "$(stat -c '%u:%g' "$WRAPPER")" = "0:0" ] || die "$WRAPPER is not owned by root:root"
+[ "$(stat -c '%a' "$WRAPPER")" = "755" ] || die "$WRAPPER mode must be strictly 0755"
+[ -z "$(find "$WRAPPER" -perm /022 2>/dev/null)" ] || die "$WRAPPER has unsafe group or world write bits"
+if id "$WORKER_USER" >/dev/null 2>&1; then
+    if su -s /bin/sh "$WORKER_USER" -c "test -w '$WRAPPER'" 2>/dev/null; then
+        die "wrapper is writable by $WORKER_USER — refusing to continue"
+    fi
+fi
+log "wrapper installed and verified root:root 0755, not writable by $WORKER_USER"
 
 # ---------------------------------------------------------------------------
 # 5. Sudoers: validate BEFORE installing, so a typo cannot lock anyone out.
