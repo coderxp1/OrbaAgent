@@ -69,12 +69,186 @@ export const VERIFIED_OPENROUTER_MODEL_IDS: ReadonlySet<string> = new Set([
   "openrouter/free",
 ]);
 
+/** Ollama model IDs supported on local GPU 1 instance. */
+export const VERIFIED_OLLAMA_MODEL_IDS: ReadonlySet<string> = new Set([
+  "qwen2.5-coder:32b",
+  "qwen2.5-coder:14b",
+  "qwen2.5-coder:7b",
+  "llama3.3:70b",
+  "qwen2.5:72b",
+  "qwen3-vl:8b",
+]);
+/**
+ * Capability-based abstract engine aliases.
+ * Users and callers interact with abstract capabilities; provider and model IDs remain hidden.
+ */
+export const CAPABILITY_ALIASES: Record<
+  string,
+  { targetModel: string; task: TaskType; description: string }
+> = {
+  "orba-code-engine": {
+    targetModel: "qwen2.5-coder:32b",
+    task: "coding",
+    description: "Primary engineering and autonomous coding engine (validated initial fleet)",
+  },
+  "orba-fast-engine": {
+    targetModel: "qwen2.5-coder:32b",
+    task: "fast",
+    description: "Low-latency utility, categorization, and micro-task engine",
+  },
+  "orba-reasoning-engine": {
+    targetModel: "qwen2.5-coder:32b",
+    task: "reasoning",
+    description: "Multi-step reasoning and architectural planning (escalates to cloud for deep chains)",
+  },
+  "orba-vision-engine": {
+    targetModel: "qwen3-vl:8b",
+    task: "vision",
+    description: "Visual inspection, UI screenshots, and diagram analysis engine (validated initial fleet)",
+  },
+};
+
+export function resolveCapabilityAlias(aliasOrModel: string): string {
+  if (aliasOrModel in CAPABILITY_ALIASES) {
+    return CAPABILITY_ALIASES[aliasOrModel].targetModel;
+  }
+  return aliasOrModel;
+}
+
 /** Whether a model ID has been confirmed to exist at its provider. */
 export function isModelIdVerified(id: string): boolean {
-  return VERIFIED_LANGDOCK_MODEL_IDS.has(id) || VERIFIED_OPENROUTER_MODEL_IDS.has(id);
+  return (
+    VERIFIED_LANGDOCK_MODEL_IDS.has(id) ||
+    VERIFIED_OPENROUTER_MODEL_IDS.has(id) ||
+    VERIFIED_OLLAMA_MODEL_IDS.has(id)
+  );
 }
 
 export const MODEL_CATALOG: Record<string, ModelDefinition> = {
+  // --- OLLAMA LOCAL MODEL POOL (GPU 1 EXCLUSIVE) ---
+  // Staged Acquisition Policy: First deployment includes strictly 1 primary coding model and 1 vision model.
+  // 70B/72B and mid-tier models are staged disabled until empirical GPU 1 benchmarks are established.
+  "qwen2.5-coder:32b": {
+    id: "qwen2.5-coder:32b",
+    displayName: "Local Code Engine Pro (Qwen 2.5 Coder 32B)",
+    provider: "ollama",
+    enabled: true,
+    priority: { general: 2, coding: 1, reasoning: 3, fast: 3 },
+    capabilities: {
+      text: true,
+      coding: true,
+      reasoning: true,
+      vision: false,
+      toolCalling: true,
+      streaming: true,
+      structuredOutput: true,
+    },
+    contextWindow: 65536,
+    costClass: "free",
+    speedClass: "standard",
+    fallbackGroup: "local-code",
+  },
+  "qwen2.5-coder:14b": {
+    id: "qwen2.5-coder:14b",
+    displayName: "Local Code Engine Mid (Qwen 2.5 Coder 14B)",
+    provider: "ollama",
+    enabled: false, // Staged: not downloaded in initial deployment
+    priority: { general: 3, coding: 2, reasoning: 4, fast: 2 },
+    capabilities: {
+      text: true,
+      coding: true,
+      reasoning: true,
+      vision: false,
+      toolCalling: true,
+      streaming: true,
+      structuredOutput: true,
+    },
+    contextWindow: 32768,
+    costClass: "free",
+    speedClass: "fast",
+    fallbackGroup: "local-code",
+  },
+  "qwen2.5-coder:7b": {
+    id: "qwen2.5-coder:7b",
+    displayName: "Local Fast Engine (Qwen 2.5 Coder 7B)",
+    provider: "ollama",
+    enabled: false, // Staged: not downloaded in initial deployment
+    priority: { general: 4, coding: 3, reasoning: 5, fast: 1 },
+    capabilities: {
+      text: true,
+      coding: true,
+      reasoning: false,
+      vision: false,
+      toolCalling: true,
+      streaming: true,
+      structuredOutput: true,
+    },
+    contextWindow: 32768,
+    costClass: "free",
+    speedClass: "fast",
+    fallbackGroup: "local-fast",
+  },
+  "llama3.3:70b": {
+    id: "llama3.3:70b",
+    displayName: "Local General Intelligence (Llama 3.3 70B)",
+    provider: "ollama",
+    enabled: false, // Staged: disabled until empirical GPU 1 benchmarking
+    priority: { general: 1, coding: 4, reasoning: 2, fast: 4 },
+    capabilities: {
+      text: true,
+      coding: true,
+      reasoning: true,
+      vision: false,
+      toolCalling: true,
+      streaming: true,
+      structuredOutput: true,
+    },
+    contextWindow: 131072,
+    costClass: "free",
+    speedClass: "standard",
+    fallbackGroup: "local-reasoning",
+  },
+  "qwen2.5:72b": {
+    id: "qwen2.5:72b",
+    displayName: "Local Deep Reasoning (Qwen 2.5 72B)",
+    provider: "ollama",
+    enabled: false, // Staged: disabled until empirical GPU 1 benchmarking
+    priority: { general: 2, coding: 4, reasoning: 1, fast: 5 },
+    capabilities: {
+      text: true,
+      coding: true,
+      reasoning: true,
+      vision: false,
+      toolCalling: true,
+      streaming: true,
+      structuredOutput: true,
+    },
+    contextWindow: 65536,
+    costClass: "free",
+    speedClass: "deep_reasoning",
+    fallbackGroup: "local-reasoning",
+  },
+  "qwen3-vl:8b": {
+    id: "qwen3-vl:8b",
+    displayName: "Local Vision Engine (Qwen3-VL 8B)",
+    provider: "ollama",
+    enabled: true,
+    priority: { general: 5, coding: 5, reasoning: 5, fast: 4 },
+    capabilities: {
+      text: true,
+      coding: false,
+      reasoning: false,
+      vision: true,
+      toolCalling: true,
+      streaming: true,
+      structuredOutput: true,
+    },
+    contextWindow: 32768,
+    costClass: "free",
+    speedClass: "standard",
+    fallbackGroup: "local-vision",
+  },
+
   // --- LANGDOCK MODEL POOL ---
   "gpt-5": {
     id: "gpt-5",

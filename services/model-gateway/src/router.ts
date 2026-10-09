@@ -1,5 +1,6 @@
 import type { ChatCompletionRequest, ModelSpec, ProviderId } from "@orbaagent/shared";
-import { MODEL_CATALOG, type ModelDefinition, toModelSpec } from "./catalog.js";
+import { GpuAdmissionController } from "./admission.js";
+import { MODEL_CATALOG, type ModelDefinition, resolveCapabilityAlias, toModelSpec } from "./catalog.js";
 import { type ModelHealthStatus, ModelHealthTracker } from "./health.js";
 import { hasConfirmedCapability, isLocalQuotaExhausted } from "./registry.js";
 
@@ -22,22 +23,36 @@ export interface RoutingDecision {
 
 export class IntelligenceRouter {
   private readonly providerHealthMap: Map<ProviderId, ProviderHealth> = new Map([
+    ["ollama", { consecutiveFailures: 0, isHealthy: true, isAuthenticated: true }],
     ["langdock", { consecutiveFailures: 0, isHealthy: true, isAuthenticated: true }],
     ["openrouter", { consecutiveFailures: 0, isHealthy: true, isAuthenticated: true }],
   ]);
 
   private readonly healthTracker: ModelHealthTracker;
+  private readonly admissionController: GpuAdmissionController;
   private readonly cooldownMs = 60000; // 1 minute circuit breaker cooldown
 
-  constructor(customHealthTracker?: ModelHealthTracker) {
+  constructor(customHealthTracker?: ModelHealthTracker, customAdmissionController?: GpuAdmissionController) {
     this.healthTracker = customHealthTracker || new ModelHealthTracker(this.cooldownMs);
+    this.admissionController = customAdmissionController || new GpuAdmissionController();
   }
 
   public getHealthTracker(): ModelHealthTracker {
     return this.healthTracker;
   }
 
+  public getAdmissionController(): GpuAdmissionController {
+    return this.admissionController;
+  }
+
   isProviderConfigured(providerId: ProviderId): boolean {
+    if (providerId === "ollama") {
+      // Ollama requires explicit enablement via OLLAMA_ENABLED or OLLAMA_BASE_URL
+      return (
+        process.env.OLLAMA_ENABLED === "true" ||
+        Boolean(process.env.OLLAMA_BASE_URL && process.env.OLLAMA_BASE_URL.trim().length > 0)
+      );
+    }
     if (process.env.NODE_ENV === "test") {
       return true;
     }
@@ -131,14 +146,30 @@ export class IntelligenceRouter {
    */
   classifyTask(request: ChatCompletionRequest): TaskComplexity {
     const userMessages = request.messages.filter((m) => m.role === "user");
+    
+    let hasExplicitImagePart = false;
+
     const fullText = (userMessages.length > 0 ? userMessages : request.messages)
-      .map((m: { content: string }) => m.content)
+      .map((m: any) => {
+        if (typeof m.content === "string") return m.content;
+        if (Array.isArray(m.content)) {
+          return m.content.map((part: any) => {
+            if (part.type === "image_url") {
+              hasExplicitImagePart = true;
+              return "";
+            }
+            if (part.type === "text") return part.text || "";
+            return "";
+          }).join(" ");
+        }
+        return "";
+      })
       .join(" ")
       .toLowerCase();
 
     // Check for vision requirement
     const hasVisionKey =
-      fullText.includes("image") || fullText.includes("screenshot") || fullText.includes("picture");
+      hasExplicitImagePart || fullText.includes("image") || fullText.includes("screenshot") || fullText.includes("picture");
     if (hasVisionKey) {
       return "vision";
     }
@@ -190,19 +221,30 @@ export class IntelligenceRouter {
 
   /**
    * Dynamic Capability-Based Intelligence Routing:
-   * Selects eligible models from the Langdock Model Pool ordered by task-specific priority.
-   * If Langdock models are exhausted or unauthenticated, seamlessly falls back to OpenRouter pool.
+   * Selects eligible local models from the Ollama Model Pool on GPU 1 when capable and admitted.
+   * If local models are unavailable, saturated, or in cooldown, seamlessly escalates to Langdock cloud intelligence,
+   * then falls back to OpenRouter.
    */
   selectRouting(request: ChatCompletionRequest): RoutingDecision {
-    const complexity = this.classifyTask(request);
+    const rawModelId = request.modelId;
+    const isAuto = rawModelId === "auto" || !rawModelId;
+    const resolvedModelId = !isAuto ? resolveCapabilityAlias(rawModelId) : undefined;
+    const effectiveRequest = resolvedModelId ? { ...request, modelId: resolvedModelId } : request;
+
+    const complexity = this.classifyTask(effectiveRequest);
+    const ollamaHealth = this.getProviderHealth("ollama");
     const langdockHealth = this.getProviderHealth("langdock");
     const openrouterHealth = this.getProviderHealth("openrouter");
 
-    const tenantId = request.trace?.tenantId;
+    const tenantId = effectiveRequest.trace?.tenantId;
 
     const needsVision = complexity === "vision";
     const needsTools =
-      Boolean(request.tools && request.tools.length > 0) || complexity === "coding";
+      Boolean(effectiveRequest.tools && effectiveRequest.tools.length > 0) || complexity === "coding";
+
+    const isOllamaConfigured = this.isProviderConfigured("ollama") || this.isMockAllowed();
+    const isOllamaAvailable =
+      ollamaHealth.isHealthy && isOllamaConfigured;
 
     const isLangdockConfigured = this.isProviderConfigured("langdock") || this.isMockAllowed();
     const isLangdockAvailable =
@@ -211,6 +253,39 @@ export class IntelligenceRouter {
     const isOpenRouterConfigured = this.isProviderConfigured("openrouter") || this.isMockAllowed();
     const isOpenRouterAvailable =
       openrouterHealth.isHealthy && openrouterHealth.isAuthenticated && isOpenRouterConfigured;
+
+    // Filter and sort eligible Local Ollama models
+    const allOllamaDefs = Object.values(MODEL_CATALOG).filter(
+      (m) => m.provider === "ollama" && m.enabled,
+    );
+
+    const eligibleOllamaDefs = isOllamaAvailable
+      ? allOllamaDefs
+          .filter((def) => !resolvedModelId || def.id === resolvedModelId)
+          .filter((def) => !needsVision || def.capabilities.vision)
+          .filter((def) => !needsTools || def.capabilities.toolCalling)
+          .filter((def) => !isLocalQuotaExhausted(def.id, tenantId))
+          .filter((def) => this.healthTracker.isModelEligible(def.id))
+          .filter((def) => this.admissionController.evaluateAdmission(def.id).admitted)
+      : [];
+
+    eligibleOllamaDefs.sort((a, b) => {
+      let prioA = a.priority.general;
+      let prioB = b.priority.general;
+      if (complexity === "coding") {
+        prioA = a.priority.coding;
+        prioB = b.priority.coding;
+      } else if (complexity === "high_reasoning") {
+        prioA = a.priority.reasoning;
+        prioB = b.priority.reasoning;
+      } else if (complexity === "fast_response") {
+        prioA = a.priority.fast;
+        prioB = b.priority.fast;
+      }
+      return prioA - prioB;
+    });
+
+    const sortedOllamaModels: ModelSpec[] = eligibleOllamaDefs.map((def) => toModelSpec(def));
 
     // Filter eligible Langdock models from the Model Catalog
     const allLangdockDefs = Object.values(MODEL_CATALOG).filter(
@@ -263,7 +338,11 @@ export class IntelligenceRouter {
     let primaryModel: ModelSpec;
     let fallbackChain: ModelSpec[];
 
-    if (sortedLangdockModels.length > 0) {
+    if (sortedOllamaModels.length > 0) {
+      primaryModel = sortedOllamaModels[0];
+      const remainingOllama = sortedOllamaModels.slice(1);
+      fallbackChain = [...remainingOllama, ...sortedLangdockModels, ...eligibleOpenRouter];
+    } else if (sortedLangdockModels.length > 0) {
       primaryModel = sortedLangdockModels[0];
       const remainingLangdock = sortedLangdockModels.slice(1);
       fallbackChain = [...remainingLangdock, ...eligibleOpenRouter];
@@ -271,6 +350,12 @@ export class IntelligenceRouter {
       primaryModel = eligibleOpenRouter[0];
       fallbackChain = eligibleOpenRouter.slice(1);
     } else {
+      const ollamaStatus = !isOllamaConfigured
+        ? "unconfigured"
+        : !ollamaHealth.isHealthy
+          ? "cooldown"
+          : "no eligible or admitted models";
+
       const langdockStatus = !isLangdockConfigured
         ? "unconfigured"
         : !langdockHealth.isAuthenticated
@@ -288,7 +373,7 @@ export class IntelligenceRouter {
             : "no eligible models";
 
       throw new Error(
-        `All provider routes are unavailable or in circuit breaker cooldown (Langdock: ${langdockStatus}, OpenRouter: ${openrouterStatus}).`,
+        `All provider routes are unavailable or in circuit breaker cooldown (Local Ollama: ${ollamaStatus}, Langdock: ${langdockStatus}, OpenRouter: ${openrouterStatus}).`,
       );
     }
 
@@ -296,10 +381,17 @@ export class IntelligenceRouter {
     // appear here: this string is part of the RoutingDecision contract and could
     // be surfaced in UI or diagnostics. Detailed IDs stay on primaryModel /
     // fallbackChain and in the server-side gateway audit log.
+    const ollamaFallbacks = fallbackChain.filter((m) => m.provider === "ollama").length;
     const langdockFallbacks = fallbackChain.filter((m) => m.provider === "langdock").length;
     const openrouterFallbacks = fallbackChain.filter((m) => m.provider === "openrouter").length;
 
-    const primaryProviderLabel = primaryModel.provider === "langdock" ? "Langdock" : "OpenRouter";
+    const primaryProviderLabel =
+      primaryModel.provider === "langdock"
+        ? "Langdock"
+        : primaryModel.provider === "ollama"
+          ? "Local Ollama"
+          : "OpenRouter";
+
     const backupSummary =
       openrouterFallbacks > 0
         ? ` and OpenRouter backup (${openrouterFallbacks} route${
@@ -313,8 +405,8 @@ export class IntelligenceRouter {
       complexity,
       reason:
         `Execution route selected: ${primaryProviderLabel} primary with ` +
-        `${langdockFallbacks + openrouterFallbacks} eligible fallback` +
-        `${langdockFallbacks + openrouterFallbacks === 1 ? "" : "s"}${backupSummary}.`,
+        `${ollamaFallbacks + langdockFallbacks + openrouterFallbacks} eligible fallback` +
+        `${ollamaFallbacks + langdockFallbacks + openrouterFallbacks === 1 ? "" : "s"}${backupSummary}.`,
     };
   }
 
