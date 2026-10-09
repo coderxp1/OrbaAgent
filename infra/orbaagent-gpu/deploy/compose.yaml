@@ -36,10 +36,10 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     ports:
-      # Loopback only. Production reaches the worker over the WireGuard tunnel by
-      # dialling 10.77.0.2:8190, which terminates here; 8190 is never published
+      # WireGuard tunnel only. Production reaches the worker over the WireGuard tunnel by
+      # dialling 10.77.0.2:8190, which terminates on wg-orba; 8190 is never published
       # on eth0 and never reachable from the public internet.
-      - "127.0.0.1:8190:8190"
+      - "10.77.0.2:8190:8190"
     environment:
       - NVIDIA_VISIBLE_DEVICES=GPU-82e03c6c-8c27-c076-eb42-7e37e9a5a878
       - CUDA_VISIBLE_DEVICES=0
@@ -80,6 +80,40 @@ services:
               device_ids: ['GPU-82e03c6c-8c27-c076-eb42-7e37e9a5a878']
               capabilities: [gpu]
 
+  orbaagent-ollama:
+    container_name: orbaagent-ollama
+    image: ollama/ollama:0.12.7
+    restart: unless-stopped
+    ports:
+      # WireGuard tunnel only. Production reaches Ollama over the WireGuard tunnel by
+      # dialling 10.77.0.2:11435, which terminates on wg-orba; 11435 is never published
+      # on eth0 and never reachable from the public internet.
+      # Port 11435 ensures complete isolation from CoderXP Ollama on 127.0.0.1:11434.
+      - "10.77.0.2:11435:11434"
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=GPU-82e03c6c-8c27-c076-eb42-7e37e9a5a878
+      - CUDA_VISIBLE_DEVICES=0
+      - OLLAMA_HOST=0.0.0.0:11434
+      - OLLAMA_MODELS=/root/.ollama/models
+      - OLLAMA_KEEP_ALIVE=24h
+      - OLLAMA_NUM_PARALLEL=2
+      - OLLAMA_MAX_LOADED_MODELS=1
+    volumes:
+      - orbaagent_ollama_models:/root/.ollama
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - orbaagent_media_net
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ['GPU-82e03c6c-8c27-c076-eb42-7e37e9a5a878']
+              capabilities: [gpu]
+
 secrets:
   media_worker_token:
     file: /etc/orbaagent/gpu-worker/secrets/media_worker_token
@@ -88,8 +122,13 @@ secrets:
 
 volumes:
   orbaagent_models:
+    name: orbaagent_models
   orbaagent_output:
+    name: orbaagent_output
   orbaagent_data:
+    name: orbaagent_data
+  orbaagent_ollama_models:
+    name: orbaagent_ollama_models
 
 networks:
   orbaagent_media_net:

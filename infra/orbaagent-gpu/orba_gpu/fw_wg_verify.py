@@ -83,11 +83,32 @@ def verify_tcp_8190_tunnel_only(status_text: str) -> bool:
     return len(tcp8190) == 1 and len(intended) == 1
 
 
+def verify_tcp_11435_tunnel_only(status_text: str) -> bool:
+    # If 11435 is configured, it must be strictly tunnel-only on wg-orba
+    lines = [l.strip() for l in status_text.splitlines() if l.strip()]
+    tcp11435 = [l for l in lines if re.search(r"\b11435\b.*\btcp\b", l, re.I) and re.search(r"\ballow\b", l, re.I)]
+    if not tcp11435:
+        return True
+    intended = []
+    for l in tcp11435:
+        if re.search(r"\bAnywhere\b|0\.0\.0\.0/0|::/0", l, re.I):
+            return False
+        if not re.search(rf"\({re.escape(WG_IFACE)}\)|\bon\s+{re.escape(WG_IFACE)}\b|\b{re.escape(WG_IFACE)}\b", l, re.I):
+            return False
+        if WG_PEER_ADDR not in l:
+            return False
+        if not re.search(r"\b(?:ROUTE|FWD|FORWARD|IN)\b", l, re.I):
+            return False
+        intended.append(l)
+    return len(tcp11435) >= 1 and len(tcp11435) == len(intended)
+
+
 def verify_ufw_state(status_text: str) -> bool:
     return (
         parse_ufw_enabled(status_text)
         and verify_udp_51820_from_production(status_text)
         and verify_tcp_8190_tunnel_only(status_text)
+        and verify_tcp_11435_tunnel_only(status_text)
     )
 
 

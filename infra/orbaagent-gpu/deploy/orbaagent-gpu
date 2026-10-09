@@ -57,7 +57,8 @@ PROJECT_NAME="orbaagent-gpu"
 WORKER_CONTAINER="orbaagent-gpu-worker"
 EXPECTED_GPU_UUID="GPU-82e03c6c-8c27-c076-eb42-7e37e9a5a878"
 FORBIDDEN_GPU_UUID="GPU-4634107e-3bae-d5d5-ff97-2355d0b92ce4"
-HEALTH_URL="http://127.0.0.1:8190/health"
+TOKEN_FILE="/etc/orbaagent/gpu-worker/secrets/media_worker_token"
+HEALTH_URL="http://10.77.0.2:8190/health"
 DOCKER="/usr/bin/docker"
 
 # A hardened environment. The caller's variables never reach docker.
@@ -169,9 +170,21 @@ case "${1:-}" in
         validate_isolation || exit $?
         ;;
     health)
-        # Loopback only; the caller never supplies the URL.
+        # Dedicated worker health check. The caller never supplies the URL or token.
+        [ -r "$TOKEN_FILE" ] || die "secret token file missing or unreadable: $TOKEN_FILE" 3
+        if [ "$(stat -c '%U:%G' "$TOKEN_FILE" 2>/dev/null)" != "root:root" ]; then
+            die "secret token file must be owned by root:root" 3
+        fi
+        if [ "$(stat -c '%a' "$TOKEN_FILE" 2>/dev/null)" != "600" ]; then
+            die "secret token file must be mode 600" 3
+        fi
+        TOKEN="$(cat "$TOKEN_FILE")"
+        [ -n "$TOKEN" ] || die "secret token file is empty" 3
+
         if command -v curl >/dev/null 2>&1; then
-            curl -fsS --max-time 5 "$HEALTH_URL" || die "worker /health did not respond" 3
+            # Header passed via stdin config to curl so the secret never appears in process args / ps
+            printf 'header = "Authorization: Bearer %s"\n' "$TOKEN" | \
+                curl -fsS --max-time 5 -K - "$HEALTH_URL" || die "worker /health did not respond" 3
         else
             die "curl not available" 3
         fi

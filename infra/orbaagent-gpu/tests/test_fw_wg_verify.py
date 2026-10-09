@@ -5,7 +5,7 @@ UFW_BASE = """Status: active
 To                         Action      From
 --                         ------      ----
 51820/udp                  ALLOW       85.215.156.241
-8190/tcp (wg-orba)         ROUTE ALLOW IN  10.77.0.1 -> 10.77.0.2
+8190/tcp (wg-orba)         ALLOW IN    10.77.0.1 -> 10.77.0.2
 """
 
 UFW_NUMBERED = """Status: active
@@ -13,7 +13,7 @@ UFW_NUMBERED = """Status: active
      To                         Action      From
      --                         ------      ----
 [ 1] 51820/udp                  ALLOW IN    85.215.156.241
-[ 2] 8190/tcp (wg-orba)         ROUTE ALLOW IN  10.77.0.1 -> 10.77.0.2
+[ 2] 8190/tcp (wg-orba)         ALLOW IN    10.77.0.1 -> 10.77.0.2
 """
 
 UFW_VERBOSE = """Status: active
@@ -24,7 +24,7 @@ New profiles: skip
 To                         Action      From
 --                         ------      ----
 51820/udp                  ALLOW IN    85.215.156.241             # OrbaAgent WG
-8190/tcp on wg-orba        ALLOW FWD   10.77.0.1 to 10.77.0.2     # OrbaAgent worker
+8190/tcp on wg-orba        ALLOW IN    10.77.0.1 to 10.77.0.2     # OrbaAgent worker
 """
 
 # Adversarial / Reject fixtures
@@ -49,7 +49,7 @@ UFW_WRONG_INTERFACE = """Status: active
 To                         Action      From
 --                         ------      ----
 51820/udp                  ALLOW       85.215.156.241
-8190/tcp (eth0)            ROUTE ALLOW IN  10.77.0.1 -> 10.77.0.2
+8190/tcp (eth0)            ALLOW IN    10.77.0.1 -> 10.77.0.2
 """
 
 UFW_WRONG_PEER = """Status: active
@@ -57,7 +57,7 @@ UFW_WRONG_PEER = """Status: active
 To                         Action      From
 --                         ------      ----
 51820/udp                  ALLOW       85.215.156.241
-8190/tcp (wg-orba)         ROUTE ALLOW IN  10.77.0.99 -> 10.77.0.2
+8190/tcp (wg-orba)         ALLOW IN    10.77.0.99 -> 10.77.0.2
 """
 
 UFW_EXTRA_RULE = """Status: active
@@ -65,7 +65,7 @@ UFW_EXTRA_RULE = """Status: active
 To                         Action      From
 --                         ------      ----
 51820/udp                  ALLOW       85.215.156.241
-8190/tcp (wg-orba)         ROUTE ALLOW IN  10.77.0.1 -> 10.77.0.2
+8190/tcp (wg-orba)         ALLOW IN    10.77.0.1 -> 10.77.0.2
 8190/tcp                   ALLOW       192.168.1.100
 """
 
@@ -74,7 +74,7 @@ UFW_UDP_ANYWHERE = """Status: active
 To                         Action      From
 --                         ------      ----
 51820/udp                  ALLOW       Anywhere
-8190/tcp (wg-orba)         ROUTE ALLOW IN  10.77.0.1 -> 10.77.0.2
+8190/tcp (wg-orba)         ALLOW IN    10.77.0.1 -> 10.77.0.2
 """
 
 UFW_INACTIVE = """Status: inactive

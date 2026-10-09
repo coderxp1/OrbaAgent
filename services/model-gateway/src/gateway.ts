@@ -10,6 +10,7 @@ import {
 } from "@orbaagent/shared";
 import type { IModelProviderAdapter } from "./adapters/base.js";
 import { LangdockAdapter } from "./adapters/langdock.js";
+import { OllamaAdapter } from "./adapters/ollama.js";
 import { OpenRouterAdapter } from "./adapters/openrouter.js";
 import { getModelSpec, recordLocalUsage } from "./registry.js";
 import { IntelligenceRouter, type RoutingDecision } from "./router.js";
@@ -88,6 +89,7 @@ export class ModelGateway {
     this.adapters = {
       langdock: customAdapters?.langdock || new LangdockAdapter(),
       openrouter: customAdapters?.openrouter || new OpenRouterAdapter(),
+      ollama: customAdapters?.ollama || new OllamaAdapter(),
     };
     this.router = customRouter || new IntelligenceRouter();
   }

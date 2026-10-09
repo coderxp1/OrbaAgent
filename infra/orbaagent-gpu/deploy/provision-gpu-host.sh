@@ -123,7 +123,7 @@ fi
 # 0.6. PREFLIGHT: Hash verification - verify bundle integrity
 # ---------------------------------------------------------------------------
 log "preflight: verifying bundle integrity"
-EXPECTED_SHA256="${EXPECTED_SHA256:-f22d200c0b5989b6be257b7d010479cf975947c311c1fe5f116d193b7bcbbd95}"
+EXPECTED_SHA256="5afddf0476ceb40f9da554479bdaa808f3a3fd4b879e44340b3b24bd870d4223"
 ACTUAL_SHA256=$(cd "$SOURCE_DIR" && find . -type f ! -path "./.git/*" ! -name ".git*" ! -name "*.pyc" ! -name "provision-gpu-host.sh" -print0 2>/dev/null | sort -z | xargs -0 sha256sum 2>/dev/null | sha256sum | awk '{print $1}')
 if [ -n "${BOOTSTRAP_VERIFIED_SHA256:-}" ]; then
     log "Bundle hash verification passed via trusted bootstrap: $BOOTSTRAP_VERIFIED_SHA256"
@@ -247,8 +247,11 @@ if command -v ufw >/dev/null 2>&1; then
     log "applying firewall rules (fail-closed)"
     # WireGuard handshake from production only.
     ufw allow from "$PRODUCTION_IP" to any port 51820 proto udp comment 'OrbaAgent WG'
-    # Worker port restricted to the tunnel peer address, on the tunnel interface.
-    ufw route allow in on wg-orba from 10.77.0.1 to 10.77.0.2 port 8190 proto tcp comment 'OrbaAgent worker'
+    # Worker port restricted to the tunnel peer address, on the tunnel interface (INPUT chain).
+    ufw route delete allow in on wg-orba from 10.77.0.1 to 10.77.0.2 port 8190 proto tcp 2>/dev/null || true
+    ufw delete allow in on wg-orba from 10.77.0.1 to 10.77.0.2 port 11434 proto tcp 2>/dev/null || true
+    ufw allow in on wg-orba from 10.77.0.1 to 10.77.0.2 port 8190 proto tcp comment 'OrbaAgent worker'
+    ufw allow in on wg-orba from 10.77.0.1 to 10.77.0.2 port 11435 proto tcp comment 'OrbaAgent Ollama'
     ufw --force enable
     ufw status verbose
 

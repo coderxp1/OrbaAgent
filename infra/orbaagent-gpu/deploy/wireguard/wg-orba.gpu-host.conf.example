@@ -24,8 +24,8 @@ ListenPort = 51820
 PrivateKey = <GPU_HOST_PRIVATE_KEY>
 
 # Hardening: drop anything not from the allowed peer.
-PostUp = ufw route allow in on %i from 10.77.0.1 to 10.77.0.2 port 8190 proto tcp || true
-PostDown = ufw route delete allow in on %i from 10.77.0.1 to 10.77.0.2 port 8190 proto tcp || true
+PostUp = ufw route delete allow in on %i from 10.77.0.1 to 10.77.0.2 port 8190 proto tcp 2>/dev/null || true; ufw allow in on %i from 10.77.0.1 to 10.77.0.2 port 8190 proto tcp || true
+PostDown = ufw delete allow in on %i from 10.77.0.1 to 10.77.0.2 port 8190 proto tcp || true
 
 # -- the single permitted peer: production --------------------------------
 [Peer]

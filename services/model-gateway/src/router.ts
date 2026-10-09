@@ -338,14 +338,26 @@ export class IntelligenceRouter {
     let primaryModel: ModelSpec;
     let fallbackChain: ModelSpec[];
 
-    if (sortedOllamaModels.length > 0) {
+    // Determine whether to prioritize Local Ollama or Langdock based on the task complexity
+    // Local models are preferred for coding and vision.
+    // Cloud models (Langdock) are preferred for general intelligence and high reasoning.
+    const preferLocal = 
+      (sortedOllamaModels.length > 0) &&
+      (!isAuto || complexity === "coding" || complexity === "vision");
+
+    if (preferLocal) {
       primaryModel = sortedOllamaModels[0];
       const remainingOllama = sortedOllamaModels.slice(1);
       fallbackChain = [...remainingOllama, ...sortedLangdockModels, ...eligibleOpenRouter];
     } else if (sortedLangdockModels.length > 0) {
       primaryModel = sortedLangdockModels[0];
       const remainingLangdock = sortedLangdockModels.slice(1);
-      fallbackChain = [...remainingLangdock, ...eligibleOpenRouter];
+      fallbackChain = [...remainingLangdock, ...sortedOllamaModels, ...eligibleOpenRouter];
+    } else if (sortedOllamaModels.length > 0) {
+      // If Langdock is offline, but local models are available, fallback to local models
+      primaryModel = sortedOllamaModels[0];
+      const remainingOllama = sortedOllamaModels.slice(1);
+      fallbackChain = [...remainingOllama, ...eligibleOpenRouter];
     } else if (eligibleOpenRouter.length > 0) {
       primaryModel = eligibleOpenRouter[0];
       fallbackChain = eligibleOpenRouter.slice(1);

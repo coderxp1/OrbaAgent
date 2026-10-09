@@ -39,9 +39,19 @@ def worker_service(compose) -> dict:
     return compose["services"]["orbaagent-gpu-worker"]
 
 
+@pytest.fixture(scope="module")
+def ollama_service(compose) -> dict:
+    return compose["services"]["orbaagent-ollama"]
+
+
 class TestComposePinsGpu1:
     def test_pins_the_orbaagent_gpu_uuid_in_env(self, worker_service):
         env = worker_service["environment"]
+        visible = next(e for e in env if str(e).startswith("NVIDIA_VISIBLE_DEVICES="))
+        assert visible.split("=", 1)[1] == GPU1_UUID
+
+    def test_ollama_pins_the_orbaagent_gpu_uuid_in_env(self, ollama_service):
+        env = ollama_service["environment"]
         visible = next(e for e in env if str(e).startswith("NVIDIA_VISIBLE_DEVICES="))
         assert visible.split("=", 1)[1] == GPU1_UUID
 
@@ -52,8 +62,19 @@ class TestComposePinsGpu1:
         assert devices[0]["device_ids"] == [GPU1_UUID]
         assert devices[0]["capabilities"] == ["gpu"]
 
+    def test_ollama_pins_the_orbaagent_gpu_uuid_in_device_reservation(self, ollama_service):
+        devices = ollama_service["deploy"]["resources"]["reservations"]["devices"]
+        assert len(devices) == 1
+        assert devices[0]["driver"] == "nvidia"
+        assert devices[0]["device_ids"] == [GPU1_UUID]
+        assert devices[0]["capabilities"] == ["gpu"]
+
     def test_sets_cuda_visible_devices_to_the_single_visible_gpu(self, worker_service):
         env = worker_service["environment"]
+        assert "CUDA_VISIBLE_DEVICES=0" in env
+
+    def test_ollama_sets_cuda_visible_devices_to_the_single_visible_gpu(self, ollama_service):
+        env = ollama_service["environment"]
         assert "CUDA_VISIBLE_DEVICES=0" in env
 
     def test_gpu0_uuid_never_appears(self, compose_text):
@@ -80,27 +101,42 @@ class TestComposeRefusesBroadGpuAccess:
         assert not re.search(r"^\s*gpus\s*:", code, re.MULTILINE)
         assert "count: all" not in code
 
-    def test_not_privileged(self, worker_service):
+    def test_not_privileged(self, worker_service, ollama_service):
         assert worker_service.get("privileged") is not True
+        assert ollama_service.get("privileged") is not True
 
-    def test_no_host_nvidia_device_mounts(self, worker_service):
+    def test_no_host_nvidia_device_mounts(self, worker_service, ollama_service):
         for volume in worker_service.get("volumes", []):
             assert "/dev/nvidia" not in str(volume)
+        for volume in ollama_service.get("volumes", []):
+            assert "/dev/nvidia" not in str(volume)
 
-    def test_no_gpu_capabilities_beyond_gpu(self, worker_service):
+    def test_no_gpu_capabilities_beyond_gpu(self, worker_service, ollama_service):
         devices = worker_service["deploy"]["resources"]["reservations"]["devices"]
         for device in devices:
             assert device["capabilities"] == ["gpu"]
+        ollama_devices = ollama_service["deploy"]["resources"]["reservations"]["devices"]
+        for device in ollama_devices:
+            assert device["capabilities"] == ["gpu"]
 
-    def test_no_host_pid_or_ipc_namespace_sharing(self, worker_service):
+    def test_no_host_pid_or_ipc_namespace_sharing(self, worker_service, ollama_service):
         assert worker_service.get("pid") is None
         assert worker_service.get("ipc") is None
         assert worker_service.get("network_mode") != "host"
+        assert ollama_service.get("pid") is None
+        assert ollama_service.get("ipc") is None
+        assert ollama_service.get("network_mode") != "host"
 
-    def test_worker_port_is_loopback_bound_only(self, worker_service):
+    def test_worker_port_is_private_wireguard_bound_only(self, worker_service):
         for mapping in worker_service["ports"]:
-            assert str(mapping).startswith("127.0.0.1:"), (
-                "port 8190 must not be published on a public interface"
+            assert str(mapping).startswith("10.77.0.2:"), (
+                "port 8190 must be published on the private WireGuard interface only"
+            )
+
+    def test_ollama_port_is_private_wireguard_bound_only(self, ollama_service):
+        for mapping in ollama_service["ports"]:
+            assert str(mapping).startswith("10.77.0.2:11435"), (
+                "port 11435 must be published on the private WireGuard interface only"
             )
 
 

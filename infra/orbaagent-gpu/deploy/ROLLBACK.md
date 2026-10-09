@@ -36,17 +36,24 @@ chmod 755 /etc/orbaagent/gpu-worker
 rm -f /etc/sudoers.d/orbaagent-gpu
 ```
 
-#### Option 2: Minimal Rollback (Preserve Configuration)
+#### Option 2: Standard Service Rollback (Preserves Model Weights)
 ```bash
-# Only stop the container and remove its runtime state
+# Stop and remove worker containers
 sudo -u klaus sudo orbaagent-gpu down
 
-# Clear the models volume (preserves source configuration)
-docker volume rm orbaagent-gpu_orbaagent_models orbaagent-gpu_orbaagent_output orbaagent-gpu_orbaagent_data 2>/dev/null || true
+# Revert WireGuard firewall rule for port 11435 if needed
+sudo ufw delete allow in on wg-orba from 10.77.0.1 to 10.77.0.2 port 11435 proto tcp 2>/dev/null || true
 
-# Remove generated artifacts but keep source code
-rm -f /etc/orbaagent/gpu-worker/worker.env
-rm -rf /etc/orbaagent/gpu-worker/secrets/
+# Note: Model volume `orbaagent_ollama_models` is deliberately PRESERVED to avoid
+# re-downloading weights.
+```
+
+#### Option 3: Explicit Destructive Volume Purge (Requires Deliberate Approval)
+> [!CAUTION]
+> This permanently deletes downloaded model weights in `orbaagent_ollama_models`.
+> Only execute if a clean-slate purge has been explicitly authorized.
+```bash
+docker volume rm orbaagent_ollama_models 2>/dev/null || true
 ```
 
 ## Hardening Integration

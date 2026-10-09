@@ -81,19 +81,24 @@ def validate_isolation(config_text: str) -> None:
         if needle.lower() in lowered:
             raise IsolationError(f"forbidden setting '{needle}': {why}")
 
-    # --- the worker port must not be published on a public interface --------
+    # --- the worker and Ollama ports must not be published on a public interface --------
     # Match the mapping itself, not the surrounding YAML dash, so both
-    # `- "127.0.0.1:8190:8190"` and `ports: ["0.0.0.0:8190:8190"]` are inspected.
+    # `- "10.77.0.2:8190:8190"` and `ports: ["0.0.0.0:8190:8190"]` are inspected.
     for line in code.splitlines():
-        if "8190:8190" not in line:
-            continue
-        candidate = line.strip().lstrip("- ").strip().strip('"').strip("'").strip()
-        if candidate.startswith("127.0.0.1:8190:8190"):
-            continue
-        raise IsolationError(
-            f"port 8190 is published on a non-loopback interface ({candidate}); "
-            "the worker must only be reachable over the private tunnel"
-        )
+        if "8190:8190" in line:
+            candidate = line.strip().lstrip("- ").strip().strip('"').strip("'").strip()
+            if not candidate.startswith("10.77.0.2:8190:8190"):
+                raise IsolationError(
+                    f"port 8190 is published on a non-private interface ({candidate}); "
+                    "the worker must only be reachable over the private WireGuard tunnel (10.77.0.2:8190:8190)"
+                )
+        if "11435:11434" in line:
+            candidate = line.strip().lstrip("- ").strip().strip('"').strip("'").strip()
+            if not candidate.startswith("10.77.0.2:11435:11434"):
+                raise IsolationError(
+                    f"port 11435 is published on a non-private interface ({candidate}); "
+                    "Ollama must only be reachable over the private WireGuard tunnel (10.77.0.2:11435:11434)"
+                )
 
 
 def violations(config_text: str) -> list[str]:

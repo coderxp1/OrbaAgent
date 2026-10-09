@@ -53,6 +53,16 @@ To                         Action      From
 8190/tcp                   ALLOW       Anywhere
 """) is False
 
+    # 6b. Port 11435 Public / Anywhere -> REJECT
+    assert v.verify_tcp_11435_tunnel_only("""Status: active
+11435/tcp                  ALLOW       Anywhere
+""") is False
+
+    # 6c. Port 11435 Valid tunnel rule -> PASS
+    assert v.verify_tcp_11435_tunnel_only("""Status: active
+11435/tcp (wg-orba)        ROUTE ALLOW IN  10.77.0.1 -> 10.77.0.2
+""") is True
+
     # 7. UDP 51820 Anywhere -> REJECT
     assert v.verify_udp_51820_from_production("""Status: active
 51820/udp                  ALLOW       Anywhere
@@ -211,7 +221,7 @@ def test_gpu_and_docker_isolation_adversarial():
       - NVIDIA_VISIBLE_DEVICES={EXPECTED_GPU_UUID}
       - CUDA_VISIBLE_DEVICES=0
     ports:
-      - "127.0.0.1:8190:8190"
+      - "10.77.0.2:8190:8190"
 """
     # 1. Valid compose -> PASS
     deploy_validation.validate_isolation(base_compose)
@@ -255,6 +265,21 @@ def test_gpu_and_docker_isolation_adversarial():
         assert False, "Should reject count: all"
     except deploy_validation.IsolationError:
         pass
+
+    # 7. Public / non-private port publication -> REJECT
+    for bad_port in (
+        '"0.0.0.0:8190:8190"',
+        '"45.84.65.76:8190:8190"',
+        '"127.0.0.1:8190:8190"',
+        '"0.0.0.0:11435:11434"',
+        '"45.84.65.76:11435:11434"',
+    ):
+        bad_compose = base_compose.replace('"10.77.0.2:8190:8190"', bad_port)
+        try:
+            deploy_validation.validate_isolation(bad_compose)
+            assert False, f"Should reject port {bad_port}"
+        except deploy_validation.IsolationError:
+            pass
 
 
 def run_all():

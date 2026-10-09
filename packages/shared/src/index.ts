@@ -41,7 +41,7 @@ export class OrbaError extends Error {
 }
 
 // Model Registry & Provider Schemas
-export const ProviderIdSchema = z.enum(["langdock", "openrouter"]);
+export const ProviderIdSchema = z.enum(["langdock", "openrouter", "ollama"]);
 export type ProviderId = z.infer<typeof ProviderIdSchema>;
 
 export const ModelCapabilitySchema = z.enum([
