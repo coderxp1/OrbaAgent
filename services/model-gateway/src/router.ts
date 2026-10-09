@@ -239,6 +239,7 @@ export class IntelligenceRouter {
     const tenantId = effectiveRequest.trace?.tenantId;
 
     const needsVision = complexity === "vision";
+    const needsReasoning = complexity === "high_reasoning";
     const needsTools =
       Boolean(effectiveRequest.tools && effectiveRequest.tools.length > 0) || complexity === "coding";
 
@@ -263,6 +264,7 @@ export class IntelligenceRouter {
       ? allOllamaDefs
           .filter((def) => !resolvedModelId || def.id === resolvedModelId)
           .filter((def) => !needsVision || def.capabilities.vision)
+          .filter((def) => !needsReasoning || def.capabilities.reasoning)
           .filter((def) => !needsTools || def.capabilities.toolCalling)
           .filter((def) => !isLocalQuotaExhausted(def.id, tenantId))
           .filter((def) => this.healthTracker.isModelEligible(def.id))
@@ -295,6 +297,7 @@ export class IntelligenceRouter {
     const eligibleLangdockDefs = isLangdockAvailable
       ? allLangdockDefs
           .filter((def) => !needsVision || def.capabilities.vision)
+          .filter((def) => !needsReasoning || def.capabilities.reasoning)
           .filter((def) => !needsTools || def.capabilities.toolCalling)
           .filter((def) => !isLocalQuotaExhausted(def.id, tenantId))
           .filter((def) => this.healthTracker.isModelEligible(def.id))
@@ -327,6 +330,7 @@ export class IntelligenceRouter {
     const eligibleOpenRouterDefs = isOpenRouterAvailable
       ? allOpenRouterDefs
           .filter((def) => !needsVision || def.capabilities.vision)
+          .filter((def) => !needsReasoning || def.capabilities.reasoning)
           .filter((def) => !needsTools || def.capabilities.toolCalling)
           .filter((def) => !isLocalQuotaExhausted(def.id, tenantId))
           .filter((def) => this.healthTracker.isModelEligible(def.id))
