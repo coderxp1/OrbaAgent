@@ -169,7 +169,7 @@ export function useAgentChat() {
                   setMessages((prev) =>
                     prev.map((msg) =>
                       msg.id === assistantMsgId
-                        ? { ...msg, content: msg.content + event.textDelta }
+                        ? { ...msg, content: (typeof msg.content === "string" ? msg.content : "") + event.textDelta }
                         : msg,
                     ),
                   );
@@ -302,7 +302,7 @@ export function useAgentChat() {
     const lastUserMsg = [...messages].reverse().find((m) => m.role === "user");
     if (lastUserMsg) {
       setMessages((prev) => prev.slice(0, -1)); // Remove failed assistant msg
-      sendMessage(lastUserMsg.content);
+      sendMessage(typeof lastUserMsg.content === "string" ? lastUserMsg.content : lastUserMsg.content.map(p => p.type === "text" ? p.text : "").join(""));
     }
   }, [messages, sendMessage]);
 

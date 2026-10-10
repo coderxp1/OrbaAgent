@@ -37,14 +37,20 @@ export function MessageItem({
 
   const handleCopyMessage = () => {
     if (!message.content) return;
-    navigator.clipboard.writeText(message.content);
+    const textContent = typeof message.content === "string" 
+      ? message.content 
+      : message.content.map(p => p.type === "text" ? p.text : "").join("");
+    navigator.clipboard.writeText(textContent);
     setMessageCopied(true);
     setTimeout(() => setMessageCopied(false), 2000);
   };
 
   const handleReply = () => {
     if (message.content && onReply) {
-      onReply(message.content);
+      const textContent = typeof message.content === "string" 
+        ? message.content 
+        : message.content.map(p => p.type === "text" ? p.text : "").join("");
+      onReply(textContent);
     }
   };
 
@@ -128,14 +134,16 @@ export function MessageItem({
         {/* Message Content */}
         {message.content ? (
           <div className="whitespace-pre-wrap leading-relaxed text-zinc-200">
-            {message.content.includes("```") ? (
+            {typeof message.content === "string" && message.content.includes("```") ? (
               <FormattedContent
                 content={message.content}
                 onCopy={handleCopy}
                 copiedCode={copiedCode}
               />
-            ) : (
+            ) : typeof message.content === "string" ? (
               message.content
+            ) : (
+              message.content.map((p, idx) => p.type === "text" ? <span key={idx}>{p.text}</span> : <img key={idx} src={p.image_url.url} alt="attachment" className="max-w-full rounded mt-2" />)
             )}
           </div>
         ) : (
