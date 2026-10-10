@@ -192,7 +192,16 @@ export type ChatMessageRole = z.infer<typeof ChatMessageRoleSchema>;
 export const ChatMessageSchema = z.object({
   id: z.string().optional(),
   role: ChatMessageRoleSchema,
-  content: z.string(),
+  content: z.union([
+    z.string(),
+    z.array(
+      z.object({
+        type: z.string(),
+        text: z.string().optional(),
+        image_url: z.object({ url: z.string() }).optional(),
+      })
+    ),
+  ]),
   name: z.string().optional(),
   toolCallId: z.string().optional(),
   toolCalls: z.array(ToolCallSchema).optional(),

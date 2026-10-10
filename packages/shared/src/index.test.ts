@@ -91,4 +91,34 @@ describe("Shared Package Tests", () => {
     const parsed = AuditEventSchema.safeParse(validAudit);
     expect(parsed.success).toBe(true);
   });
+
+  it("validates ChatMessageSchema with multimodal content array", async () => {
+    const { ChatMessageSchema } = await import("./index.js");
+    
+    // Legacy / Text-only
+    const validText = {
+      role: "user",
+      content: "Hello world"
+    };
+    expect(ChatMessageSchema.safeParse(validText).success).toBe(true);
+
+    // Multimodal Array
+    const validMultimodal = {
+      role: "user",
+      content: [
+        { type: "text", text: "What is this image?" },
+        { type: "image_url", image_url: { url: "data:image/jpeg;base64,R0lG" } }
+      ]
+    };
+    expect(ChatMessageSchema.safeParse(validMultimodal).success).toBe(true);
+    
+    // Invalid Multimodal
+    const invalidMultimodal = {
+      role: "user",
+      content: [
+        { type: "image_url" } // Missing image_url object
+      ]
+    };
+    expect(ChatMessageSchema.safeParse(invalidMultimodal).success).toBe(false);
+  });
 });

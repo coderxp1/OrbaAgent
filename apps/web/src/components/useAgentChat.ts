@@ -24,7 +24,7 @@ export function useAgentChat() {
   const sendMessage = useCallback(
     async (
       userContent: string,
-      attachments?: Array<{ artifactId: string; name?: string; type?: string; size?: number; relPath?: string }>,
+      attachments?: Array<{ artifactId: string; name?: string; type?: string; size?: number; relPath?: string; file?: File }>,
     ) => {
       if (!userContent.trim() || isGenerating) return;
 
@@ -59,6 +59,51 @@ export function useAgentChat() {
       abortControllerRef.current = controller;
 
       try {
+        const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
+        const SUPPORTED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+        
+        let apiPayloadContent: any = userContent;
+        if (attachments && attachments.some(a => a.type?.startsWith("image/"))) {
+          const parts: any[] = [{ type: "text", text: userContent }];
+          for (const att of attachments) {
+            if (att.type?.startsWith("image/")) {
+              if (!SUPPORTED_IMAGE_TYPES.includes(att.type)) {
+                setError({ code: "unsupported_image", message: `Unsupported image format: ${att.type}. Supported formats: JPEG, PNG, WEBP, GIF.` });
+                setIsGenerating(false);
+                setMessages(messages);
+                return;
+              }
+              if ((att.size || 0) > MAX_IMAGE_SIZE) {
+                setError({ code: "image_too_large", message: `Image exceeds 5MB limit: ${att.name || "Unknown"}` });
+                setIsGenerating(false);
+                setMessages(messages);
+                return;
+              }
+              if (!att.file) {
+                setError({ code: "image_read_error", message: `File data missing for image: ${att.name || "Unknown"}` });
+                setIsGenerating(false);
+                setMessages(messages);
+                return;
+              }
+              try {
+                const dataUrl = await new Promise<string>((resolve, reject) => {
+                  const reader = new FileReader();
+                  reader.onload = () => resolve(reader.result as string);
+                  reader.onerror = reject;
+                  reader.readAsDataURL(att.file as File);
+                });
+                parts.push({ type: "image_url", image_url: { url: dataUrl } });
+              } catch (e) {
+                setError({ code: "image_read_error", message: `Failed to read image: ${att.name || "Unknown"}` });
+                setIsGenerating(false);
+                setMessages(messages);
+                return;
+              }
+            }
+          }
+          apiPayloadContent = parts;
+        }
+
         const response = await fetch("/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -67,10 +112,16 @@ export function useAgentChat() {
             modelId: "auto",
             messages: updatedMessages.map((m) => ({
               role: m.role,
-              content: m.content,
+              content: m.id === userMsgId ? apiPayloadContent : m.content,
             })),
             stream: true,
-            attachments: attachments && attachments.length > 0 ? attachments : undefined,
+            attachments: attachments && attachments.length > 0 ? attachments.map(a => ({
+              artifactId: a.artifactId,
+              name: a.name,
+              type: a.type,
+              size: a.size,
+              relPath: a.relPath,
+            })) : undefined,
             trace: {
               traceId,
               tenantId: "default-tenant",
