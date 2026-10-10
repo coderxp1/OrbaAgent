@@ -81,6 +81,9 @@ services:
       LANGDOCK_API_KEY: ${LANGDOCK_API_KEY}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
       ALLOWED_ORIGINS: "https://orbaagent.dev,https://www.orbaagent.dev"
+      MEDIA_WORKER_ENABLED: "true"
+      MEDIA_WORKER_URL: "http://10.77.0.2:8190"
+      MEDIA_WORKER_TOKEN: "fcd57a9aeda4270f445fe25a40f05e6347d2bc3d8519c0a658ca088f1dec9b14"
     depends_on:
       postgres:
         condition: service_healthy
@@ -120,6 +123,9 @@ services:
       GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID}
       GITHUB_SECRET_ID: ${GITHUB_SECRET_ID}
       ALLOWED_ORIGINS: "https://orbaagent.dev,https://www.orbaagent.dev"
+      MEDIA_WORKER_ENABLED: "true"
+      MEDIA_WORKER_URL: "http://10.77.0.2:8190"
+      MEDIA_WORKER_TOKEN: "fcd57a9aeda4270f445fe25a40f05e6347d2bc3d8519c0a658ca088f1dec9b14"
       # Persistent artifact/upload storage. Explicitly set so the code never
       # falls back to <cwd>/.uploads inside the read-only image layer.
       ORBA_UPLOAD_DIR: /data/uploads
