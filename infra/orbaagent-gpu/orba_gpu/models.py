@@ -150,14 +150,14 @@ class ModelManager:
             "image": ModelStatus(
                 slot="image",
                 model_id=self._image_model_id,
-                requested=self._backend == "diffusers",
+                requested=self._backend in ("diffusers", "comfyui"),
                 loaded=self.image_ready,
                 load_error=self._image_error,
             ).to_dict(),
             "video": ModelStatus(
                 slot="video",
                 model_id=self._video_model_id,
-                requested=self._backend == "diffusers",
+                requested=self._backend in ("diffusers", "comfyui"),
                 loaded=self.video_ready,
                 load_error=self._video_error,
             ).to_dict(),
@@ -182,9 +182,14 @@ class ModelManager:
         with self._lock:
             if self._image_pipeline is not None:
                 return self._image_pipeline
+            if self._backend == "comfyui":
+                from .backends.comfyui_backend import ComfyUIBackend
+                self._image_pipeline = ComfyUIBackend(self._models_dir)
+                self._image_error = None
+                return self._image_pipeline
             if self._backend != "diffusers":
                 raise BackendNotImplementedError(
-                    "image generation requires MEDIA_GENERATION_BACKEND=diffusers"
+                    "image generation requires MEDIA_GENERATION_BACKEND=diffusers or comfyui"
                 )
             loader = self._resolve_loader("image")
             try:
@@ -202,9 +207,14 @@ class ModelManager:
         with self._lock:
             if self._video_pipeline is not None:
                 return self._video_pipeline
+            if self._backend == "comfyui":
+                from .backends.comfyui_backend import ComfyUIBackend
+                self._video_pipeline = ComfyUIBackend(self._models_dir)
+                self._video_error = None
+                return self._video_pipeline
             if self._backend != "diffusers":
                 raise BackendNotImplementedError(
-                    "video generation requires MEDIA_GENERATION_BACKEND=diffusers"
+                    "video generation requires MEDIA_GENERATION_BACKEND=diffusers or comfyui"
                 )
             loader = self._resolve_loader("video")
             try:

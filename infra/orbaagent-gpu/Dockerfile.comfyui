@@ -1,0 +1,38 @@
+FROM pytorch/pytorch:2.6.0-cuda12.6-cudnn9-runtime
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    curl \
+    ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+# Add a non-root user for ComfyUI. We'll use UID 1500 to match the intended runtime.
+RUN useradd -m -u 1500 orba-media && \
+    mkdir -p /app/ComfyUI/models /app/ComfyUI/output /app/ComfyUI/custom_nodes && \
+    chown -R orba-media:orba-media /app/ComfyUI
+
+USER orba-media
+
+# Clone ComfyUI matching the verified v0.36.0 version
+RUN git clone https://github.com/comfyanonymous/ComfyUI.git /app/ComfyUI && \
+    cd /app/ComfyUI && \
+    git checkout v0.36.0
+
+# Install dependencies (user site)
+RUN pip install --no-cache-dir --user -r /app/ComfyUI/requirements.txt
+
+# Install custom nodes
+RUN cd /app/ComfyUI/custom_nodes && \
+    git clone https://github.com/comfyanonymous/comfyui-kitchen.git && \
+    git clone https://github.com/aimdo/comfyui-aimdo.git
+
+WORKDIR /app/ComfyUI
+
+# Ensure installed binaries are in PATH
+ENV PATH="/home/orba-media/.local/bin:${PATH}"
+
+EXPOSE 8188
+
+CMD ["python", "main.py", "--listen", "0.0.0.0", "--port", "8188"]

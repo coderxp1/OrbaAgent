@@ -208,6 +208,22 @@ def _run_image_inference(
         )
         return
 
+    if hasattr(pipeline, "generate_image"):
+        success = pipeline.generate_image(
+            prompt=prompt,
+            negative_prompt=negative_prompt,
+            width=width,
+            height=height,
+            steps=steps,
+            seed=seed,
+            output_format="png",
+            output_path=str(target),
+        )
+        if not success:
+            from .generation import GenerationFailedError
+            raise GenerationFailedError("ComfyUI image generation failed")
+        return
+
     from .backends.diffusers_backend import run_image_inference
 
     run_image_inference(
@@ -328,6 +344,22 @@ def _run_video_inference(
             height=height,
             output_path=target,
         )
+        return
+
+    if hasattr(pipeline, "generate_video"):
+        success = pipeline.generate_video(
+            prompt=prompt,
+            negative_prompt=negative_prompt,
+            width=width,
+            height=height,
+            steps=0, # not explicitly used for video length in signature
+            seed=1,
+            output_format="mp4",
+            output_path=str(target),
+        )
+        if not success:
+            from .generation import GenerationFailedError
+            raise GenerationFailedError("ComfyUI video generation failed")
         return
 
     from .backends.diffusers_backend import run_video_inference

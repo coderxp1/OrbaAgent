@@ -80,6 +80,37 @@ services:
               device_ids: ['GPU-82e03c6c-8c27-c076-eb42-7e37e9a5a878']
               capabilities: [gpu]
 
+  orbaagent-comfyui:
+    container_name: orbaagent-comfyui
+    build:
+      context: /etc/orbaagent/gpu-worker/src
+      dockerfile: Dockerfile.comfyui
+    restart: unless-stopped
+    ports:
+      # Private only, accessible via wireguard tunnel 10.77.0.2 if needed, but primarily internally
+      - "10.77.0.2:8189:8188"
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=GPU-82e03c6c-8c27-c076-eb42-7e37e9a5a878
+      - CUDA_VISIBLE_DEVICES=0
+    volumes:
+      - orbaagent_models:/app/ComfyUI/models:ro
+      - orbaagent_output:/app/ComfyUI/output
+    networks:
+      - orbaagent_media_net
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ['GPU-82e03c6c-8c27-c076-eb42-7e37e9a5a878']
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8188/system_stats"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+
   orbaagent-ollama:
     container_name: orbaagent-ollama
     image: ollama/ollama:0.12.7
