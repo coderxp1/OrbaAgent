@@ -116,7 +116,7 @@ describe("Shared Package Tests", () => {
     const invalidMultimodal = {
       role: "user",
       content: [
-        { type: "image_url" } // Missing image_url object
+        { type: "image_url", image_url: { wrong: "url" } } // Missing url inside image_url
       ]
     };
     expect(ChatMessageSchema.safeParse(invalidMultimodal).success).toBe(false);

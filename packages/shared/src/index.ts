@@ -195,11 +195,10 @@ export const ChatMessageSchema = z.object({
   content: z.union([
     z.string(),
     z.array(
-      z.object({
-        type: z.string(),
-        text: z.string().optional(),
-        image_url: z.object({ url: z.string() }).optional(),
-      })
+      z.discriminatedUnion("type", [
+        z.object({ type: z.literal("text"), text: z.string() }),
+        z.object({ type: z.literal("image_url"), image_url: z.object({ url: z.string() }) })
+      ])
     ),
   ]),
   name: z.string().optional(),
