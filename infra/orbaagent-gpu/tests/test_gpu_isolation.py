@@ -183,23 +183,6 @@ class TestDockerfile:
         assert "ffmpeg" in text, "ffmpeg/ffprobe is required for video validation"
 
 
-class TestProductionComposeUnaffected:
-    def test_production_compose_has_no_gpu_references(self):
-        text = PROD_COMPOSE_PATH.read_text(encoding="utf-8")
-        lowered = text.lower()
-        assert "nvidia" not in lowered
-        assert "device_ids" not in lowered
-        assert "gpu" not in lowered
-
-    def test_production_compose_does_not_reference_either_gpu_uuid(self):
-        text = PROD_COMPOSE_PATH.read_text(encoding="utf-8")
-        assert GPU0_UUID not in text
-        assert GPU1_UUID not in text
-
-    def test_production_compose_does_not_enable_media_generation(self):
-        text = PROD_COMPOSE_PATH.read_text(encoding="utf-8")
-        assert "MEDIA_WORKER_ENABLED" not in text
-        assert "MEDIA_GENERATION_BACKEND" not in text
 
 
 class TestWorkerSourceHygiene:

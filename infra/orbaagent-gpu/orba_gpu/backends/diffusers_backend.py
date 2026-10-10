@@ -44,7 +44,7 @@ def load_image_pipeline(model_path: str):
     device = _device()
     dtype = torch.bfloat16 if device == "cuda" else torch.float32
 
-    pipeline = FluxPipeline.from_pretrained(model_path, torch_dtype=dtype)
+    pipeline = FluxPipeline.from_pretrained(model_path, torch_dtype=dtype, local_files_only=True)
     pipeline = pipeline.to(device)
 
     # Reduce peak VRAM; harmless when the optimisation is unavailable.
@@ -114,7 +114,7 @@ def load_video_pipeline(model_path: str):
     device = _device()
     dtype = torch.bfloat16 if device == "cuda" else torch.float32
 
-    pipeline = DiffusionPipeline.from_pretrained(model_path, torch_dtype=dtype)
+    pipeline = DiffusionPipeline.from_pretrained(model_path, torch_dtype=dtype, local_files_only=True)
     pipeline = pipeline.to(device)
     try:
         pipeline.enable_attention_slicing()

@@ -7,7 +7,6 @@ import shutil
 import uuid
 import logging
 from typing import Optional
-from orba_gpu.backends import GenerationBackend
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +14,7 @@ logger = logging.getLogger(__name__)
 COMFYUI_URL = "http://orbaagent-comfyui:8188"
 COMFYUI_OUTPUT_DIR = "/output"
 
-class ComfyUIBackend(GenerationBackend):
+class ComfyUIBackend:
     def __init__(self, models_dir: str):
         self.models_dir = models_dir
         self.image_model = os.getenv("MEDIA_GENERATION_IMAGE_MODEL", "flux1-schnell")

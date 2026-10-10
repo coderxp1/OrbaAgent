@@ -95,6 +95,7 @@ services:
     volumes:
       - orbaagent_models:/app/ComfyUI/models:ro
       - orbaagent_output:/app/ComfyUI/output
+    user: "1500"
     networks:
       - orbaagent_media_net
     deploy:

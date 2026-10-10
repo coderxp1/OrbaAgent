@@ -139,7 +139,7 @@ class TestFailureBehaviour:
         assert "FLUX.1-schnell" in attempted[0]
 
     def test_unimplemented_backend_raises_clearly(self):
-        m = make_manager(backend="comfyui")
+        m = make_manager(backend="yolo")
         with pytest.raises(BackendNotImplementedError, match="MEDIA_GENERATION_BACKEND=diffusers"):
             m.load_image()
         with pytest.raises(BackendNotImplementedError):

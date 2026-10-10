@@ -179,8 +179,8 @@ class TestGenerateImageEndpoint:
         assert resp.json()["detail"]["status"] == "MEDIA_GENERATION_UNAVAILABLE"
 
     def test_unavailable_when_backend_value_has_no_implementation(self, tmp_path):
-        """`comfyui` is a recognized name with no implementation in this worker."""
-        client, _ = build_client(tmp_path, backend="comfyui")
+        """`yolo` is a recognized name with no implementation in this worker."""
+        client, _ = build_client(tmp_path, backend="yolo")
         resp = client.post("/api/generate/image", json={"prompt": "x"}, headers=auth_headers())
         assert resp.status_code == 503
         message = resp.json()["detail"]["message"]

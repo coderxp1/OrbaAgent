@@ -30,10 +30,10 @@ class TestSettingsFromEnv:
         assert s.image_backend_requested is False
         assert s.video_backend_requested is False
 
-    def test_backend_requires_explicit_diffusers(self):
+    def test_backend_requires_explicit_backend(self):
         assert Settings.from_env({"MEDIA_GENERATION_BACKEND": "diffusers"}).image_backend_requested
+        assert Settings.from_env({"MEDIA_GENERATION_BACKEND": "comfyui"}).image_backend_requested
         # An unknown value must NOT count as implemented.
-        assert not Settings.from_env({"MEDIA_GENERATION_BACKEND": "comfyui"}).image_backend_requested
         assert not Settings.from_env({"MEDIA_GENERATION_BACKEND": "yolo"}).image_backend_requested
 
     def test_token_is_not_in_repr(self):
