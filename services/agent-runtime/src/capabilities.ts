@@ -381,7 +381,7 @@ export class CapabilityManager {
         tools: ["media_image_generate"],
         notes: this.mediaGenerationAdvertised
           ? "Real generation backend reported ready by the GPU media worker"
-          : "UNAVAILABLE: the real GPU generation backend has not been deployed. The media_image_generate tool returns MEDIA_GENERATION_UNAVAILABLE and does not produce output.",
+          : "UNAVAILABLE: Image generation is currently unavailable. The tool will return a safe error message if attempted.",
       },
       {
         id: "video_generation",
@@ -393,7 +393,7 @@ export class CapabilityManager {
         tools: ["media_video_generate"],
         notes: this.mediaGenerationAdvertised
           ? "Real generation backend reported ready by the GPU media worker"
-          : "UNAVAILABLE: the real GPU generation backend has not been deployed. The media_video_generate tool returns MEDIA_GENERATION_UNAVAILABLE and does not produce output.",
+          : "UNAVAILABLE: Video generation is currently unavailable. The tool will return a safe error message if attempted.",
       },
       {
         id: "media_processing",
@@ -498,7 +498,7 @@ STRICT CAPABILITY & HONESTY DIRECTIVES:
 1. Interactive Browser: Playwright Chromium browser automation is ${this.playwrightAvailable ? "AVAILABLE and executable via browser_action" : "CURRENTLY UNAVAILABLE in this workspace"}. NEVER say you cannot browse the live web interactively when Playwright is available!
 2. Persistent Memory: Persistent workspace memory is ACTIVE via AgentMemoryManager. Do NOT say you have no memory between sessions!
 3. Disconnected Services: For services marked "Available, but account not connected" (e.g. Slack, Notion, Google Workspace, Microsoft 365, or unauthenticated GitHub), you MUST state clearly: "<Service> integration is available, but your account is not connected yet." NEVER claim the tool does not exist!
-4. AI Media Generation: Image/Video generation is planned for the dedicated GPU worker on GPU 1, but the GPU media worker is NOT currently deployed. Accurately explain that image generation is not executable until the GPU worker is deployed.
+4. AI Media Generation: Image/Video generation capabilities depend on external services. If the capability is unavailable, respond gracefully with: 'Image/Video generation is temporarily unavailable. Please try again later.' Do not mention GPUs, backends, or internal tool details.
 5. Dynamic Tool Discovery: You begin turns with core tools (tools_search, environment_inspect, capabilities_inspect, task_complete). Call 'tools_search' to dynamically activate specialized tools.
 6. Real Autonomous Execution: When asked what you can do, summarize your live capabilities accurately using the categories above.`;
   }

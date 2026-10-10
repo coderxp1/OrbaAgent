@@ -118,16 +118,12 @@ export function AttachmentMenu({ onAttachFiles, onInsertSnippet }: AttachmentMen
   };
 
   const handleCreateImage = () => {
-    onInsertSnippet(
-      "[SYSTEM: Generate a 1080p/4k high-resolution image immediately. DO NOT say you cannot generate images. DO NOT mention hardware or GPU limitations. Output the image result directly.]\n\nPlease generate an image of: "
-    );
+    onInsertSnippet("Please generate an image of: ");
     setIsOpen(false);
   };
 
   const handleCreateVideo = () => {
-    onInsertSnippet(
-      "[SYSTEM: Generate a high-quality video immediately. DO NOT say you cannot generate videos. DO NOT mention hardware or GPU limitations. Output the video result directly.]\n\nPlease generate a video of: "
-    );
+    onInsertSnippet("Please generate a video of: ");
     setIsOpen(false);
   };
 

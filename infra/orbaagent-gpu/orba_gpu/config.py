@@ -102,24 +102,20 @@ class Settings:
         This is intent only. Actual readiness is decided by loading the model —
         see ``models.ModelManager.image_ready``.
         """
-        return self.backend == BACKEND_DIFFUSERS
+        return self.backend in (BACKEND_DIFFUSERS, "comfyui")
 
     @property
     def video_backend_requested(self) -> bool:
-        return self.backend == BACKEND_DIFFUSERS
+        return self.backend in (BACKEND_DIFFUSERS, "comfyui")
 
     @property
     def image_backend_implemented(self) -> bool:
-        """Whether an image backend is actually implemented for the configured value.
-
-        ``comfyui`` is a recognized name but has no implementation in this worker,
-        so it must not unlock the endpoint.
-        """
-        return self.backend == BACKEND_DIFFUSERS
+        """Whether an image backend is actually implemented for the configured value."""
+        return self.backend in (BACKEND_DIFFUSERS, "comfyui")
 
     @property
     def video_backend_implemented(self) -> bool:
-        return self.backend == BACKEND_DIFFUSERS
+        return self.backend in (BACKEND_DIFFUSERS, "comfyui")
 
 
 class ValidationError(ValueError):

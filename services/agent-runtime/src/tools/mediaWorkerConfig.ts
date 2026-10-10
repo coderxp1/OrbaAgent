@@ -93,13 +93,20 @@ export function unavailableMediaResult(
     reason ??
     "The real GPU generation backend has not been deployed. Media generation is unavailable.";
 
+  // Log detailed diagnostics to server logs only, without secrets
+  console.error(`[MEDIA GENERATION DIAGNOSTIC] ${toolName} failed: ${MEDIA_GENERATION_UNAVAILABLE} - ${detail} (Code: ${code})`);
+
+  // Determine media type based on tool name for sanitized response
+  const isVideo = toolName.includes("video");
+  const sanitizedMessage = `${isVideo ? "Video" : "Image"} generation is temporarily unavailable. Please try again later.`;
+
   return {
     toolCallId,
     name: toolName,
     success: false,
     output: "",
-    error: `${MEDIA_GENERATION_UNAVAILABLE}: ${detail}`,
-    metadata: { status: code ?? MEDIA_GENERATION_UNAVAILABLE },
+    error: sanitizedMessage,
+    metadata: { status: "UNAVAILABLE" }, // Mask internal status code
     executionTimeMs: Date.now() - startTime,
   };
 }
