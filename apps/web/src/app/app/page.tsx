@@ -543,7 +543,7 @@ export default function WorkspacePage() {
               </h1>
 
               {/* Center Input Card (Matching Mockup) */}
-              <div className="w-full rounded-2xl bg-[#1e1e1e] border border-[#2e2e2e] shadow-xl overflow-hidden text-left mb-6">
+              <div className="w-full rounded-2xl bg-[#1e1e1e] border border-[#2e2e2e] shadow-xl text-left mb-6">
                 <div className="p-4 flex flex-col gap-3">
                   {/* Attached Files Badges */}
                   {attachedFiles.length > 0 && (
@@ -644,7 +644,7 @@ export default function WorkspacePage() {
 
                 {/* Sub-bar: Get better answers from your apps (Matching media_1791118201468.png) */}
                 {showAppsBar && (
-                  <div className="bg-[#181818] border-t border-[#292929] px-4 py-2.5 flex items-center justify-between text-xs">
+                  <div className="bg-[#181818] border-t border-[#292929] px-4 py-2.5 flex items-center justify-between text-xs rounded-b-2xl">
                     <span className="text-zinc-400 font-medium text-[11px]">
                       Get better answers from your apps
                     </span>
