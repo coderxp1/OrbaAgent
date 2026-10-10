@@ -1,6 +1,6 @@
 "use client";
 
-import { Camera, FileCode, FileText, FolderUp, Image, Paperclip, Plus, Video } from "lucide-react";
+import { ChevronRight, FileCode, FileText, FolderUp, HardDrive, Image, ImagePlus, MoreHorizontal, Paperclip, Plus, Video } from "lucide-react";
 import type React from "react";
 import { useEffect, useRef, useState } from "react";
 
@@ -169,80 +169,54 @@ export function AttachmentMenu({ onAttachFiles, onInsertSnippet }: AttachmentMen
 
       {/* Dropdown Menu (Matching Mockup) */}
       {isOpen && (
-        <div className="absolute left-0 bottom-full mb-2 w-48 rounded-xl border border-[#2e2e32] bg-[#1a1a1d] shadow-2xl py-1.5 z-50 animate-in fade-in zoom-in-95 duration-100 flex flex-col">
+        <div className="absolute left-0 bottom-full mb-2 w-56 rounded-xl border border-[#2e2e32] bg-[#1a1a1d] shadow-2xl py-1.5 z-50 animate-in fade-in zoom-in-95 duration-100 flex flex-col">
           <button
             onClick={() => fileInputRef.current?.click()}
             type="button"
-            className="flex items-center gap-2.5 px-3 py-2 text-xs text-zinc-200 hover:text-white hover:bg-[#252529] transition-colors text-left"
+            className="flex items-center gap-2.5 px-3 py-2 text-sm text-zinc-200 hover:text-white hover:bg-[#252529] transition-colors text-left"
           >
-            <Paperclip className="w-3.5 h-3.5 text-blue-400" />
-            <span>Files</span>
+            <Paperclip className="w-4 h-4 text-blue-400" />
+            <span>Upload files</span>
           </button>
 
           <button
-            onClick={() => {
-              // Detect support for directory selection; provide clear fallback if unavailable
-              const input = folderInputRef.current;
-              if (!input) return;
-              const supportsDirectory = "webkitdirectory" in (input as any) || "directory" in (input as any);
-              if (!supportsDirectory) {
-                alert(
-                  "Folder selection is not supported in this browser. Please upload files instead or use a Chromium-based browser for folder upload.",
-                );
-                return;
-              }
-              input.click();
-            }}
+            onClick={() => alert("Google Drive integration coming soon")}
             type="button"
-            className="flex items-center gap-2.5 px-3 py-2 text-xs text-zinc-200 hover:text-white hover:bg-[#252529] transition-colors text-left"
+            className="flex items-center gap-2.5 px-3 py-2 text-sm text-zinc-200 hover:text-white hover:bg-[#252529] transition-colors text-left"
           >
-            <FolderUp className="w-3.5 h-3.5 text-amber-400" />
-            <span>Folders</span>
+            <HardDrive className="w-4 h-4 text-zinc-400" />
+            <span>Add from Drive</span>
           </button>
 
           <button
-            onClick={() => imageInputRef.current?.click()}
             type="button"
-            className="flex items-center gap-2.5 px-3 py-2 text-xs text-zinc-200 hover:text-white hover:bg-[#252529] transition-colors text-left"
+            className="flex items-center justify-between px-3 py-2 text-sm text-zinc-200 hover:text-white hover:bg-[#252529] transition-colors text-left"
           >
-            <Image className="w-3.5 h-3.5 text-purple-400" />
-            <span>Images</span>
+            <div className="flex items-center gap-2.5">
+              <MoreHorizontal className="w-4 h-4 text-zinc-400" />
+              <span>More uploads</span>
+            </div>
+            <ChevronRight className="w-4 h-4 text-zinc-400" />
+          </button>
+
+          <div className="h-px bg-[#2e2e32] my-1.5 mx-2" />
+
+          <button
+            onClick={() => alert("Image generation is a separate capability not yet enabled")}
+            type="button"
+            className="flex items-center gap-2.5 px-3 py-2 text-sm text-zinc-200 hover:text-white hover:bg-[#252529] transition-colors text-left"
+          >
+            <ImagePlus className="w-4 h-4 text-zinc-300" />
+            <span>Create image</span>
           </button>
 
           <button
-            onClick={() => videoInputRef.current?.click()}
+            onClick={() => alert("Video generation is a separate capability not yet enabled")}
             type="button"
-            className="flex items-center gap-2.5 px-3 py-2 text-xs text-zinc-200 hover:text-white hover:bg-[#252529] transition-colors text-left"
+            className="flex items-center gap-2.5 px-3 py-2 text-sm text-zinc-200 hover:text-white hover:bg-[#252529] transition-colors text-left"
           >
-            <Video className="w-3.5 h-3.5 text-red-400" />
-            <span>Videos</span>
-          </button>
-
-          <button
-            onClick={handleTextPrompt}
-            type="button"
-            className="flex items-center gap-2.5 px-3 py-2 text-xs text-zinc-200 hover:text-white hover:bg-[#252529] transition-colors text-left"
-          >
-            <FileText className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Text Note</span>
-          </button>
-
-          <button
-            onClick={handleScreenshot}
-            type="button"
-            className="flex items-center gap-2.5 px-3 py-2 text-xs text-zinc-200 hover:text-white hover:bg-[#252529] transition-colors text-left"
-          >
-            <Camera className="w-3.5 h-3.5 text-sky-400" />
-            <span>Screenshot</span>
-          </button>
-
-          <button
-            onClick={handleFigmaPrompt}
-            type="button"
-            className="flex items-center gap-2.5 px-3 py-2 text-xs text-zinc-200 hover:text-white hover:bg-[#252529] transition-colors text-left"
-          >
-            <FileCode className="w-3.5 h-3.5 text-pink-400" />
-            <span>Figma Link</span>
+            <Video className="w-4 h-4 text-zinc-300" />
+            <span>Create video</span>
           </button>
         </div>
       )}
