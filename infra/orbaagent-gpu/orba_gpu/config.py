@@ -6,6 +6,8 @@ import os
 from dataclasses import dataclass, field
 from typing import Optional
 
+from .secrets import load_optional_secret
+
 #: GPU 1 on migrol-ag-gpu-worker01 — the only device this worker may use.
 #: GPU 0 (GPU-4634107e-3bae-d5d5-ff97-2355d0b92ce4) runs the CoderXP/ComfyUI
 #: workload and must never be selected.
@@ -79,6 +81,17 @@ class Settings:
         def get(key: str, default: str = "") -> str:
             return (source.get(key) or default).strip()
 
+        token = load_optional_secret(
+            env_var="MEDIA_WORKER_TOKEN",
+            file_var="MEDIA_WORKER_TOKEN_FILE",
+            env=source,
+        )
+        ingest_token = load_optional_secret(
+            env_var="MEDIA_INGEST_TOKEN",
+            file_var="MEDIA_INGEST_TOKEN_FILE",
+            env=source,
+        )
+
         return Settings(
             target_gpu_uuid=get("MEDIA_WORKER_GPU_UUID", DEFAULT_TARGET_GPU_UUID),
             backend=get("MEDIA_GENERATION_BACKEND"),
@@ -87,9 +100,9 @@ class Settings:
             models_dir=get("MEDIA_MODELS_DIR", "/models"),
             output_dir=get("MEDIA_OUTPUT_DIR", "/output"),
             port=_env_int(source, "MEDIA_WORKER_PORT", 8190),
-            token=get("MEDIA_WORKER_TOKEN"),
+            token=token,
             ingest_url=get("MEDIA_INGEST_URL"),
-            ingest_token=get("MEDIA_INGEST_TOKEN"),
+            ingest_token=ingest_token,
             max_concurrent_generations=max(
                 1, _env_int(source, "MEDIA_MAX_CONCURRENT_GENERATIONS", MAX_CONCURRENT_GENERATIONS)
             ),

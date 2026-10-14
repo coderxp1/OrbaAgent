@@ -9,6 +9,7 @@ from orba_gpu.secrets import (
     REDACTED,
     MissingSecretError,
     Redactor,
+    load_optional_secret,
     load_secret,
 )
 
@@ -78,6 +79,48 @@ class TestLoadSecret:
                 env_var="MEDIA_WORKER_TOKEN",
                 env={"SOMETHING_ELSE": "orbaagent-gpu-worker-auth"},
             )
+
+
+class TestLoadOptionalSecret:
+    def test_returns_empty_when_absent(self):
+        assert load_optional_secret(env_var="MEDIA_INGEST_TOKEN", env={}) == ""
+
+    def test_reads_from_env_when_set(self):
+        assert load_optional_secret(env_var="MEDIA_INGEST_TOKEN", env={"MEDIA_INGEST_TOKEN": GOOD}) == GOOD
+
+    def test_reads_from_file_when_configured(self, tmp_path):
+        f = tmp_path / "token"
+        f.write_text(GOOD + "\n")
+        assert load_optional_secret(
+            env_var="MEDIA_INGEST_TOKEN",
+            file_var="MEDIA_INGEST_TOKEN_FILE",
+            env={"MEDIA_INGEST_TOKEN_FILE": str(f)},
+        ) == GOOD
+
+    def test_file_takes_precedence_over_env(self, tmp_path):
+        f = tmp_path / "token"
+        f.write_text("file_secret")
+        assert load_optional_secret(
+            env_var="MEDIA_INGEST_TOKEN",
+            file_var="MEDIA_INGEST_TOKEN_FILE",
+            env={"MEDIA_INGEST_TOKEN_FILE": str(f), "MEDIA_INGEST_TOKEN": "env_secret"},
+        ) == "file_secret"
+
+    def test_missing_or_unreadable_file_falls_back_to_env(self, tmp_path):
+        assert load_optional_secret(
+            env_var="MEDIA_INGEST_TOKEN",
+            file_var="MEDIA_INGEST_TOKEN_FILE",
+            env={"MEDIA_INGEST_TOKEN_FILE": str(tmp_path / "nonexistent"), "MEDIA_INGEST_TOKEN": "env_fallback"},
+        ) == "env_fallback"
+
+    def test_empty_file_falls_back_to_env(self, tmp_path):
+        f = tmp_path / "empty"
+        f.write_text("   \n")
+        assert load_optional_secret(
+            env_var="MEDIA_INGEST_TOKEN",
+            file_var="MEDIA_INGEST_TOKEN_FILE",
+            env={"MEDIA_INGEST_TOKEN_FILE": str(f), "MEDIA_INGEST_TOKEN": "env_fallback"},
+        ) == "env_fallback"
 
 
 class TestRedactor:

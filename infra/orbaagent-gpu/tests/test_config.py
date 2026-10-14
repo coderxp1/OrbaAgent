@@ -45,6 +45,46 @@ class TestSettingsFromEnv:
         s = Settings.from_env({"MEDIA_INGEST_TOKEN": "ingestsecret" * 4})
         assert "ingestsecret" not in repr(s)
 
+    def test_ingest_token_loads_from_file_when_configured(self, tmp_path):
+        secret_file = tmp_path / "media_ingest_token"
+        secret_file.write_text("myingesttoken12345678901234567890\n")
+        s = Settings.from_env({"MEDIA_INGEST_TOKEN_FILE": str(secret_file)})
+        assert s.ingest_token == "myingesttoken12345678901234567890"
+
+    def test_ingest_token_file_takes_precedence_over_env(self, tmp_path):
+        secret_file = tmp_path / "media_ingest_token"
+        secret_file.write_text("from_file_token_12345678901234567890\n")
+        s = Settings.from_env({
+            "MEDIA_INGEST_TOKEN_FILE": str(secret_file),
+            "MEDIA_INGEST_TOKEN": "from_env_token_12345678901234567890",
+        })
+        assert s.ingest_token == "from_file_token_12345678901234567890"
+
+    def test_ingest_token_missing_file_falls_back_to_env(self, tmp_path):
+        s = Settings.from_env({
+            "MEDIA_INGEST_TOKEN_FILE": str(tmp_path / "missing_file"),
+            "MEDIA_INGEST_TOKEN": "fallback_token_12345678901234567890",
+        })
+        assert s.ingest_token == "fallback_token_12345678901234567890"
+
+    def test_ingest_token_empty_file_falls_back_to_env_or_empty(self, tmp_path):
+        empty_file = tmp_path / "empty_token"
+        empty_file.write_text("   \n")
+        s = Settings.from_env({
+            "MEDIA_INGEST_TOKEN_FILE": str(empty_file),
+            "MEDIA_INGEST_TOKEN": "fallback_env_token",
+        })
+        assert s.ingest_token == "fallback_env_token"
+
+        s_no_env = Settings.from_env({"MEDIA_INGEST_TOKEN_FILE": str(empty_file)})
+        assert s_no_env.ingest_token == ""
+
+    def test_worker_token_loads_from_file_when_configured(self, tmp_path):
+        secret_file = tmp_path / "media_worker_token"
+        secret_file.write_text("myworkertoken12345678901234567890\n")
+        s = Settings.from_env({"MEDIA_WORKER_TOKEN_FILE": str(secret_file)})
+        assert s.token == "myworkertoken12345678901234567890"
+
     def test_values_are_stripped(self):
         s = Settings.from_env(
             {"MEDIA_GENERATION_BACKEND": "  diffusers  ", "MEDIA_WORKER_TOKEN": "  abc  "}

@@ -64,6 +64,29 @@ def load_secret(
     )
 
 
+def load_optional_secret(
+    *,
+    env_var: str,
+    file_var: Optional[str] = None,
+    env: Optional[dict] = None,
+) -> str:
+    """Load an optional secret from a file (preferred) or an environment variable.
+
+    Returns the stripped secret string, or "" if not set, empty, or unreadable.
+    Never logs or leaks the secret and never raises MissingSecretError.
+    """
+    source = os.environ if env is None else env
+
+    if file_var:
+        file_path = (source.get(file_var) or "").strip()
+        if file_path:
+            value = _read_secret_file(file_path)
+            if value:
+                return value
+
+    return (source.get(env_var) or "").strip()
+
+
 def _validate(value: str, name: str, min_length: int) -> str:
     if len(value) < min_length:
         raise MissingSecretError(
