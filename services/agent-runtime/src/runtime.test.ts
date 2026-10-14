@@ -61,12 +61,14 @@ describe("OrbaAgent Runtime & Security Foundation", () => {
       const allDefs = registry.getAllToolDefinitions();
 
       expect(activeTools).toEqual([
+        "task_plan",
+        "task_step",
         "tools_search",
         "environment_inspect",
         "capabilities_inspect",
         "task_complete",
       ]);
-      expect(activeDefs.length).toBe(4);
+      expect(activeDefs.length).toBe(6);
       expect(allDefs.length).toBeGreaterThanOrEqual(15);
 
       const reductionPct = ((allDefs.length - activeDefs.length) / allDefs.length) * 100;
@@ -101,6 +103,8 @@ describe("OrbaAgent Runtime & Security Foundation", () => {
 
       registry.pruneTools();
       expect(registry.getActiveToolNames()).toEqual([
+        "task_plan",
+        "task_step",
         "tools_search",
         "environment_inspect",
         "capabilities_inspect",

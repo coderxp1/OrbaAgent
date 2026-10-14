@@ -480,6 +480,8 @@ rl.on('line', (line) => {
       // 1. Reset registry to bare minimum core tools
       registry.resetActiveToolsToCore();
       expect(registry.getActiveToolNames()).toEqual([
+        "task_plan",
+        "task_step",
         "tools_search",
         "environment_inspect",
         "capabilities_inspect",

@@ -2,6 +2,7 @@ import {
   AgentMemoryManager,
   ChangeReviewManager,
   IntegrationsManager,
+  TaskPlanManager,
   ToolRegistry,
   ToolRouter,
 } from "@orbaagent/agent-runtime";
@@ -122,9 +123,30 @@ export class AgentOrchestrator {
     const memoryManager = AgentMemoryManager.getInstance();
     const memoryPrompt = memoryManager.generateMemoryPrompt(workspaceId, userId);
 
-    const systemContext = memoryPrompt
+    const planManager = TaskPlanManager.getInstance();
+    const existingPlan = planManager.getActivePlan(workspaceId);
+    let planContext = "";
+    if (existingPlan && existingPlan.status !== "completed") {
+      const pendingSteps = existingPlan.steps.filter((s) => s.status !== "completed" && s.status !== "skipped");
+      planContext = `\n\n## Resumed Active Plan (${existingPlan.planId})\nGoal: ${existingPlan.goal}\nRemaining Steps:\n${pendingSteps
+        .map((s) => `- ${s.id}: ${s.title} [${s.status}]`)
+        .join("\n")}\nResume execution from the next pending step. Do not repeat already completed steps.\n`;
+    }
+
+    const autonomousPolicy = `
+## Autonomous Coding & Verification Policy
+1. When assigned a technical goal or bug repair, use 'task_plan' to decompose the goal into structured, ordered steps with dependencies and acceptance criteria.
+2. Search and activate relevant tools using 'tools_search' (e.g. read_file, write_file, edit_file, execute_shell, test_runner).
+3. Execute real changes in the workspace and track step progression with 'task_step'.
+4. Before concluding, verify the work by running tests or checks ('test_runner', 'lint_typecheck', or 'execute_shell').
+5. If verification fails, diagnose the error, modify the files to fix the issue, and rerun verification.
+6. Call 'task_complete' only after all steps are completed and verification has confirmed the work.
+`;
+
+    let systemContext = memoryPrompt
       ? `${capabilityPrompt}\n\n${memoryPrompt}`
       : capabilityPrompt;
+    systemContext += autonomousPolicy + planContext;
 
     // Prepare current messages history
     const currentMessages: ChatMessage[] = [...rawRequest.messages];
@@ -185,14 +207,44 @@ export class AgentOrchestrator {
         }
       }
 
-      // Check if task completed tool was invoked
-      const hasTaskCompleteCall = pendingToolCalls.some((c) => c.name === "task_complete");
-      if (hasTaskCompleteCall) {
-        isExplicitlyCompleted = true;
-      }
-
       // Case 1: No tool calls were produced in this turn
       if (pendingToolCalls.length === 0) {
+        const activePlan = planManager.getActivePlan(workspaceId);
+        const planEval = activePlan ? planManager.evaluatePlanCompletion(activePlan.planId) : null;
+
+        if (
+          planEval &&
+          !planEval.canComplete &&
+          iteration < this.maxIterations
+        ) {
+          const nextStep = planManager.getNextExecutableStep(activePlan!.planId);
+          currentMessages.push({
+            role: "assistant",
+            content: stepText,
+          });
+
+          const continuePrompt = nextStep
+            ? `Your active plan '${activePlan!.planId}' is in progress (${planEval.completedSteps}/${planEval.totalSteps} steps completed). Proceed immediately with step '${nextStep.id}: ${nextStep.title}'. Execute the required tools to fulfill its criteria and update the step.`
+            : `Your active plan '${activePlan!.planId}' has pending or failed steps. Diagnose any failures, repair them, run tests, and continue until all acceptance criteria are verified.`;
+
+          currentMessages.push({
+            role: "user",
+            content: continuePrompt,
+          });
+
+          yield {
+            type: "agent_activity",
+            traceId: trace.traceId,
+            activity: {
+              step: "Auto-continuing planned workflow",
+              status: "in_progress",
+              details: `Executing step in plan ${activePlan!.planId} (${planEval.completedSteps}/${planEval.totalSteps} completed)`,
+            },
+          };
+
+          continue;
+        }
+
         if (
           hasExecutedAnyTools &&
           indicatesPendingAction(stepText) &&
@@ -328,6 +380,47 @@ export class AgentOrchestrator {
             type: "tools_discovered",
             traceId: trace.traceId,
             discoveredTools: (result.metadata as any).discoveredTools as string[],
+          };
+        }
+
+        if (call.name === "task_plan" && result.success && (result.metadata as any)?.plan) {
+          yield {
+            type: "task_plan_updated",
+            traceId: trace.traceId,
+            taskPlan: (result.metadata as any).plan,
+          };
+        }
+
+        if (call.name === "task_step" && result.success) {
+          if ((result.metadata as any)?.step) {
+            yield {
+              type: "task_step_updated",
+              traceId: trace.traceId,
+              taskStep: (result.metadata as any).step,
+            };
+          }
+          const planId = (result.metadata as any)?.planId;
+          if (planId) {
+            const p = planManager.getPlan(planId);
+            if (p) {
+              yield {
+                type: "task_plan_updated",
+                traceId: trace.traceId,
+                taskPlan: p,
+              };
+            }
+          }
+        }
+
+        if (call.name === "test_runner" || call.name === "lint_typecheck") {
+          yield {
+            type: "task_verification",
+            traceId: trace.traceId,
+            verification: {
+              checkName: call.name,
+              passed: result.success,
+              evidence: result.output || result.error || "",
+            },
           };
         }
 

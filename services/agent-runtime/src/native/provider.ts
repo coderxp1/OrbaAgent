@@ -22,6 +22,8 @@ import { PackageManagerTool } from "../tools/packageManager.js";
 import { ProcessManagerTool } from "../tools/processManager.js";
 import { ShellTool } from "../tools/shell.js";
 import { TaskCompleteTool } from "../tools/taskComplete.js";
+import { TaskPlanTool } from "../tools/taskPlanTool.js";
+import { TaskStepTool } from "../tools/taskStepTool.js";
 import { TestRunnerTool } from "../tools/testRunner.js";
 import type { IToolSearchableRegistry } from "../tools/toolsSearch.js";
 import { MediaImageGenerateTool } from "../tools/mediaImageGenerate.js";
@@ -40,6 +42,8 @@ export class NativeProvider {
     this.tools.push(
       new CapabilitiesInspectTool(registry as any),
       new EnvironmentInspectTool(),
+      new TaskPlanTool(),
+      new TaskStepTool(),
       new TaskCompleteTool(),
       new ShellTool(),
       new ListFilesTool(),

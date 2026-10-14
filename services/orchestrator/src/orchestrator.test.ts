@@ -271,11 +271,11 @@ describe("AgentOrchestrator State Machine & Autonomous Execution", () => {
 
     expect(turn).toBe(3);
 
-    // Turn 1 had ONLY core tools injected (tools_search, environment_inspect, capabilities_inspect, task_complete)
-    expect(toolsInEachTurn[0]).toBe(4);
+    // Turn 1 had ONLY core tools injected (task_plan, task_step, tools_search, environment_inspect, capabilities_inspect, task_complete)
+    expect(toolsInEachTurn[0]).toBe(6);
 
     // Turn 2 had dynamically expanded active tools including execute_git
-    expect(toolsInEachTurn[1]).toBeGreaterThan(4);
+    expect(toolsInEachTurn[1]).toBeGreaterThan(6);
 
     // Events emitted include permission_requested, permission_granted, audit_logged, tools_discovered
     const permReqEvents = events.filter((e) => e.type === "permission_requested");

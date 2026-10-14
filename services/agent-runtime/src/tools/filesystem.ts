@@ -111,7 +111,7 @@ export class ReadFileTool implements ITool {
   ): Promise<ToolExecutionResult> {
     const startTime = Date.now();
     const toolCallId = (args._toolCallId as string) || `tc_read_${Date.now()}`;
-    const filePath = String(args.filePath || "");
+    const filePath = String(args.filePath || args.path || "");
 
     try {
       const targetPath = resolveSafePath(context.workspaceDir, filePath);
@@ -177,7 +177,7 @@ export class WriteFileTool implements ITool {
   ): Promise<ToolExecutionResult> {
     const startTime = Date.now();
     const toolCallId = (args._toolCallId as string) || `tc_write_${Date.now()}`;
-    const filePath = String(args.filePath || "");
+    const filePath = String(args.filePath || args.path || "");
     const content = String(args.content ?? "");
 
     try {
@@ -253,7 +253,7 @@ export class EditFileTool implements ITool {
   ): Promise<ToolExecutionResult> {
     const startTime = Date.now();
     const toolCallId = (args._toolCallId as string) || `tc_edit_${Date.now()}`;
-    const filePath = String(args.filePath || "");
+    const filePath = String(args.filePath || args.path || "");
     const targetContent = String(args.targetContent || "");
     const replacementContent = String(args.replacementContent || "");
 

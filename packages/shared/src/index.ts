@@ -328,6 +328,57 @@ export const UsageStatsSchema = z.object({
 });
 export type UsageStats = z.infer<typeof UsageStatsSchema>;
 
+export const TaskStepStatusSchema = z.enum([
+  "pending",
+  "running",
+  "completed",
+  "failed",
+  "skipped",
+]);
+export type TaskStepStatus = z.infer<typeof TaskStepStatusSchema>;
+
+export const TaskStepSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  description: z.string().optional(),
+  dependencies: z.array(z.string()).default([]),
+  acceptanceCriteria: z.array(z.string()).default([]),
+  status: TaskStepStatusSchema.default("pending"),
+  assignedTool: z.string().optional(),
+  toolArguments: z.record(z.unknown()).optional(),
+  resultEvidence: z.string().optional(),
+  error: z.string().optional(),
+  attempts: z.number().int().nonnegative().default(0),
+  startedAt: z.string().optional(),
+  completedAt: z.string().optional(),
+});
+export type TaskStep = z.infer<typeof TaskStepSchema>;
+
+export const TaskPlanStatusSchema = z.enum([
+  "planning",
+  "in_progress",
+  "verifying",
+  "completed",
+  "failed",
+  "interrupted",
+]);
+export type TaskPlanStatus = z.infer<typeof TaskPlanStatusSchema>;
+
+export const TaskPlanSchema = z.object({
+  planId: z.string(),
+  goal: z.string(),
+  workspaceId: z.string(),
+  status: TaskPlanStatusSchema.default("planning"),
+  steps: z.array(TaskStepSchema).default([]),
+  currentStepId: z.string().optional(),
+  verificationCriteria: z.array(z.string()).default([]),
+  maxRetriesPerStep: z.number().int().positive().default(3),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  completedAt: z.string().optional(),
+});
+export type TaskPlan = z.infer<typeof TaskPlanSchema>;
+
 export const NormalizedEventTypeSchema = z.enum([
   "text_delta",
   "thinking_delta",
@@ -350,6 +401,9 @@ export const NormalizedEventTypeSchema = z.enum([
   "permission_granted",
   "permission_denied",
   "audit_logged",
+  "task_plan_updated",
+  "task_step_updated",
+  "task_verification",
 ]);
 export type NormalizedEventType = z.infer<typeof NormalizedEventTypeSchema>;
 
@@ -368,6 +422,15 @@ export const NormalizedEventSchema = z.object({
   toolCall: ToolCallSchema.optional(),
   toolResult: ToolExecutionResultSchema.optional(),
   activity: AgentActivitySchema.optional(),
+  taskPlan: TaskPlanSchema.optional(),
+  taskStep: TaskStepSchema.optional(),
+  verification: z
+    .object({
+      checkName: z.string(),
+      passed: z.boolean(),
+      evidence: z.string(),
+    })
+    .optional(),
   usage: UsageStatsSchema.optional(),
   executionSessionId: z.string().optional(),
   command: z.string().optional(),

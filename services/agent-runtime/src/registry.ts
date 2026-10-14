@@ -38,6 +38,8 @@ import { WebFetchTool } from "./tools/web.js";
 export class ToolRegistry implements IToolSearchableRegistry {
   private readonly tools: Map<string, ITool> = new Map();
   private readonly coreToolNames: Set<string> = new Set([
+    "task_plan",
+    "task_step",
     "tools_search",
     "environment_inspect",
     "capabilities_inspect",
