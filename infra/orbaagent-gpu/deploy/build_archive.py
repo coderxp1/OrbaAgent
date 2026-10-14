@@ -47,7 +47,7 @@ def get_files_to_pack() -> list[tuple[Path, str]]:
     items: list[tuple[Path, str]] = []
 
     # Root files
-    for name in ("Dockerfile", "worker.py"):
+    for name in ("Dockerfile", "Dockerfile.comfyui", "worker.py"):
         p = REPO_ROOT / name
         if p.is_file():
             items.append((p, name))

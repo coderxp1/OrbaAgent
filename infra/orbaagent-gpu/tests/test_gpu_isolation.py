@@ -182,7 +182,51 @@ class TestDockerfile:
             assert package in text, f"{package} must be installed for the real backend"
         assert "ffmpeg" in text, "ffmpeg/ffprobe is required for video validation"
 
+    def test_comfyui_dockerfile_isolation(self):
+        comfy_path = GPU_ROOT / "Dockerfile.comfyui"
+        assert comfy_path.is_file(), "Dockerfile.comfyui must exist in repository root"
+        text = comfy_path.read_text(encoding="utf-8")
+        assert "--gpus" not in text
+        assert "MEDIA_WORKER_TOKEN=" not in text
+        assert "pytorch/pytorch:2.8.0-cuda12.8-cudnn9-runtime" in text
+        assert "USER orba-media" in text
 
+    def test_all_compose_build_dockerfiles_exist_and_are_packaged(self):
+        """Every dockerfile referenced in compose.yaml services MUST exist in the build context,
+        be packaged in build_archive, be permitted in bootstrap allowlist, and installed by provision.
+        """
+        import yaml
+        from deploy import build_archive
+        from deploy import bootstrap_provision as bp
+
+        compose_data = yaml.safe_load(COMPOSE_PATH.read_text(encoding="utf-8"))
+        packed_names = {rel_path for _, rel_path in build_archive.get_files_to_pack()}
+        prov_text = (GPU_ROOT / "deploy" / "provision-gpu-host.sh").read_text(encoding="utf-8")
+        bash_bootstrap_text = (GPU_ROOT / "deploy" / "bootstrap-provision.sh").read_text(encoding="utf-8")
+
+        for service_name, config in compose_data.get("services", {}).items():
+            build_cfg = config.get("build")
+            if not build_cfg:
+                continue
+            dockerfile_name = build_cfg.get("dockerfile", "Dockerfile")
+            dockerfile_path = GPU_ROOT / dockerfile_name
+
+            assert dockerfile_path.is_file(), (
+                f"Service {service_name} specifies dockerfile '{dockerfile_name}', "
+                f"but {dockerfile_path} does not exist!"
+            )
+            assert dockerfile_name in packed_names, (
+                f"dockerfile '{dockerfile_name}' for service {service_name} is not packed by build_archive!"
+            )
+            assert dockerfile_name in bp.ALLOWED_EXACT, (
+                f"dockerfile '{dockerfile_name}' for service {service_name} is missing from python bootstrap ALLOWED_EXACT!"
+            )
+            assert dockerfile_name in bash_bootstrap_text, (
+                f"dockerfile '{dockerfile_name}' for service {service_name} is missing from bash bootstrap ALLOWED_EXACT!"
+            )
+            assert f'"{dockerfile_name}"' in prov_text or f"/{dockerfile_name}" in prov_text, (
+                f"dockerfile '{dockerfile_name}' for service {service_name} is not installed by provision-gpu-host.sh!"
+            )
 
 
 class TestWorkerSourceHygiene:

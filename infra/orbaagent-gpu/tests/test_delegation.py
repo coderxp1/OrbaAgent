@@ -401,6 +401,7 @@ class TestBuildContextImmutability:
 
     def test_worker_code_is_actually_copied_into_the_build_context(self, provision_code):
         assert '"$SOURCE_DIR/Dockerfile"' in provision_code
+        assert '"$SOURCE_DIR/Dockerfile.comfyui"' in provision_code
         assert '"$SOURCE_DIR/worker.py"' in provision_code
         assert '"$SOURCE_DIR/orba_gpu"' in provision_code
 

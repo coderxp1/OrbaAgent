@@ -33,6 +33,7 @@ EXPECTED_SHA256 = "4e6f50c11d6c127a592e33e63e259662e5c0ab739c67be841f4300ca81da9
 # Exact file whitelist (relative paths inside archive)
 ALLOWED_EXACT: tuple[str, ...] = (
     "Dockerfile",
+    "Dockerfile.comfyui",
     "worker.py",
     "deploy/provision-gpu-host.sh",
     "deploy/orbaagent-gpu",

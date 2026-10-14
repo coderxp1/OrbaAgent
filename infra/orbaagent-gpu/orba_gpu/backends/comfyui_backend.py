@@ -229,18 +229,69 @@ class ComfyUIBackend:
         try:
             frames = sorted([f for f in os.listdir(COMFYUI_OUTPUT_DIR) if f.startswith(prefix) and f.endswith(".png")])
             if not frames:
+                logger.error("ComfyUI video workflow finished but produced no frame files with prefix %s", prefix)
                 return False
-                
-            # If the output format expects a video file, we need to stitch it.
-            # But wait, earlier diffusers exported to mp4. Let's stitch with ffmpeg.
-            # The worker image has `ffmpeg` installed (see Dockerfile).
+
+            actual_ffmpeg = "ffmpeg"
+            if not shutil.which(actual_ffmpeg):
+                try:
+                    import imageio_ffmpeg
+                    actual_ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+                except Exception:
+                    actual_ffmpeg = "ffmpeg"
+
             import subprocess
-            frame_pattern = os.path.join(COMFYUI_OUTPUT_DIR, f"{prefix}_%05d.png")
-            # Create mp4
-            subprocess.run([
-                "ffmpeg", "-y", "-framerate", "8", "-i", frame_pattern,
-                "-c:v", "libx264", "-pix_fmt", "yuv420p", output_path
-            ], check=True)
+            import tempfile
+
+            # Create a concat demuxer manifest to robustly handle any ComfyUI frame numbering scheme
+            concat_path = None
+            try:
+                with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as concat_file:
+                    concat_path = concat_file.name
+                    for frame in frames:
+                        frame_path = os.path.join(COMFYUI_OUTPUT_DIR, frame).replace("\\", "/")
+                        concat_file.write(f"file '{frame_path}'\nduration 0.125\n")
+                    # Trailing file entry required by ffmpeg concat demuxer
+                    if frames:
+                        last_frame = os.path.join(COMFYUI_OUTPUT_DIR, frames[-1]).replace("\\", "/")
+                        concat_file.write(f"file '{last_frame}'\n")
+
+                subprocess.run(
+                    [
+                        actual_ffmpeg,
+                        "-y",
+                        "-f", "concat",
+                        "-safe", "0",
+                        "-i", concat_path,
+                        "-c:v", "libx264",
+                        "-pix_fmt", "yuv420p",
+                        "-r", "8",
+                        "-movflags", "+faststart",
+                        str(output_path),
+                    ],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=300,
+                )
+            finally:
+                if concat_path and os.path.exists(concat_path):
+                    try:
+                        os.unlink(concat_path)
+                    except OSError:
+                        pass
+
+            if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
+                logger.error("ComfyUI video stitching failed to produce valid MP4 artifact at %s", output_path)
+                return False
+
+            # Verify that output file has valid MP4 signature ('ftyp' box in first 16 bytes)
+            with open(output_path, "rb") as vf:
+                header = vf.read(16)
+                if b"ftyp" not in header:
+                    logger.error("Generated video file at %s lacks valid MP4 ftyp container header", output_path)
+                    return False
+
             return True
         except Exception as e:
             logger.error(f"Failed to process ComfyUI video output: {e}")
