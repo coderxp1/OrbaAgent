@@ -172,11 +172,11 @@ class TestSudoersPolicy:
         for rule in rules:
             tail = rule.split("/usr/local/sbin/orbaagent-gpu", 1)[1].strip()
             granted.add(tail or "help")
-        for expected in ("up", "down", "restart", "status", "build", "validate", "health", "help"):
+        for expected in ("up", "down", "restart", "deploy-worker", "restart-worker", "status", "build", "validate", "health", "help"):
             assert expected in granted, f"{expected} should be delegable"
         # And nothing beyond that list.
         allowed_prefixes = {
-            "up", "down", "restart", "status", "build", "validate", "health", "help", "logs", "logs *",
+            "up", "down", "restart", "deploy-worker", "restart-worker", "status", "build", "validate", "health", "help", "logs", "logs *",
         }
         assert granted <= allowed_prefixes, f"unexpected grants: {granted - allowed_prefixes}"
 
@@ -241,7 +241,7 @@ class TestWrapperScript:
             assert forbidden not in code, f"wrapper must not perform {forbidden}"
 
     def test_case_statement_enumerates_every_command(self, text):
-        for command in ("up)", "down)", "restart)", "status)", "logs)", "build)", "validate)", "health)", "help|"):
+        for command in ("up)", "down)", "restart)", "deploy-worker)", "restart-worker)", "status)", "logs)", "build)", "validate)", "health)", "help|"):
             assert command in text, f"missing case branch {command}"
 
     def test_rejects_unknown_commands(self, text):
@@ -249,11 +249,30 @@ class TestWrapperScript:
 
     def test_validates_isolation_after_start(self, text):
         assert "validate_isolation" in text
-        # `up` and `restart` must both re-validate.
-        up_block = text.split("    up)", 1)[1].split(";;", 1)[0]
-        assert "validate_isolation" in up_block
-        restart_block = text.split("    restart)", 1)[1].split(";;", 1)[0]
-        assert "validate_isolation" in restart_block
+        # `up`, `restart`, `deploy-worker`, and `restart-worker` must all re-validate.
+        for branch in ("up)", "restart)", "deploy-worker)", "restart-worker)"):
+            block = text.split(f"    {branch}", 1)[1].split(";;", 1)[0]
+            assert "validate_isolation" in block, f"{branch} must validate isolation"
+
+    def test_deploy_worker_targets_only_worker_container_with_no_deps(self, text):
+        """deploy-worker must use --no-deps and target only orbaagent-gpu-worker,
+        preventing orbaagent-ollama or other services from being restarted or recreated.
+        """
+        deploy_block = text.split("    deploy-worker)", 1)[1].split(";;", 1)[0]
+        code = "\n".join(line.split("#", 1)[0] for line in deploy_block.splitlines())
+        assert "up -d --no-deps orbaagent-gpu-worker" in code
+        assert "validate_isolation" in code
+        assert "ollama" not in code
+        assert "comfyui" not in code
+
+    def test_restart_worker_targets_only_worker_container(self, text):
+        """restart-worker must target only orbaagent-gpu-worker without touching other services."""
+        restart_block = text.split("    restart-worker)", 1)[1].split(";;", 1)[0]
+        code = "\n".join(line.split("#", 1)[0] for line in restart_block.splitlines())
+        assert "restart orbaagent-gpu-worker" in code
+        assert "validate_isolation" in code
+        assert "ollama" not in code
+        assert "comfyui" not in code
 
     def test_uses_a_literal_compose_path(self, text):
         assert 'COMPOSE_FILE="/etc/orbaagent/gpu-worker/compose.yaml"' in text

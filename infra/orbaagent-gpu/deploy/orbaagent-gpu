@@ -18,6 +18,8 @@
 #   orbaagent-gpu up              start (idempotent)
 #   orbaagent-gpu down            stop and remove the worker container
 #   orbaagent-gpu restart         restart the worker container
+#   orbaagent-gpu deploy-worker   recreate and replace ONLY the worker container with the built image
+#   orbaagent-gpu restart-worker  restart ONLY the worker container without touching other services
 #   orbaagent-gpu status          `docker compose ps` for this project only
 #   orbaagent-gpu logs [N]        last N (default 100) log lines, N in 1..2000
 #   orbaagent-gpu build           build the worker image from the fixed context
@@ -123,6 +125,8 @@ Usage: orbaagent-gpu <command> [args]
   up                 start the worker (idempotent), then validate isolation
   down               stop and remove the worker container
   restart            restart the worker container
+  deploy-worker      recreate and replace ONLY the worker container with the built image
+  restart-worker     restart ONLY the worker container without touching other services
   status             show container status for this project
   logs [lines]       show the last N log lines (default 100, max 2000)
   build              build the worker image from the fixed build context
@@ -146,6 +150,17 @@ case "${1:-}" in
         ;;
     restart)
         docker_compose restart || exit $?
+        validate_isolation || exit $?
+        ;;
+    deploy-worker)
+        # Narrowly scoped: recreates ONLY the worker container with the newly built image
+        # using --no-deps so orbaagent-ollama and other services are never restarted or recreated.
+        docker_compose up -d --no-deps orbaagent-gpu-worker || exit $?
+        validate_isolation || exit $?
+        ;;
+    restart-worker)
+        # Narrowly scoped: restarts ONLY the worker container process without touching other services.
+        docker_compose restart orbaagent-gpu-worker || exit $?
         validate_isolation || exit $?
         ;;
     status)
