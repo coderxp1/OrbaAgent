@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-DEFAULT_EXPECTED_SHA256="10b725141d6544759d2e5c78dfeb2a949c692278367dc876ef206d0ad80fcebb"
+DEFAULT_EXPECTED_SHA256="3ce665d9bf35b8c86063b659daf80adcbe1f35dce13eefa9c864cf2da5f4c70e"
 # Whitelist: allowed exact paths or allowed subtrees
 export ALLOWED_EXACT="Dockerfile
 Dockerfile.comfyui
@@ -201,7 +201,7 @@ if [ -f "$TMPDIR/deploy/orbaagent-gpu" ]; then
   chmod 0755 "$TMPDIR/deploy/orbaagent-gpu"
 fi
 
-EXPECTED_PROV_SCRIPT_HASH="0e3acd72970ca54eeb6b685079c4390225512db6225744e33b89c8971a293156"
+EXPECTED_PROV_SCRIPT_HASH="d5672be72ae0ef61a54b9d95e343fc91778f4710063a330b1643deb45b6f7db5"
 PROV_SCRIPT_HASH=$(sha256sum "$PROV_SCRIPT" | awk '{print $1}')
 if [ "$PROV_SCRIPT_HASH" != "$EXPECTED_PROV_SCRIPT_HASH" ]; then
   die "provisioning script hash mismatch! Expected: $EXPECTED_PROV_SCRIPT_HASH, Actual: $PROV_SCRIPT_HASH"

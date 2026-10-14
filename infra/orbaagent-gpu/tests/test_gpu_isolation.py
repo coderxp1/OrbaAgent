@@ -222,6 +222,24 @@ class TestDockerfile:
         user_idx = text.index("USER orba-media")
         assert user_idx > chown_idx, "USER switch to orba-media must occur after chown"
 
+    def test_comfyui_dockerfile_dependencies_and_no_invalid_custom_node_clones(self):
+        """Regression test: Do not clone kernel libraries or memory allocators into custom_nodes.
+        Packages such as comfy-kitchen and comfy-aimdo are PyPI dependencies specified in
+        ComfyUI's requirements.txt, not standalone ComfyUI custom nodes.
+        Also verify that pip installs from requirements.txt without hardcoding non-existent git repos.
+        """
+        comfy_path = GPU_ROOT / "Dockerfile.comfyui"
+        text = comfy_path.read_text(encoding="utf-8")
+
+        # Invalid legacy URLs must not exist in Dockerfile
+        assert "comfyui-kitchen.git" not in text, "Kernel library comfy-kitchen must not be cloned as a custom node"
+        assert "comfyui-aimdo.git" not in text, "VRAM allocator comfy-aimdo must not be cloned as a custom node"
+        assert "comfy-kitchen.git" not in text
+        assert "comfy-aimdo.git" not in text
+
+        # Requirements installation must be present
+        assert "pip install --no-cache-dir --user -r /app/ComfyUI/requirements.txt" in text
+
     def test_all_compose_build_dockerfiles_exist_and_are_packaged(self):
         """Every dockerfile referenced in compose.yaml services MUST exist in the build context,
         be packaged in build_archive, be permitted in bootstrap allowlist, and installed by provision.
