@@ -18,7 +18,7 @@ export async function POST(request: Request) {
       body.trace?.traceId || `trace_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 
     // Server-side verified context
-    const verifiedTenantId = process.env.ORBA_TENANT_ID || "authenticated-tenant";
+    const verifiedTenantId = process.env.ORBA_TENANT_ID || "default-tenant";
     const verifiedUserId = process.env.ORBA_USER_ID || "authenticated-user";
 
     // Read GitHub token from cookie, header, or environment

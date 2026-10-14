@@ -1,12 +1,18 @@
 import type { ToolDefinition, ToolExecutionResult, ToolMetadata } from "@orbaagent/shared";
 import type { ITool, ToolExecutionContext } from "./base.js";
-import { getMediaWorkerConfig, unavailableMediaResult } from "./mediaWorkerConfig.js";
+import {
+  FIRST_REQUEST_TIMEOUT_MS,
+  type GpuWorkerHealth,
+  getMediaWorkerConfig,
+  isLazyLoadAllowed,
+  unavailableMediaResult,
+} from "./mediaWorkerConfig.js";
 
 export class MediaImageGenerateTool implements ITool {
   public readonly definition: ToolDefinition = {
     name: "media_image_generate",
     description:
-      "Generate an AI image using dedicated GPU 1 media worker. Returns job ID, status, artifact path, and generation metadata.",
+      "Generate an AI image using dedicated GPU 1 media worker. Returns job ID, status, accessible artifact URL, and generation metadata. When successful, present the generated image to the user in markdown using the returned artifactUrl: ![Description](artifactUrl).",
     parameters: {
       type: "object",
       properties: {
@@ -94,7 +100,9 @@ export class MediaImageGenerateTool implements ITool {
       }).catch(() => null);
 
       if (!healthRes || !healthRes.ok) {
-        console.error(`[MEDIA GENERATION DIAGNOSTIC] GPU media worker health check failed. Response: ${healthRes ? healthRes.status : 'network error'}`);
+        console.error(
+          `[MEDIA GENERATION DIAGNOSTIC] GPU media worker health check failed. Response: ${healthRes ? healthRes.status : "network error"}`,
+        );
         return {
           toolCallId,
           name: this.definition.name,
@@ -111,13 +119,20 @@ export class MediaImageGenerateTool implements ITool {
       // Defence in depth: only trust a worker that reports a real generation
       // backend. A worker can be reachable while running no model at all, and an
       // older build answered generation requests with fabricated output.
-      const health = (await healthRes.json().catch(() => null)) as {
-        capabilities?: { image_generation?: boolean };
-        generation_backend?: string | null;
-      } | null;
+      const health = (await healthRes.json().catch(() => null)) as GpuWorkerHealth | null;
 
-      if (!health?.capabilities?.image_generation) {
-        console.error(`[MEDIA GENERATION DIAGNOSTIC] MEDIA_GENERATION_UNAVAILABLE: the GPU worker is reachable but reports no real image generation backend (generation_backend=${health?.generation_backend ?? "none"}).`);
+      // The worker reports capabilities.image_generation = true only AFTER the
+      // model has been loaded into GPU memory. When the worker is configured
+      // with generation_backend="diffusers" but has not received its first
+      // request yet, the capability is false and unavailable_reason explains
+      // that the first request will trigger loading. We must allow that case.
+      const capabilityReady = health?.capabilities?.image_generation === true;
+      const lazyLoadPending = isLazyLoadAllowed(health);
+
+      if (!capabilityReady && !lazyLoadPending) {
+        console.error(
+          `[MEDIA GENERATION DIAGNOSTIC] MEDIA_GENERATION_UNAVAILABLE: the GPU worker is reachable but reports no real image generation backend (generation_backend=${health?.generation_backend ?? "none"}).`,
+        );
         return {
           toolCallId,
           name: this.definition.name,
@@ -130,6 +145,9 @@ export class MediaImageGenerateTool implements ITool {
           executionTimeMs: Date.now() - startTime,
         };
       }
+
+      // Use an extended timeout for the first request (model loading).
+      const requestTimeout = lazyLoadPending ? FIRST_REQUEST_TIMEOUT_MS : 120_000;
 
       // 2. Submit image generation job to dedicated GPU worker
       const jobRes = await fetch(`${workerUrl}/api/generate/image`, {
@@ -148,12 +166,14 @@ export class MediaImageGenerateTool implements ITool {
           model: args.model || "flux1-schnell",
           output_format: args.output_format || "png",
         }),
-        signal: AbortSignal.timeout(120000),
+        signal: AbortSignal.timeout(requestTimeout),
       });
 
       if (!jobRes.ok) {
         const errorText = await jobRes.text().catch(() => "Unknown error");
-        console.error(`[MEDIA GENERATION DIAGNOSTIC] GPU image generation failed with status ${jobRes.status}: ${errorText}`);
+        console.error(
+          `[MEDIA GENERATION DIAGNOSTIC] GPU image generation failed with status ${jobRes.status}: ${errorText}`,
+        );
         return {
           toolCallId,
           name: this.definition.name,
@@ -167,6 +187,33 @@ export class MediaImageGenerateTool implements ITool {
       const result = await jobRes.json();
       const durationMs = Date.now() - startTime;
 
+      // If delivery to production failed, report the failure truthfully
+      if (
+        result.delivered === false ||
+        (typeof result.ingest_note === "string" && result.ingest_note.includes("ingest failed"))
+      ) {
+        console.error(
+          `[MEDIA GENERATION DIAGNOSTIC] GPU image generated successfully but artifact delivery failed: ${result.ingest_note}`,
+        );
+        return {
+          toolCallId,
+          name: this.definition.name,
+          success: false,
+          output: "",
+          error: `Image generated on GPU host, but artifact delivery to the web application failed (${result.ingest_note || "Ingest rejected"}). Artifact is not retrievable.`,
+          metadata: result,
+          executionTimeMs: durationMs,
+        };
+      }
+
+      const artifactUrl = result.artifactUrl || result.artifact_url || "";
+      const artifactPath =
+        result.artifactPath ||
+        result.artifact_path ||
+        result.artifact_id ||
+        result.artifactId ||
+        "";
+
       return {
         toolCallId,
         name: this.definition.name,
@@ -175,10 +222,12 @@ export class MediaImageGenerateTool implements ITool {
           {
             status: "COMPLETED",
             jobId: result.jobId || `job_${Date.now()}`,
-            artifactPath: result.artifactPath,
-            artifactUrl: result.artifactUrl,
+            artifactPath,
+            artifactUrl,
+            markdown: artifactUrl ? `![Generated Image: ${prompt}](${artifactUrl})` : undefined,
             model: result.model || args.model || "flux1-schnell",
             dimensions: `${args.width || 1024}x${args.height || 1024}`,
+            delivered: result.delivered !== false,
             executionDurationMs: durationMs,
           },
           null,
@@ -188,7 +237,9 @@ export class MediaImageGenerateTool implements ITool {
         executionTimeMs: durationMs,
       };
     } catch (err: any) {
-      console.error(`[MEDIA GENERATION DIAGNOSTIC] GPU generation request failed: ${err.message || String(err)}`);
+      console.error(
+        `[MEDIA GENERATION DIAGNOSTIC] GPU generation request failed: ${err.message || String(err)}`,
+      );
       return {
         toolCallId,
         name: this.definition.name,

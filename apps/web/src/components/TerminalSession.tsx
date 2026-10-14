@@ -185,6 +185,60 @@ export function TerminalSession({
                     <span>Executing command...</span>
                   </div>
                 ) : null}
+
+                {/* Inline Media Artifact Preview */}
+                {(() => {
+                  if (!res || !res.output) return null;
+                  try {
+                    const parsed = JSON.parse(res.output);
+                    const url = parsed.artifactUrl || parsed.artifact_url;
+                    if (typeof url === "string" && url.startsWith("/api/artifacts/")) {
+                      const isVideo = url.endsWith(".mp4") || url.endsWith(".webm") || item.call.name.includes("video");
+                      return (
+                        <div className="pl-4 pt-1.5">
+                          <div className="group/artifact relative inline-block rounded-xl overflow-hidden border border-zinc-750 bg-zinc-950/80 shadow-md max-w-sm">
+                            {isVideo ? (
+                              <video
+                                src={url}
+                                controls
+                                className="max-h-60 w-full object-contain bg-black"
+                              />
+                            ) : (
+                              <a
+                                href={url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="block relative overflow-hidden group/img"
+                              >
+                                <img
+                                  src={url}
+                                  alt="Generated Artifact"
+                                  className="max-h-60 w-full object-contain rounded-t-xl transition-transform duration-200 group-hover/img:scale-[1.02]"
+                                  loading="lazy"
+                                />
+                                <span className="absolute inset-0 bg-black/40 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center text-white text-[11px] font-medium">
+                                  View full size ↗
+                                </span>
+                              </a>
+                            )}
+                            <div className="p-2 flex items-center justify-between border-t border-zinc-800 bg-zinc-900/90 text-[10px] text-zinc-400">
+                              <span className="font-mono truncate">{url.split("/").pop()}</span>
+                              <a
+                                href={url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-indigo-400 hover:text-indigo-300 underline ml-2 shrink-0 font-sans"
+                              >
+                                Open artifact ↗
+                              </a>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    }
+                  } catch {}
+                  return null;
+                })()}
               </div>
             );
           })}

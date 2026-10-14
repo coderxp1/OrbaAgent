@@ -55,7 +55,7 @@ services:
       - MEDIA_MAX_CONCURRENT_GENERATIONS=${MEDIA_MAX_CONCURRENT_GENERATIONS:-1}
       # Secrets are files, never values. They do not appear in `docker inspect`.
       - MEDIA_WORKER_TOKEN_FILE=/run/secrets/media_worker_token
-      - MEDIA_INGEST_URL=${MEDIA_INGEST_URL:-}
+      - MEDIA_INGEST_URL=${MEDIA_INGEST_URL:-https://orbaagent.dev/api/internal/media/ingest}
       - MEDIA_INGEST_TOKEN_FILE=/run/secrets/media_ingest_token
       - ORBA_TENANT_ID=${ORBA_TENANT_ID:-}
     secrets:
@@ -72,6 +72,8 @@ services:
       - orbaagent_data:/data
     networks:
       - orbaagent_media_net
+    extra_hosts:
+      - "orbaagent.dev:10.77.0.1"
     deploy:
       resources:
         reservations:

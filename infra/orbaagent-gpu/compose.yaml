@@ -59,7 +59,7 @@ services:
       - MEDIA_WORKER_TOKEN_FILE=/run/secrets/media_worker_token
       # Token used to deliver generated artifacts to production. The GPU host and
       # the production host share no filesystem.
-      - MEDIA_INGEST_URL=${MEDIA_INGEST_URL:-}
+      - MEDIA_INGEST_URL=${MEDIA_INGEST_URL:-https://orbaagent.dev/api/internal/media/ingest}
       - MEDIA_INGEST_TOKEN_FILE=/run/secrets/media_ingest_token
       - ORBA_TENANT_ID=${ORBA_TENANT_ID:-}
     secrets:
@@ -73,6 +73,8 @@ services:
       - ./data:/data
     networks:
       - orbaagent_media_net
+    extra_hosts:
+      - "orbaagent.dev:10.77.0.1"
     deploy:
       resources:
         reservations:

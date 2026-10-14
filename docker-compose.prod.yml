@@ -132,6 +132,8 @@ services:
       # Workspace identity for upload/artifact paths. Optional; the application
       # defaults to "default-tenant" when unset.
       ORBA_TENANT_ID: ${ORBA_TENANT_ID:-}
+      # Dedicated ingest secret for GPU worker artifact delivery
+      ORBA_INTERNAL_INGEST_TOKEN: ${ORBA_INTERNAL_INGEST_TOKEN}
     volumes:
       # Named volume (not a bind mount): survives container recreation, restart,
       # and image rebuild. Seeded with node:node ownership from the image layer

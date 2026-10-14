@@ -133,17 +133,26 @@ export function MessageItem({
 
         {/* Message Content */}
         {message.content ? (
-          <div className="whitespace-pre-wrap leading-relaxed text-zinc-200">
-            {typeof message.content === "string" && message.content.includes("```") ? (
+          <div className="leading-relaxed text-zinc-200">
+            {typeof message.content === "string" ? (
               <FormattedContent
                 content={message.content}
                 onCopy={handleCopy}
                 copiedCode={copiedCode}
               />
-            ) : typeof message.content === "string" ? (
-              message.content
             ) : (
-              message.content.map((p, idx) => p.type === "text" ? <span key={idx}>{p.text}</span> : <img key={idx} src={p.image_url.url} alt="attachment" className="max-w-full rounded mt-2" />)
+              message.content.map((p, idx) =>
+                p.type === "text" ? (
+                  <span key={idx}>{renderMarkdownInline(p.text)}</span>
+                ) : (
+                  <img
+                    key={idx}
+                    src={p.image_url.url}
+                    alt="attachment"
+                    className="max-w-full rounded-xl mt-2 border border-zinc-800"
+                  />
+                ),
+              )
             )}
           </div>
         ) : (
@@ -289,11 +298,77 @@ function FormattedContent({
           );
         }
         return (
-          <p key={itemKey} className="whitespace-pre-wrap">
-            {part}
-          </p>
+          <div key={itemKey} className="whitespace-pre-wrap leading-relaxed">
+            {renderMarkdownInline(part)}
+          </div>
         );
       })}
     </div>
   );
+}
+
+function renderMarkdownInline(text: string) {
+  // Regex to match markdown images: ![alt](url) and links: [text](url)
+  const pattern = /(!?\[[^\]]*\]\([^)]+\))/g;
+  const tokens = text.split(pattern);
+
+  return tokens.map((token, i) => {
+    // Check if token is image: ![alt](url)
+    const imgMatch = token.match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
+    if (imgMatch) {
+      const alt = imgMatch[1];
+      const src = imgMatch[2];
+      return (
+        <span key={i} className="my-3 block max-w-lg">
+          <span className="block overflow-hidden rounded-xl border border-zinc-700/80 bg-zinc-900/90 shadow-xl group/img relative">
+            <a href={src} target="_blank" rel="noopener noreferrer" className="block cursor-pointer">
+              <img
+                src={src}
+                alt={alt || "Generated Media"}
+                className="w-full h-auto max-h-[480px] object-contain rounded-t-xl transition-transform duration-200 group-hover/img:scale-[1.01]"
+                loading="lazy"
+              />
+              <span className="absolute inset-0 bg-black/40 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center text-white text-xs font-medium">
+                Click to open full size ↗
+              </span>
+            </a>
+            {alt && (
+              <span className="px-3 py-1.5 bg-zinc-950/90 border-t border-zinc-800 text-xs text-zinc-400 flex items-center justify-between">
+                <span className="truncate">{alt}</span>
+                <a
+                  href={src}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  download
+                  className="text-indigo-400 hover:text-indigo-300 text-[11px] underline ml-2 shrink-0 font-sans"
+                >
+                  Download
+                </a>
+              </span>
+            )}
+          </span>
+        </span>
+      );
+    }
+
+    // Check if token is link: [text](url)
+    const linkMatch = token.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+    if (linkMatch) {
+      const linkText = linkMatch[1];
+      const href = linkMatch[2];
+      return (
+        <a
+          key={i}
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-indigo-400 hover:text-indigo-300 underline underline-offset-2 transition-colors inline-flex items-center gap-0.5"
+        >
+          {linkText}
+        </a>
+      );
+    }
+
+    return <span key={i}>{token}</span>;
+  });
 }
