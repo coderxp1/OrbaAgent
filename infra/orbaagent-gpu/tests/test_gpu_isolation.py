@@ -191,6 +191,37 @@ class TestDockerfile:
         assert "pytorch/pytorch:2.8.0-cuda12.8-cudnn9-runtime" in text
         assert "USER orba-media" in text
 
+    def test_comfyui_dockerfile_clone_ordering_and_permissions(self):
+        """Regression test: Git clone must target an empty or non-existent directory.
+        Creating /app/ComfyUI/models or other subdirectories before git clone causes:
+        'fatal: destination path '/app/ComfyUI' already exists and is not an empty directory.'
+        """
+        comfy_path = GPU_ROOT / "Dockerfile.comfyui"
+        text = comfy_path.read_text(encoding="utf-8")
+
+        assert "git clone https://github.com/comfyanonymous/ComfyUI.git /app/ComfyUI" in text
+        assert "git checkout v0.36.0" in text
+
+        clone_idx = text.index("git clone https://github.com/comfyanonymous/ComfyUI.git /app/ComfyUI")
+
+        # Ensure any mkdir for /app/ComfyUI occurs strictly AFTER git clone
+        lines = text.splitlines()
+        for line_no, line in enumerate(lines, 1):
+            if "mkdir" in line and "/app/ComfyUI" in line:
+                mkdir_idx = text.index(line)
+                assert mkdir_idx > clone_idx, (
+                    f"Line {line_no} creates /app/ComfyUI directories before git clone, "
+                    f"which will cause git clone to fail with non-empty directory error!"
+                )
+
+        # Ensure chown for /app/ComfyUI happens after git clone so orba-media owns repo files
+        chown_idx = text.index("chown -R orba-media:orba-media /app/ComfyUI")
+        assert chown_idx > clone_idx, "chown of /app/ComfyUI must occur after git clone"
+
+        # Ensure non-root runtime user switch is present
+        user_idx = text.index("USER orba-media")
+        assert user_idx > chown_idx, "USER switch to orba-media must occur after chown"
+
     def test_all_compose_build_dockerfiles_exist_and_are_packaged(self):
         """Every dockerfile referenced in compose.yaml services MUST exist in the build context,
         be packaged in build_archive, be permitted in bootstrap allowlist, and installed by provision.
