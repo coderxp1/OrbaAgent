@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import pytest
 
+from pathlib import Path
+
 from orba_gpu.models import (
     BackendNotImplementedError,
     ModelManager,
@@ -13,10 +15,26 @@ from orba_gpu.models import (
 )
 
 
-def make_manager(backend="diffusers", image_loader=None, video_loader=None, tmp_path=None):
+def make_manager(backend="diffusers", image_loader=None, video_loader=None, tmp_path=None, populate=True):
+    if tmp_path is None:
+        import tempfile
+        tmp_dir = Path(tempfile.mkdtemp())
+    else:
+        tmp_dir = Path(tmp_path)
+
+    models_dir = tmp_dir / "models"
+    models_dir.mkdir(parents=True, exist_ok=True)
+    if populate:
+        img_dir = models_dir / "black-forest-labs" / "FLUX.1-schnell"
+        img_dir.mkdir(parents=True, exist_ok=True)
+        (img_dir / "model_index.json").write_text("{}")
+        vid_dir = models_dir / "Wan-AI" / "Wan2.1-T2V-1.3B"
+        vid_dir.mkdir(parents=True, exist_ok=True)
+        (vid_dir / "model_index.json").write_text("{}")
+
     return ModelManager(
-        models_dir=str(tmp_path or "/models"),
-        output_dir=str(tmp_path or "/output"),
+        models_dir=str(models_dir),
+        output_dir=str(tmp_dir / "output"),
         backend=backend,
         image_model_id="black-forest-labs/FLUX.1-schnell",
         video_model_id="Wan-AI/Wan2.1-T2V-1.3B",
@@ -168,22 +186,60 @@ class TestFailureBehaviour:
 
 
 class TestModelPathResolution:
-    def test_missing_local_dir_falls_back_to_hub_id(self, tmp_path):
-        assert resolve_model_path(str(tmp_path), "org/model") == "org/model"
+    def test_missing_storage_dir_raises(self, tmp_path):
+        missing_root = tmp_path / "does-not-exist"
+        with pytest.raises(ModelUnavailableError, match="model storage directory is missing"):
+            resolve_model_path(str(missing_root), "org/model")
 
-    def test_existing_local_dir_resolves_to_path(self, tmp_path):
+    def test_empty_arguments_raise(self, tmp_path):
+        with pytest.raises(ModelUnavailableError, match="must be configured"):
+            resolve_model_path("", "org/model")
+        with pytest.raises(ModelUnavailableError, match="must be configured"):
+            resolve_model_path(str(tmp_path), "")
+
+    def test_missing_local_model_raises_unavailable(self, tmp_path):
+        with pytest.raises(ModelUnavailableError, match="not available locally"):
+            resolve_model_path(str(tmp_path), "org/model")
+
+    def test_existing_local_dir_without_config_raises(self, tmp_path):
         target = tmp_path / "org" / "model"
         target.mkdir(parents=True)
-        resolved = resolve_model_path(str(tmp_path), "org/model")
-        assert resolved.endswith("model")
-        assert str(tmp_path) in resolved
+        with pytest.raises(ModelUnavailableError, match="not available locally"):
+            resolve_model_path(str(tmp_path), "org/model")
 
-    def test_traversal_outside_models_dir_is_not_resolved_to_a_path(self, tmp_path):
+    def test_existing_local_dir_with_model_index_resolves_to_path(self, tmp_path):
+        target = tmp_path / "org" / "model"
+        target.mkdir(parents=True)
+        (target / "model_index.json").write_text("{}")
+        resolved = resolve_model_path(str(tmp_path), "org/model")
+        assert resolved == str(target.resolve())
+
+    def test_existing_local_dir_with_config_resolves_to_path(self, tmp_path):
+        target = tmp_path / "org" / "model"
+        target.mkdir(parents=True)
+        (target / "config.json").write_text("{}")
+        resolved = resolve_model_path(str(tmp_path), "org/model")
+        assert resolved == str(target.resolve())
+
+    def test_huggingface_cache_snapshot_resolves_to_snapshot_path(self, tmp_path):
+        snapshot = tmp_path / "models--org--model" / "snapshots" / "rev123"
+        snapshot.mkdir(parents=True)
+        (snapshot / "model_index.json").write_text("{}")
+        resolved = resolve_model_path(str(tmp_path), "org/model")
+        assert resolved == str(snapshot.resolve())
+
+    def test_huggingface_cache_without_config_raises(self, tmp_path):
+        snapshot = tmp_path / "models--org--model" / "snapshots" / "rev123"
+        snapshot.mkdir(parents=True)
+        with pytest.raises(ModelUnavailableError, match="not available locally"):
+            resolve_model_path(str(tmp_path), "org/model")
+
+    def test_traversal_outside_models_dir_raises(self, tmp_path):
         outside = tmp_path.parent / "outside-model"
         outside.mkdir(exist_ok=True)
-        resolved = resolve_model_path(str(tmp_path), "../outside-model")
-        # Must not hand back a path outside the models directory.
-        assert resolved == "../outside-model"
+        (outside / "model_index.json").write_text("{}")
+        with pytest.raises(ModelUnavailableError):
+            resolve_model_path(str(tmp_path), "../outside-model")
 
 
 class TestLocalModelAvailable:

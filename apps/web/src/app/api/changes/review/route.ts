@@ -42,14 +42,16 @@ export async function POST(request: Request) {
 
     let success = false;
 
+    const workspaceDir = process.env.ORBA_WORKSPACE_PATH || undefined;
+
     if (body.action === "accept" && body.changeId && runId) {
       success = manager.acceptChange(runId, body.changeId);
     } else if (body.action === "reject" && body.changeId && runId) {
-      success = await manager.revertChange(runId, body.changeId);
+      success = await manager.revertChange(runId, body.changeId, workspaceDir);
     } else if (body.action === "accept_all") {
       success = runId ? manager.acceptAll(runId) : true;
     } else if (body.action === "reject_all") {
-      success = runId ? await manager.revertAll(runId) : true;
+      success = runId ? await manager.revertAll(runId, workspaceDir) : true;
     } else {
       return NextResponse.json({ error: "Invalid action or parameters" }, { status: 400 });
     }

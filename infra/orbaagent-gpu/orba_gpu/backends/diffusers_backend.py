@@ -29,7 +29,11 @@ def _torch():
 
 def _device() -> str:
     torch = _torch()
-    return "cuda" if torch.cuda.is_available() else "cpu"
+    if not torch.cuda.is_available():
+        raise RuntimeError(
+            "CUDA is unavailable in the media worker; CPU fallback is disabled"
+        )
+    return "cuda"
 
 
 def load_image_pipeline(model_path: str):
@@ -98,7 +102,9 @@ def run_image_inference(
 
     result = pipeline(**kwargs)
     images = getattr(result, "images", None)
-    if not images:
+    # Explicit None/length check: avoids 'truth value of array is ambiguous'
+    # when a backend returns numpy arrays instead of PIL Images.
+    if images is None or len(images) == 0:
         raise RuntimeError("diffusion pipeline returned no images")
 
     image = images[0]
@@ -146,20 +152,54 @@ def run_video_inference(
 
     target_frames = max(1, int(round(duration_seconds * fps)))
 
+    # Wan architecture uses 4x temporal compression, requiring (num_frames - 1) % 4 == 0 (4N + 1).
+    if getattr(pipeline, "_class_name", "") == "WanPipeline" or hasattr(pipeline, "vae_scale_factor_temporal"):
+        target_frames = max(1, ((target_frames - 1) // 4) * 4 + 1)
+
     kwargs = {
         "prompt": prompt,
         "width": width,
         "height": height,
         "num_frames": target_frames,
     }
-    if negative_prompt and getattr(pipeline, "do_classifier_free_guidance", False):
-        kwargs["negative_prompt"] = negative_prompt
+    if negative_prompt:
+        if getattr(pipeline, "do_classifier_free_guidance", False) or getattr(pipeline, "_class_name", "") == "WanPipeline":
+            kwargs["negative_prompt"] = negative_prompt
+            if getattr(pipeline, "_class_name", "") == "WanPipeline":
+                kwargs.setdefault("guidance_scale", 5.0)
 
     result = pipeline(**kwargs)
     frames = getattr(result, "frames", None)
-    if not frames:
+    # Explicit None/length check: avoids 'truth value of array is ambiguous'
+    # when Wan (or any future pipeline) returns a numpy array instead of a list.
+    if frames is None or len(frames) == 0:
         raise RuntimeError("video pipeline returned no frames")
-    frames = frames[0] if isinstance(frames[0], list) else frames
+    # Wan pipeline may return frames with a leading batch dimension:
+    #   result.frames: List[List[PIL.Image]] or ndarray of shape (B, T, H, W, C)
+    # Check type and shape carefully before unwrapping to ensure we do not
+    # accidentally drop frames if the return is already a flat list or 4D array.
+    if hasattr(frames, "ndim") and frames.ndim == 5:
+        # 5D ndarray: (B, T, H, W, C) -> take first batch sequence (T, H, W, C)
+        frames = frames[0]
+    elif isinstance(frames, (list, tuple)) and len(frames) > 0:
+        first = frames[0]
+        if isinstance(first, (list, tuple)):
+            # Nested list: [[frame_0, frame_1, ...]] -> take first batch sequence
+            frames = first
+        elif hasattr(first, "ndim") and getattr(first, "ndim") == 4 and len(frames) == 1:
+            # List containing a single 4D array (T, H, W, C)
+            frames = first
+        # Otherwise: already a flat sequence of frames (List[PIL.Image] or List[ndarray(H,W,C)]), keep intact.
+
+    # Resolve ffmpeg executable (fallback to imageio-ffmpeg if system ffmpeg is absent)
+    import shutil
+    actual_ffmpeg = ffmpeg_path
+    if not shutil.which(actual_ffmpeg):
+        try:
+            import imageio_ffmpeg
+            actual_ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+        except Exception:
+            actual_ffmpeg = ffmpeg_path
 
     # export_to_video writes an mp4 at the given fps using imageio-ffmpeg.
     with tempfile.TemporaryDirectory() as tmp:
@@ -169,7 +209,7 @@ def run_video_inference(
         # Re-encode to guarantee the container/format ffprobe expects.
         subprocess.run(
             [
-                ffmpeg_path,
+                actual_ffmpeg,
                 "-y",
                 "-loglevel",
                 "error",

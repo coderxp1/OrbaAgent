@@ -144,14 +144,14 @@ export function MessageItem({
               message.content.map((p, idx) =>
                 p.type === "text" ? (
                   <span key={idx}>{renderMarkdownInline(p.text)}</span>
-                ) : (
+                ) : isSafeImageUrl(p.image_url.url) ? (
                   <img
                     key={idx}
                     src={p.image_url.url}
                     alt="attachment"
                     className="max-w-full rounded-xl mt-2 border border-zinc-800"
                   />
-                ),
+                ) : null,
               )
             )}
           </div>
@@ -307,6 +307,35 @@ function FormattedContent({
   );
 }
 
+function isSafeUrl(rawUrl: string): boolean {
+  if (!rawUrl) return false;
+  const trimmed = rawUrl.trim();
+  // Prevent protocol-relative URLs (e.g. "//evil.com")
+  if (trimmed.startsWith("//")) return false;
+  // Allow internal artifact and application paths (starting with single "/")
+  if (trimmed.startsWith("/")) {
+    return !trimmed.startsWith("/\\");
+  }
+  // Allow strictly http: and https: schemes
+  try {
+    const parsed = new URL(trimmed);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function isSafeImageUrl(rawUrl: string): boolean {
+  if (!rawUrl) return false;
+  const trimmed = rawUrl.trim();
+  if (isSafeUrl(trimmed)) return true;
+  // Allow safe inline data URLs for standard image types only
+  if (/^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/=]+$/i.test(trimmed)) {
+    return true;
+  }
+  return false;
+}
+
 function renderMarkdownInline(text: string) {
   // Regex to match markdown images: ![alt](url) and links: [text](url)
   const pattern = /(!?\[[^\]]*\]\([^)]+\))/g;
@@ -317,7 +346,13 @@ function renderMarkdownInline(text: string) {
     const imgMatch = token.match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
     if (imgMatch) {
       const alt = imgMatch[1];
-      const src = imgMatch[2];
+      const src = imgMatch[2].trim();
+
+      // Guard against unsafe URL schemes (javascript:, vbscript:, data html, etc.)
+      if (!isSafeImageUrl(src)) {
+        return <span key={i} className="font-mono text-xs text-zinc-400">{token}</span>;
+      }
+
       return (
         <span key={i} className="my-3 block max-w-lg">
           <span className="block overflow-hidden rounded-xl border border-zinc-700/80 bg-zinc-900/90 shadow-xl group/img relative">
@@ -355,7 +390,13 @@ function renderMarkdownInline(text: string) {
     const linkMatch = token.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
     if (linkMatch) {
       const linkText = linkMatch[1];
-      const href = linkMatch[2];
+      const href = linkMatch[2].trim();
+
+      // Guard against unsafe link schemes (javascript:, vbscript:, data:, etc.)
+      if (!isSafeUrl(href)) {
+        return <span key={i} className="font-mono text-xs text-zinc-400">{token}</span>;
+      }
+
       return (
         <a
           key={i}

@@ -28,8 +28,16 @@ FFMPEG = "ffmpeg"
 
 
 def make_manager(tmp_path, *, image_loader=None, video_loader=None):
+    models_dir = tmp_path / "models"
+    img_dir = models_dir / "black-forest-labs" / "FLUX.1-schnell"
+    img_dir.mkdir(parents=True, exist_ok=True)
+    (img_dir / "config.json").write_text("{}")
+    vid_dir = models_dir / "Wan-AI" / "Wan2.1-T2V-1.3B"
+    vid_dir.mkdir(parents=True, exist_ok=True)
+    (vid_dir / "config.json").write_text("{}")
+
     return ModelManager(
-        models_dir=str(tmp_path / "models"),
+        models_dir=str(models_dir),
         output_dir=str(tmp_path / "output"),
         backend="diffusers",
         image_model_id="black-forest-labs/FLUX.1-schnell",

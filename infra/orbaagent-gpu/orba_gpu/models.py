@@ -79,15 +79,33 @@ def _is_relative_to(child: Path, parent: Path) -> bool:
 
 
 def resolve_model_path(models_dir: str, model_id: str) -> str:
-    """Resolve a model id to a local path or the id itself.
+    """Resolve only an existing local Diffusers directory; never return a Hub ID."""
+    if not models_dir or not model_id:
+        raise ModelUnavailableError("model directory and model ID must be configured")
+    root = Path(models_dir).resolve()
+    if not root.is_dir():
+        raise ModelUnavailableError(f"model storage directory is missing: {root}")
 
-    Rejects ids that would escape the models directory.
-    """
-    root = Path(models_dir)
     candidate = root / model_id
-    if candidate.exists() and _is_relative_to(candidate, root):
-        return str(candidate)
-    return model_id
+    if candidate.is_dir() and _is_relative_to(candidate, root):
+        if (candidate / "model_index.json").is_file() or (candidate / "config.json").is_file():
+            return str(candidate)
+
+    # Hugging Face cache layout: models--org--name/snapshots/<revision>
+    cache_dir = root / ("models--" + model_id.replace("/", "--"))
+    snapshots = cache_dir / "snapshots"
+    if cache_dir.is_dir() and _is_relative_to(cache_dir, root) and snapshots.is_dir():
+        for snapshot in sorted(snapshots.iterdir(), reverse=True):
+            if snapshot.is_dir() and (
+                (snapshot / "model_index.json").is_file()
+                or (snapshot / "config.json").is_file()
+            ):
+                return str(snapshot)
+
+    raise ModelUnavailableError(
+        f"model '{model_id}' is not available locally under {root}; "
+        "provision and validate the model before enabling generation"
+    )
 
 
 class ModelManager:
@@ -193,7 +211,8 @@ class ModelManager:
                 )
             loader = self._resolve_loader("image")
             try:
-                self._image_pipeline = loader(resolve_model_path(self._models_dir, self._image_model_id))
+                model_path = resolve_model_path(self._models_dir, self._image_model_id)
+                self._image_pipeline = loader(model_path)
                 self._image_error = None
             except Exception as exc:
                 self._image_error = str(exc)
@@ -218,9 +237,8 @@ class ModelManager:
                 )
             loader = self._resolve_loader("video")
             try:
-                self._video_pipeline = loader(
-                    resolve_model_path(self._models_dir, self._video_model_id)
-                )
+                model_path = resolve_model_path(self._models_dir, self._video_model_id)
+                self._video_pipeline = loader(model_path)
                 self._video_error = None
             except Exception as exc:
                 self._video_error = str(exc)

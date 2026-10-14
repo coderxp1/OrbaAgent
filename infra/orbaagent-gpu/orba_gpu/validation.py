@@ -171,6 +171,53 @@ def _default_probe_runner(cmd: Sequence[str]) -> subprocess.CompletedProcess:
     )
 
 
+def _probe_video_fallback(path: Path) -> Optional[dict]:
+    """Fallback video container parser using av or imageio when ffprobe binary is absent."""
+    try:
+        import av
+
+        with av.open(str(path)) as container:
+            if not container.streams.video:
+                return None
+            stream = container.streams.video[0]
+            width = stream.width
+            height = stream.height
+            fps = float(stream.average_rate) if stream.average_rate else None
+            duration = (
+                float(stream.duration * stream.time_base)
+                if (stream.duration and stream.time_base)
+                else None
+            )
+            if duration is None and container.duration:
+                duration = float(container.duration / 1000000.0)
+            return {
+                "duration_seconds": duration,
+                "width": width,
+                "height": height,
+                "fps": fps,
+            }
+    except Exception:
+        pass
+
+    try:
+        import imageio
+
+        reader = imageio.get_reader(str(path))
+        meta = reader.get_meta_data()
+        reader.close()
+        size = meta.get("size")
+        return {
+            "duration_seconds": float(meta.get("duration", 0.0)) or None,
+            "width": size[0] if size else None,
+            "height": size[1] if size else None,
+            "fps": float(meta.get("fps", 0.0)) or None,
+        }
+    except Exception:
+        pass
+
+    return None
+
+
 def probe_video(
     path: Path,
     ffprobe_path: str = "ffprobe",
@@ -197,43 +244,43 @@ def probe_video(
                 str(path),
             ]
         )
+        if result.returncode == 0:
+            payload = json.loads(result.stdout or "{}")
+            streams = payload.get("streams") or []
+            if streams:
+                stream = streams[0]
+
+                duration_raw = stream.get("duration") or (payload.get("format") or {}).get("duration")
+                try:
+                    duration = float(duration_raw)
+                except (TypeError, ValueError):
+                    duration = None
+
+                fps = None
+                rate = stream.get("avg_frame_rate") or ""
+                if "/" in rate:
+                    num, _, den = rate.partition("/")
+                    try:
+                        num_f, den_f = float(num), float(den)
+                        if den_f:
+                            fps = num_f / den_f
+                    except ValueError:
+                        fps = None
+
+                return {
+                    "duration_seconds": duration,
+                    "width": stream.get("width"),
+                    "height": stream.get("height"),
+                    "fps": fps,
+                }
     except Exception:
-        return None
-    if result.returncode != 0:
-        return None
-    try:
-        payload = json.loads(result.stdout or "{}")
-    except json.JSONDecodeError:
-        return None
+        pass
 
-    streams = payload.get("streams") or []
-    if not streams:
-        return None
-    stream = streams[0]
-
-    duration_raw = stream.get("duration") or (payload.get("format") or {}).get("duration")
-    try:
-        duration = float(duration_raw)
-    except (TypeError, ValueError):
-        duration = None
-
-    fps = None
-    rate = stream.get("avg_frame_rate") or ""
-    if "/" in rate:
-        num, _, den = rate.partition("/")
-        try:
-            num_f, den_f = float(num), float(den)
-            if den_f:
-                fps = num_f / den_f
-        except ValueError:
-            fps = None
-
-    return {
-        "duration_seconds": duration,
-        "width": stream.get("width"),
-        "height": stream.get("height"),
-        "fps": fps,
-    }
+    # If ffprobe was missing or execution failed and no custom runner was forced,
+    # fall back to python-native container parsing via av / imageio.
+    if runner is None:
+        return _probe_video_fallback(path)
+    return None
 
 
 def validate_video(

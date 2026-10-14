@@ -7,10 +7,13 @@ no code path that reports COMPLETED without a verified artifact.
 
 from __future__ import annotations
 
+import logging
 import os
 import threading
 import time
 import uuid
+
+logger = logging.getLogger(__name__)
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -291,8 +294,24 @@ def generate_video(
                 ffprobe_path=ffprobe_path,
             )
             if not result.ok:
+                file_size = target.stat().st_size if target.exists() else 0
+                sig = ""
+                if target.exists() and file_size >= 12:
+                    try:
+                        sig = target.read_bytes()[:12].hex()
+                    except Exception:
+                        sig = ""
+                logger.warning(
+                    "Video validation failed for %s (size=%d, sig=%s): %s",
+                    target.name,
+                    file_size,
+                    sig,
+                    result.error,
+                )
                 cleanup_artifact(target)
-                raise GenerationFailedError(f"video output validation failed: {result.error}")
+                raise GenerationFailedError(
+                    f"video output validation failed: {result.error} (size={file_size}B, sig={sig})"
+                )
 
             return GenerationOutcome(
                 artifact_id=f"artifact_{uuid.uuid4().hex}",

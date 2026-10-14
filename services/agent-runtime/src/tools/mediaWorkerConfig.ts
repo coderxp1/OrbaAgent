@@ -1,6 +1,43 @@
 import type { ToolExecutionResult } from "@orbaagent/shared";
 
 /**
+ * Shape of the JSON body returned by the GPU worker's `/health` endpoint.
+ * Only the fields we inspect are listed; the worker may return more.
+ */
+export interface GpuWorkerHealth {
+  worker?: string;
+  status?: string;
+  capabilities?: {
+    image_generation?: boolean;
+    video_generation?: boolean;
+    media_processing?: boolean;
+  };
+  generation_backend?: string | null;
+  unavailable_reason?: string | null;
+}
+
+/**
+ * The exact substring the GPU worker includes in `unavailable_reason` when it
+ * has a configured `generation_backend` (e.g. "diffusers") but has not loaded
+ * model weights yet because it defers loading to the first request.
+ */
+const LAZY_LOAD_MARKER = "first request loads the weights";
+
+/**
+ * Returns `true` when the worker is healthy and has a real diffusers backend
+ * configured, but model weights have not been loaded yet (lazy loading).
+ *
+ * The TypeScript tools must allow the generation request to proceed in this
+ * state — the request itself will trigger model loading.
+ */
+export function isLazyLoadAllowed(health: GpuWorkerHealth | null): boolean {
+  if (!health) return false;
+  if (health.generation_backend !== "diffusers") return false;
+  if (typeof health.unavailable_reason !== "string") return false;
+  return health.unavailable_reason.includes(LAZY_LOAD_MARKER);
+}
+
+/**
  * Machine-readable status returned when no real GPU media-generation backend is
  * deployed. Deliberately distinct from a generic failure so callers and the
  * capability report can distinguish "not built yet" from "broken".
@@ -94,7 +131,9 @@ export function unavailableMediaResult(
     "The real GPU generation backend has not been deployed. Media generation is unavailable.";
 
   // Log detailed diagnostics to server logs only, without secrets
-  console.error(`[MEDIA GENERATION DIAGNOSTIC] ${toolName} failed: ${MEDIA_GENERATION_UNAVAILABLE} - ${detail} (Code: ${code})`);
+  console.error(
+    `[MEDIA GENERATION DIAGNOSTIC] ${toolName} failed: ${MEDIA_GENERATION_UNAVAILABLE} - ${detail} (Code: ${code})`,
+  );
 
   // Determine media type based on tool name for sanitized response
   const isVideo = toolName.includes("video");
@@ -110,3 +149,10 @@ export function unavailableMediaResult(
     executionTimeMs: Date.now() - startTime,
   };
 }
+
+/**
+ * Extended timeout for the first generation request, which must also load
+ * model weights into GPU memory. FLUX schnell loads in ~20-30s on a 3090;
+ * Wan2.1-1.3B takes ~40-60s. 300s provides ample margin.
+ */
+export const FIRST_REQUEST_TIMEOUT_MS = 300_000;

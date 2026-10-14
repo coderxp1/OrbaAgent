@@ -130,7 +130,7 @@ describe("Phase 4A: Production Capability Verification & Autonomous Workflow", (
       const imgItem = report.categories.ai_media.find((m) => m.id === "image_generation");
 
       expect(imgItem?.status).toBe("UNAVAILABLE");
-      expect(imgItem?.notes).toContain("real GPU generation backend has not been deployed");
+      expect(imgItem?.notes).toContain("Image generation is currently unavailable");
 
       // Generation is advertised only when a real backend reports ready. Merely
       // reaching a worker is not sufficient: the worker can be up while no

@@ -49,10 +49,18 @@ def build_client(
     ingest_url="",
     ingest_token="",
 ):
+    models_path = tmp_path / "models"
+    img_dir = models_path / "black-forest-labs" / "FLUX.1-schnell"
+    img_dir.mkdir(parents=True, exist_ok=True)
+    (img_dir / "config.json").write_text("{}")
+    vid_dir = models_path / "Wan-AI" / "Wan2.1-T2V-1.3B"
+    vid_dir.mkdir(parents=True, exist_ok=True)
+    (vid_dir / "config.json").write_text("{}")
+
     settings = Settings(
         target_gpu_uuid=GPU1_UUID,
         backend=backend,
-        models_dir=str(tmp_path / "models"),
+        models_dir=str(models_path),
         output_dir=str(tmp_path / "output"),
         token=TOKEN,
         ingest_url=ingest_url,

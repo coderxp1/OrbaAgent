@@ -17,6 +17,9 @@ export class ChangeReviewManager {
   // agentRunId -> AgentFileChange[]
   private activeChanges: Map<string, AgentFileChange[]> = new Map();
 
+  // agentRunId -> workspaceDir
+  private runWorkspaces: Map<string, string> = new Map();
+
   public static getInstance(): ChangeReviewManager {
     if (!ChangeReviewManager.instance) {
       ChangeReviewManager.instance = new ChangeReviewManager();
@@ -82,6 +85,7 @@ export class ChangeReviewManager {
     workspaceDir: string,
     targetPaths?: string[],
   ): Promise<void> {
+    this.runWorkspaces.set(agentRunId, workspaceDir);
     const baselineMap = new Map<string, FileSnapshot>();
 
     if (targetPaths && targetPaths.length > 0) {
@@ -108,6 +112,7 @@ export class ChangeReviewManager {
     workspaceDir: string,
     relPath: string,
   ): Promise<void> {
+    this.runWorkspaces.set(agentRunId, workspaceDir);
     let baselineMap = this.baselines.get(agentRunId);
     if (!baselineMap) {
       baselineMap = new Map<string, FileSnapshot>();
@@ -136,6 +141,7 @@ export class ChangeReviewManager {
     workspaceId = "default-workspace",
     messageId?: string,
   ): Promise<AgentFileChange[]> {
+    this.runWorkspaces.set(agentRunId, workspaceDir);
     const baselineMap = this.baselines.get(agentRunId) || new Map<string, FileSnapshot>();
     const changes: AgentFileChange[] = [];
 
@@ -227,7 +233,12 @@ export class ChangeReviewManager {
     const change = changes.find((c) => c.changeId === changeId);
     if (!change) return false;
 
-    const targetDir = workspaceDir || process.env.WORKSPACE_ROOT || process.cwd();
+    const targetDir =
+      workspaceDir ||
+      this.runWorkspaces.get(agentRunId) ||
+      process.env.ORBA_WORKSPACE_PATH ||
+      process.env.WORKSPACE_ROOT ||
+      process.cwd();
     const baselineMap = this.baselines.get(agentRunId);
     const baseline = baselineMap?.get(change.path);
     const fullPath = path.resolve(targetDir, change.path);
@@ -269,9 +280,16 @@ export class ChangeReviewManager {
     const changes = this.activeChanges.get(agentRunId);
     if (!changes) return false;
 
+    const targetDir =
+      workspaceDir ||
+      this.runWorkspaces.get(agentRunId) ||
+      process.env.ORBA_WORKSPACE_PATH ||
+      process.env.WORKSPACE_ROOT ||
+      process.cwd();
+
     for (const change of changes) {
       if (change.reviewStatus === "pending") {
-        await this.revertChange(agentRunId, change.changeId, workspaceDir);
+        await this.revertChange(agentRunId, change.changeId, targetDir);
       }
     }
 

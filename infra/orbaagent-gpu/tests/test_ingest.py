@@ -206,3 +206,143 @@ def test_unreadable_response_is_a_failure(tmp_path):
             bundle="b",
             opener=bad_opener,
         )
+
+
+def test_video_mp4_successful_ingest(tmp_path):
+    video_path = tmp_path / "generated.mp4"
+    # Minimal ISO-BMFF header with 'ftyp' box
+    video_path.write_bytes(b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom" + b"\x00" * 32)
+    opener = opener_returning(
+        {
+            "artifactId": "vid_art_999",
+            "url": "/api/artifacts/w/b/video.mp4",
+            "size": 48,
+            "type": "video/mp4",
+            "workspace": "default-tenant",
+            "bundle": "job_vid_1",
+        }
+    )
+
+    result = ingest_artifact(
+        ingest_url=URL,
+        ingest_token=TOKEN,
+        artifact_path=video_path,
+        content_type="video/mp4",
+        workspace="default-tenant",
+        bundle="job_vid_1",
+        opener=opener,
+    )
+
+    assert result.artifact_id == "vid_art_999"
+    assert result.url == "/api/artifacts/w/b/video.mp4"
+    assert result.content_type == "video/mp4"
+    assert result.workspace == "default-tenant"
+    assert result.bundle == "job_vid_1"
+
+
+def test_invalid_auth_401_and_403_raise_ingest_error(tmp_path):
+    import urllib.error
+
+    def unauthorized_opener(request):
+        raise urllib.error.HTTPError(URL, 401, "Unauthorized", {}, io.BytesIO(b"missing token"))
+
+    with pytest.raises(IngestError, match="HTTP 401"):
+        ingest_artifact(
+            ingest_url=URL,
+            ingest_token=TOKEN,
+            artifact_path=make_artifact(tmp_path),
+            content_type="image/png",
+            workspace="w",
+            bundle="b",
+            opener=unauthorized_opener,
+        )
+
+    def forbidden_opener(request):
+        raise urllib.error.HTTPError(URL, 403, "Forbidden", {}, io.BytesIO(b"invalid token"))
+
+    with pytest.raises(IngestError, match="HTTP 403"):
+        ingest_artifact(
+            ingest_url=URL,
+            ingest_token=TOKEN,
+            artifact_path=make_artifact(tmp_path),
+            content_type="image/png",
+            workspace="w",
+            bundle="b",
+            opener=forbidden_opener,
+        )
+
+
+def test_rejected_content_415_raises_ingest_error(tmp_path):
+    import urllib.error
+
+    def unsupported_opener(request):
+        raise urllib.error.HTTPError(
+            URL, 415, "Unsupported Media Type", {}, io.BytesIO(b"unrecognized content")
+        )
+
+    with pytest.raises(IngestError, match="HTTP 415"):
+        ingest_artifact(
+            ingest_url=URL,
+            ingest_token=TOKEN,
+            artifact_path=make_artifact(tmp_path),
+            content_type="text/plain",
+            workspace="w",
+            bundle="b",
+            opener=unsupported_opener,
+        )
+
+
+def test_server_errors_500_and_503_raise_ingest_error(tmp_path):
+    import urllib.error
+
+    def server_error_opener(request):
+        raise urllib.error.HTTPError(
+            URL, 500, "Internal Server Error", {}, io.BytesIO(b"storage failure")
+        )
+
+    with pytest.raises(IngestError, match="HTTP 500"):
+        ingest_artifact(
+            ingest_url=URL,
+            ingest_token=TOKEN,
+            artifact_path=make_artifact(tmp_path),
+            content_type="image/png",
+            workspace="w",
+            bundle="b",
+            opener=server_error_opener,
+        )
+
+    def service_unavailable_opener(request):
+        raise urllib.error.HTTPError(
+            URL, 503, "Service Unavailable", {}, io.BytesIO(b"ingest unconfigured")
+        )
+
+    with pytest.raises(IngestError, match="HTTP 503"):
+        ingest_artifact(
+            ingest_url=URL,
+            ingest_token=TOKEN,
+            artifact_path=make_artifact(tmp_path),
+            content_type="image/png",
+            workspace="w",
+            bundle="b",
+            opener=service_unavailable_opener,
+        )
+
+
+def test_socket_timeout_raises_ingest_error(tmp_path):
+    import socket
+    import urllib.error
+
+    def timeout_opener(request):
+        raise urllib.error.URLError(socket.timeout("timed out"))
+
+    with pytest.raises(IngestError, match="transport failure"):
+        ingest_artifact(
+            ingest_url=URL,
+            ingest_token=TOKEN,
+            artifact_path=make_artifact(tmp_path),
+            content_type="image/png",
+            workspace="w",
+            bundle="b",
+            opener=timeout_opener,
+        )
+

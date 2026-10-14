@@ -47,8 +47,9 @@ export class MediaImageGenerateTool implements ITool {
         },
         output_format: {
           type: "string",
-          enum: ["png", "jpeg", "webp"],
-          description: "Target image format. Default is png.",
+          enum: ["png"],
+          description: "Target image format. Currently only png is supported by the worker.",
+          default: "png",
         },
       },
       required: ["prompt"],
