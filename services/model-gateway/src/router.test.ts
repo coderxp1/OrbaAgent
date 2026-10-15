@@ -60,9 +60,9 @@ describe("IntelligenceRouter", () => {
   });
 
   it("should select another eligible Langdock model when primary model quota is exhausted", () => {
-    // Record 500 requests for gpt-5.4
+    // Record 500 requests for gpt-5.4 under tenant t_1
     for (let i = 0; i < 500; i++) {
-      recordLocalUsage("gpt-5.4", 100);
+      recordLocalUsage("gpt-5.4", 100, "t_1");
     }
 
     const req: ChatCompletionRequest = {
@@ -158,6 +158,40 @@ describe("IntelligenceRouter", () => {
     expect(() => router.selectRouting(req)).toThrow(
       "All provider routes are unavailable or in circuit breaker cooldown",
     );
+  });
+
+  it("should directly route to OpenRouter when Langdock encounters authentication failure", () => {
+    router.recordAuthFailure("langdock", "Invalid API key");
+
+    const req: ChatCompletionRequest = {
+      modelId: "auto",
+      messages: [{ role: "user", content: "Write a python script" }],
+      stream: true,
+      trace: {
+        traceId: "tr_auth_1",
+        tenantId: "t_1",
+        userId: "u_1",
+        conversationId: "c_1",
+        agentRunId: "r_1",
+      },
+    };
+
+    const routing = router.selectRouting(req);
+    expect(routing.primaryModel.provider).toBe("openrouter");
+    expect(routing.primaryModel.id).toBe("openrouter/auto");
+  });
+
+  it("should clear model failure counts when provider recovers after cooldown", () => {
+    // Record 3 failures for gpt-5.4
+    router.recordProviderFailure("langdock", "gpt-5.4");
+    router.recordProviderFailure("langdock", "gpt-5.4");
+    router.recordProviderFailure("langdock", "gpt-5.4");
+
+    expect(router.getModelFailures("gpt-5.4")).toBe(3);
+
+    // Record success on provider
+    router.recordProviderSuccess("langdock");
+    expect(router.getModelFailures("gpt-5.4")).toBe(0);
   });
 
   it("should enforce non-mock policy in production", () => {

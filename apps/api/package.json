@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc -b",
+    "build": "tsc -b --force",
     "dev": "node dist/index.js",
     "typecheck": "tsc --noEmit"
   },

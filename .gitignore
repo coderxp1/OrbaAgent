@@ -55,3 +55,27 @@ tmp/
 scratch/
 scratch*/
 
+# Runtime upload/artifact storage (default ORBA_UPLOAD_DIR)
+.uploads/
+**/.uploads/
+
+# Kilo Code agent workspace (local skills + stale worktree copies)
+.kilo/
+
+# Python (GPU worker tests and bytecode)
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# GPU worker runtime state — model weights and generated artifacts are never committed
+infra/orbaagent-gpu/models/
+infra/orbaagent-gpu/output/
+infra/orbaagent-gpu/data/
+infra/orbaagent-gpu/secrets/
+*.safetensors
+*.ckpt
+*.onnx
+*.gguf
+

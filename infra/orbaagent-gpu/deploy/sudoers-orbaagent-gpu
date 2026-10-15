@@ -1,0 +1,40 @@
+# OrbaAgent GPU worker delegation  —  /etc/sudoers.d/orbaagent-gpu
+#
+# Install with:
+#   sudo install -o root -g root -m 0440 \
+#     infra/orbaagent-gpu/deploy/sudoers-orbaagent-gpu \
+#     /etc/sudoers.d/orbaagent-gpu
+#   sudo visudo -c          # MUST pass before you rely on it
+#
+# This grants klaus permission to run exactly one root-owned script, with no
+# argument wildcards that could be abused. The script itself performs all
+# argument validation and cannot be edited by klaus (root:root 0755).
+#
+# DELIBERATELY ABSENT — do not add:
+#   * docker, docker-compose, dockerd, or anything that reaches the Docker socket
+#   * a `docker` group membership for klaus
+#   * systemctl, journalctl, or a shell
+#   * any wildcard such as ALL or /usr/bin/docker *
+#
+# Why no wildcard: `klaus ALL=(root) NOPASSWD: /usr/local/sbin/orbaagent-gpu *`
+# would let klaus pass arbitrary trailing arguments to the wrapper. The wrapper
+# ignores extras, but the tighter form below leaves no room for a future edit to
+# the wrapper to become exploitable.
+
+klaus ALL=(root) NOPASSWD: /usr/local/sbin/orbaagent-gpu up
+klaus ALL=(root) NOPASSWD: /usr/local/sbin/orbaagent-gpu down
+klaus ALL=(root) NOPASSWD: /usr/local/sbin/orbaagent-gpu restart
+klaus ALL=(root) NOPASSWD: /usr/local/sbin/orbaagent-gpu deploy-worker
+klaus ALL=(root) NOPASSWD: /usr/local/sbin/orbaagent-gpu restart-worker
+klaus ALL=(root) NOPASSWD: /usr/local/sbin/orbaagent-gpu status
+klaus ALL=(root) NOPASSWD: /usr/local/sbin/orbaagent-gpu build
+klaus ALL=(root) NOPASSWD: /usr/local/sbin/orbaagent-gpu validate
+klaus ALL=(root) NOPASSWD: /usr/local/sbin/orbaagent-gpu health
+
+# `logs` takes an optional bounded numeric line count. sudo-rs on Ubuntu 26.04
+# allows trailing arguments via `*` but rejects character class patterns `[...]`.
+# The wrapper itself strictly enforces that the argument is a positive integer
+# bounded between 1 and 2000, rejecting flags, non-digits, and injection attempts.
+klaus ALL=(root) NOPASSWD: /usr/local/sbin/orbaagent-gpu logs *
+klaus ALL=(root) NOPASSWD: /usr/local/sbin/orbaagent-gpu logs
+klaus ALL=(root) NOPASSWD: /usr/local/sbin/orbaagent-gpu help

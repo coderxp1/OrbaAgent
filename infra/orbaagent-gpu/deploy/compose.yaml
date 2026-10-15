@@ -1,0 +1,169 @@
+version: '3.8'
+
+# OrbaAgent GPU media worker — DEPLOYMENT COPY
+#
+# Installed to /etc/orbaagent/gpu-worker/compose.yaml, root:root 0644, by
+# provision-gpu-host.sh. It is deliberately NOT the copy inside the working
+# repository, so editing the repository cannot change what runs.
+#
+# GPU ISOLATION IS ENFORCED BY CONFIGURATION
+# ------------------------------------------
+# This worker may only ever use GPU 1 (GPU-82e03c6c-8c27-c076-eb42-7e37e9a5a878).
+# GPU 0 (GPU-4634107e-...) runs the CoderXP/ComfyUI workload and must never be
+# selected. Three independent layers:
+#
+#   1. deploy.resources.reservations.devices.device_ids -> the NVIDIA container
+#      runtime mounts ONLY that device's nodes, so GPU 0 is not in the
+#      container's device namespace at all.
+#   2. NVIDIA_VISIBLE_DEVICES -> restricts the runtime device set to the UUID.
+#   3. CUDA_VISIBLE_DEVICES=0 -> renumbers the single visible device to index 0.
+#
+# The worker also queries nvidia-smi by explicit UUID, never by index.
+#
+# DO NOT add `--gpus all`, `privileged: true`, /dev/nvidia* host mounts, or host
+# networking. deploy/check_compose_isolation.py asserts all of this, and the
+# root-owned wrapper re-validates it before and after every start.
+
+services:
+  orbaagent-gpu-worker:
+    container_name: orbaagent-gpu-worker
+    build:
+      # Absolute, root-owned build context. The worker source and Dockerfile live
+      # under /etc/orbaagent/gpu-worker/, which klaus cannot write. If the build
+      # context were the klaus-owned data directory, klaus could alter worker
+      # code or add flags to the Dockerfile.
+      context: /etc/orbaagent/gpu-worker/src
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      # WireGuard tunnel only. Production reaches the worker over the WireGuard tunnel by
+      # dialling 10.77.0.2:8190, which terminates on wg-orba; 8190 is never published
+      # on eth0 and never reachable from the public internet.
+      - "10.77.0.2:8190:8190"
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=GPU-82e03c6c-8c27-c076-eb42-7e37e9a5a878
+      - CUDA_VISIBLE_DEVICES=0
+      - MEDIA_WORKER_PORT=8190
+      - MEDIA_WORKER_GPU_UUID=GPU-82e03c6c-8c27-c076-eb42-7e37e9a5a878
+      # Backend and models come from the root-owned worker.env so that a change
+      # to the repository cannot silently enable generation.
+      - MEDIA_GENERATION_BACKEND=${MEDIA_GENERATION_BACKEND:-}
+      - MEDIA_GENERATION_IMAGE_MODEL=${MEDIA_GENERATION_IMAGE_MODEL:-black-forest-labs/FLUX.1-schnell}
+      - MEDIA_GENERATION_VIDEO_MODEL=${MEDIA_GENERATION_VIDEO_MODEL:-Wan-AI/Wan2.1-T2V-1.3B}
+      - MEDIA_MODELS_DIR=/models
+      - MEDIA_OUTPUT_DIR=/output
+      - MEDIA_MAX_CONCURRENT_GENERATIONS=${MEDIA_MAX_CONCURRENT_GENERATIONS:-1}
+      # Secrets are files, never values. They do not appear in `docker inspect`.
+      - MEDIA_WORKER_TOKEN_FILE=/run/secrets/media_worker_token
+      - MEDIA_INGEST_URL=${MEDIA_INGEST_URL:-https://orbaagent.dev/api/internal/media/ingest}
+      - MEDIA_INGEST_TOKEN_FILE=/run/secrets/media_ingest_token
+      - ORBA_TENANT_ID=${ORBA_TENANT_ID:-}
+    secrets:
+      - media_worker_token
+      - media_ingest_token
+    volumes:
+      # Named volumes, not bind mounts. A bind mount's host directory must be
+      # writable by the container, which would mean making a host path writable
+      # by klaus too. Named volumes are managed by Docker as root, so the
+      # configuration stays immutable and the worker (uid 0 in-container) can
+      # still read models and write artifacts.
+      - orbaagent_models:/models
+      - orbaagent_output:/output
+      - orbaagent_data:/data
+    networks:
+      - orbaagent_media_net
+    extra_hosts:
+      - "orbaagent.dev:10.77.0.1"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ['GPU-82e03c6c-8c27-c076-eb42-7e37e9a5a878']
+              capabilities: [gpu]
+
+  orbaagent-comfyui:
+    container_name: orbaagent-comfyui
+    build:
+      context: /etc/orbaagent/gpu-worker/src
+      dockerfile: Dockerfile.comfyui
+    restart: unless-stopped
+    ports:
+      # Private only, accessible via wireguard tunnel 10.77.0.2 if needed, but primarily internally
+      - "10.77.0.2:8189:8188"
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=GPU-82e03c6c-8c27-c076-eb42-7e37e9a5a878
+      - CUDA_VISIBLE_DEVICES=0
+    volumes:
+      - orbaagent_models:/app/ComfyUI/models:ro
+      - orbaagent_output:/app/ComfyUI/output
+    user: "1500"
+    networks:
+      - orbaagent_media_net
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ['GPU-82e03c6c-8c27-c076-eb42-7e37e9a5a878']
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8188/system_stats"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+
+  orbaagent-ollama:
+    container_name: orbaagent-ollama
+    image: ollama/ollama:0.12.7
+    restart: unless-stopped
+    ports:
+      # WireGuard tunnel only. Production reaches Ollama over the WireGuard tunnel by
+      # dialling 10.77.0.2:11435, which terminates on wg-orba; 11435 is never published
+      # on eth0 and never reachable from the public internet.
+      # Port 11435 ensures complete isolation from CoderXP Ollama on 127.0.0.1:11434.
+      - "10.77.0.2:11435:11434"
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=GPU-82e03c6c-8c27-c076-eb42-7e37e9a5a878
+      - CUDA_VISIBLE_DEVICES=0
+      - OLLAMA_HOST=0.0.0.0:11434
+      - OLLAMA_MODELS=/root/.ollama/models
+      - OLLAMA_KEEP_ALIVE=24h
+      - OLLAMA_NUM_PARALLEL=2
+      - OLLAMA_MAX_LOADED_MODELS=1
+    volumes:
+      - orbaagent_ollama_models:/root/.ollama
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - orbaagent_media_net
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ['GPU-82e03c6c-8c27-c076-eb42-7e37e9a5a878']
+              capabilities: [gpu]
+
+secrets:
+  media_worker_token:
+    file: /etc/orbaagent/gpu-worker/secrets/media_worker_token
+  media_ingest_token:
+    file: /etc/orbaagent/gpu-worker/secrets/media_ingest_token
+
+volumes:
+  orbaagent_models:
+    name: orbaagent_models
+  orbaagent_output:
+    name: orbaagent_output
+  orbaagent_data:
+    name: orbaagent_data
+  orbaagent_ollama_models:
+    name: orbaagent_ollama_models
+
+networks:
+  orbaagent_media_net:
+    driver: bridge

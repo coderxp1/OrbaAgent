@@ -1,0 +1,36 @@
+# OrbaAgent GPU media tunnel — GPU host side (45.84.65.76)
+# Install to: /etc/wireguard/wg-orba.conf   (root:root 0600 — contains a private key)
+# Bring up:   sudo systemctl enable --now wg-quick@wg-orba
+#
+# Topology
+#   GPU host (this file) : 10.77.0.2/32
+#   Production           : 10.77.0.1/32
+#
+# The GPU host LISTENS; production is the only permitted peer. Production has
+# passwordless sudo and initiates, so no privileged access is required on this
+# host to establish the tunnel — only to install it once.
+#
+# Addresses and ports required
+#   Public, inbound on this host : UDP 51820 from 85.215.156.241 only
+#   Private, after the tunnel    : TCP 8190 (worker) reachable only from 10.77.0.1
+#   Outbound, over the tunnel    : TCP 80 to 10.77.0.1 (artifact ingest)
+#
+# Replace <GPU_HOST_PRIVATE_KEY> and <PRODUCTION_PUBLIC_KEY> with generated keys.
+# Never commit real keys.
+
+[Interface]
+Address = 10.77.0.2/32
+ListenPort = 51820
+PrivateKey = <GPU_HOST_PRIVATE_KEY>
+
+# Hardening: drop anything not from the allowed peer.
+PostUp = ufw route delete allow in on %i from 10.77.0.1 to 10.77.0.2 port 8190 proto tcp 2>/dev/null || true; ufw allow in on %i from 10.77.0.1 to 10.77.0.2 port 8190 proto tcp || true
+PostDown = ufw delete allow in on %i from 10.77.0.1 to 10.77.0.2 port 8190 proto tcp || true
+
+# -- the single permitted peer: production --------------------------------
+[Peer]
+PublicKey = <PRODUCTION_PUBLIC_KEY>
+# Only production's tunnel address may use this tunnel.
+AllowedIPs = 10.77.0.1/32
+# No endpoint: this side does not dial. It only accepts production's handshake.
+PersistentKeepalive = 0

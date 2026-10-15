@@ -41,7 +41,7 @@ export class OrbaError extends Error {
 }
 
 // Model Registry & Provider Schemas
-export const ProviderIdSchema = z.enum(["langdock", "openrouter"]);
+export const ProviderIdSchema = z.enum(["langdock", "openrouter", "ollama"]);
 export type ProviderId = z.infer<typeof ProviderIdSchema>;
 
 export const ModelCapabilitySchema = z.enum([
@@ -69,6 +69,43 @@ export const ModelSpecSchema = z.object({
 export type ModelSpec = z.infer<typeof ModelSpecSchema>;
 
 // Tool & Message Schemas
+export const ToolCategorySchema = z.enum([
+  "system",
+  "filesystem",
+  "process",
+  "git",
+  "github",
+  "browser",
+  "http",
+  "runtime",
+  "package",
+  "testing",
+  "docker",
+  "database",
+  "cloud",
+  "communication",
+  "calendar",
+  "knowledge",
+  "documents",
+  "media",
+  "mcp",
+  "ci",
+  "jobs",
+]);
+export type ToolCategory = z.infer<typeof ToolCategorySchema>;
+
+export const ToolProviderTypeSchema = z.enum(["native", "mcp", "connector"]);
+export type ToolProviderType = z.infer<typeof ToolProviderTypeSchema>;
+
+export const PermissionTierSchema = z.enum([
+  "TIER_0_READ",
+  "TIER_1_WRITE",
+  "TIER_2_EXEC",
+  "TIER_3_EXTERNAL",
+  "TIER_4_DESTRUCTIVE",
+]);
+export type PermissionTier = z.infer<typeof PermissionTierSchema>;
+
 export const ToolCallSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -83,18 +120,94 @@ export const ToolDefinitionSchema = z.object({
 });
 export type ToolDefinition = z.infer<typeof ToolDefinitionSchema>;
 
+export const ToolMetadataSchema = z.object({
+  name: z.string(),
+  description: z.string(),
+  category: ToolCategorySchema,
+  provider: ToolProviderTypeSchema,
+  riskTier: PermissionTierSchema,
+  keywords: z.array(z.string()).default([]),
+  requiredConnection: z.string().optional(),
+  requiredRuntime: z.string().optional(),
+  requiresApproval: z.boolean().default(false).optional(),
+  parameters: z.record(z.unknown()),
+  version: z.string().default("1.0.0").optional(),
+  isCore: z.boolean().default(false).optional(),
+});
+export type ToolMetadata = z.infer<typeof ToolMetadataSchema>;
+
+export const AuditEventSchema = z.object({
+  id: z.string(),
+  timestamp: z.string(),
+  traceId: z.string(),
+  tenantId: z.string(),
+  userId: z.string(),
+  agentRunId: z.string(),
+  toolName: z.string(),
+  category: ToolCategorySchema.optional(),
+  riskTier: PermissionTierSchema,
+  action: z.string(),
+  approved: z.boolean(),
+  reason: z.string().optional(),
+  redactedArgs: z.record(z.unknown()).optional(),
+  success: z.boolean().optional(),
+  executionTimeMs: z.number().optional(),
+});
+export type AuditEvent = z.infer<typeof AuditEventSchema>;
+
+export const ToolExecutionResultSchema = z.object({
+  toolCallId: z.string(),
+  name: z.string(),
+  success: z.boolean(),
+  output: z.string(),
+  error: z.string().optional(),
+  executionTimeMs: z.number().optional(),
+  metadata: z.record(z.unknown()).optional(),
+});
+export type ToolExecutionResult = z.infer<typeof ToolExecutionResultSchema>;
+
+export const AgentFileChangeStatusSchema = z.enum(["created", "modified", "deleted", "renamed"]);
+export type AgentFileChangeStatus = z.infer<typeof AgentFileChangeStatusSchema>;
+
+export const AgentFileChangeSchema = z.object({
+  changeId: z.string(),
+  agentRunId: z.string(),
+  messageId: z.string().optional(),
+  workspaceId: z.string(),
+  path: z.string(),
+  filename: z.string(),
+  status: AgentFileChangeStatusSchema,
+  previousPath: z.string().optional(),
+  additions: z.number().int().nonnegative(),
+  deletions: z.number().int().nonnegative(),
+  diff: z.string().optional(),
+  reviewStatus: z.enum(["pending", "accepted", "rejected"]).default("pending"),
+  timestamp: z.string().optional(),
+});
+export type AgentFileChange = z.infer<typeof AgentFileChangeSchema>;
+
 export const ChatMessageRoleSchema = z.enum(["system", "user", "assistant", "tool"]);
 export type ChatMessageRole = z.infer<typeof ChatMessageRoleSchema>;
 
 export const ChatMessageSchema = z.object({
   id: z.string().optional(),
   role: ChatMessageRoleSchema,
-  content: z.string(),
+  content: z.union([
+    z.string(),
+    z.array(
+      z.discriminatedUnion("type", [
+        z.object({ type: z.literal("text"), text: z.string() }),
+        z.object({ type: z.literal("image_url"), image_url: z.object({ url: z.string() }) }),
+      ]),
+    ),
+  ]),
   name: z.string().optional(),
   toolCallId: z.string().optional(),
   toolCalls: z.array(ToolCallSchema).optional(),
+  toolResults: z.array(ToolExecutionResultSchema).optional(),
   thinking: z.string().optional(),
   timestamp: z.string().optional(),
+  fileChanges: z.array(AgentFileChangeSchema).optional(),
 });
 export type ChatMessage = z.infer<typeof ChatMessageSchema>;
 
@@ -104,6 +217,8 @@ export const TraceMetadataSchema = z.object({
   userId: z.string().default("default-user"),
   conversationId: z.string().default("default-conversation"),
   agentRunId: z.string().default("default-run"),
+  githubToken: z.string().optional(),
+  executionSessionId: z.string().optional(),
   credentialId: z.string().optional(),
 });
 export type TraceMetadata = z.infer<typeof TraceMetadataSchema>;
@@ -126,8 +241,86 @@ export const ChatCompletionRequestSchema = z.object({
   maxTokens: z.number().int().positive().optional(),
   stream: z.boolean().default(true),
   trace: TraceMetadataSchema,
+  attachments: z
+    .array(
+      z.object({
+        artifactId: z.string(),
+        name: z.string().optional(),
+        type: z.string().optional(),
+        size: z.number().int().nonnegative().optional(),
+        relPath: z.string().optional(),
+      }),
+    )
+    .optional(),
 });
 export type ChatCompletionRequest = z.infer<typeof ChatCompletionRequestSchema>;
+
+export const IntegrationNameSchema = z.enum([
+  "github",
+  "slack",
+  "notion",
+  "email",
+  "gmail",
+  "jira",
+  "atlassian",
+  "linear",
+  "google_calendar",
+  "teams",
+  "outlook",
+  "salesforce",
+  "asana",
+  "box",
+  "google_drive",
+  "sharepoint",
+  "google_workspace",
+  "microsoft_365",
+  "vercel",
+  "cloudflare",
+  "supabase",
+]);
+export type IntegrationName = z.infer<typeof IntegrationNameSchema>;
+
+export const JobStatusSchema = z.enum([
+  "QUEUED",
+  "RUNNING",
+  "WAITING",
+  "COMPLETED",
+  "FAILED",
+  "CANCELLED",
+  "PAUSED",
+]);
+export type JobStatus = z.infer<typeof JobStatusSchema>;
+
+export const JobRecordSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  status: JobStatusSchema,
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  progress: z.number().min(0).max(100).optional(),
+  payload: z.record(z.unknown()).optional(),
+  result: z.unknown().optional(),
+  error: z.string().optional(),
+});
+export type JobRecord = z.infer<typeof JobRecordSchema>;
+
+export const IntegrationStatusSchema = z.object({
+  name: IntegrationNameSchema,
+  displayName: z.string(),
+  connected: z.boolean(),
+  accountName: z.string().optional(),
+  scopes: z.array(z.string()).optional(),
+  lastSyncedAt: z.string().optional(),
+});
+export type IntegrationStatus = z.infer<typeof IntegrationStatusSchema>;
+
+export const ToolManifestSchema = z.object({
+  availableTools: z.array(z.string()),
+  connectedServices: z.array(IntegrationStatusSchema),
+  workspaceId: z.string(),
+  permissions: z.record(z.boolean()),
+});
+export type ToolManifest = z.infer<typeof ToolManifestSchema>;
 
 export const UsageStatsSchema = z.object({
   promptTokens: z.number().int().nonnegative(),
@@ -136,18 +329,91 @@ export const UsageStatsSchema = z.object({
 });
 export type UsageStats = z.infer<typeof UsageStatsSchema>;
 
+export const TaskStepStatusSchema = z.enum([
+  "pending",
+  "running",
+  "completed",
+  "failed",
+  "skipped",
+]);
+export type TaskStepStatus = z.infer<typeof TaskStepStatusSchema>;
+
+export const TaskStepSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  description: z.string().optional(),
+  dependencies: z.array(z.string()).default([]),
+  acceptanceCriteria: z.array(z.string()).default([]),
+  status: TaskStepStatusSchema.default("pending"),
+  assignedTool: z.string().optional(),
+  toolArguments: z.record(z.unknown()).optional(),
+  resultEvidence: z.string().optional(),
+  error: z.string().optional(),
+  attempts: z.number().int().nonnegative().default(0),
+  startedAt: z.string().optional(),
+  completedAt: z.string().optional(),
+});
+export type TaskStep = z.infer<typeof TaskStepSchema>;
+
+export const TaskPlanStatusSchema = z.enum([
+  "planning",
+  "in_progress",
+  "verifying",
+  "completed",
+  "failed",
+  "interrupted",
+]);
+export type TaskPlanStatus = z.infer<typeof TaskPlanStatusSchema>;
+
+export const TaskPlanSchema = z.object({
+  planId: z.string(),
+  goal: z.string(),
+  workspaceId: z.string(),
+  status: TaskPlanStatusSchema.default("planning"),
+  steps: z.array(TaskStepSchema).default([]),
+  currentStepId: z.string().optional(),
+  verificationCriteria: z.array(z.string()).default([]),
+  maxRetriesPerStep: z.number().int().positive().default(3),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  completedAt: z.string().optional(),
+});
+export type TaskPlan = z.infer<typeof TaskPlanSchema>;
+
 export const NormalizedEventTypeSchema = z.enum([
   "text_delta",
   "thinking_delta",
   "tool_call_start",
   "tool_call_delta",
   "tool_call_end",
+  "tool_call_result",
+  "agent_activity",
   "usage",
   "error",
   "done",
   "stream_reset",
+  "terminal_command_start",
+  "terminal_stdout",
+  "terminal_stderr",
+  "terminal_exit",
+  "file_changes_detected",
+  "tools_discovered",
+  "permission_requested",
+  "permission_granted",
+  "permission_denied",
+  "audit_logged",
+  "task_plan_updated",
+  "task_step_updated",
+  "task_verification",
 ]);
 export type NormalizedEventType = z.infer<typeof NormalizedEventTypeSchema>;
+
+export const AgentActivitySchema = z.object({
+  step: z.string(),
+  status: z.enum(["in_progress", "completed", "failed"]),
+  details: z.string().optional(),
+});
+export type AgentActivity = z.infer<typeof AgentActivitySchema>;
 
 export const NormalizedEventSchema = z.object({
   type: NormalizedEventTypeSchema,
@@ -155,7 +421,32 @@ export const NormalizedEventSchema = z.object({
   textDelta: z.string().optional(),
   thinkingDelta: z.string().optional(),
   toolCall: ToolCallSchema.optional(),
+  toolResult: ToolExecutionResultSchema.optional(),
+  activity: AgentActivitySchema.optional(),
+  taskPlan: TaskPlanSchema.optional(),
+  taskStep: TaskStepSchema.optional(),
+  verification: z
+    .object({
+      checkName: z.string(),
+      passed: z.boolean(),
+      evidence: z.string(),
+    })
+    .optional(),
   usage: UsageStatsSchema.optional(),
+  executionSessionId: z.string().optional(),
+  command: z.string().optional(),
+  exitCode: z.number().optional(),
+  changes: z.array(AgentFileChangeSchema).optional(),
+  discoveredTools: z.array(z.string()).optional(),
+  auditEvent: AuditEventSchema.optional(),
+  permissionDetails: z
+    .object({
+      toolName: z.string(),
+      riskTier: PermissionTierSchema,
+      action: z.string(),
+      reason: z.string().optional(),
+    })
+    .optional(),
   error: z
     .object({
       code: z.string(),
@@ -197,3 +488,9 @@ export const AuditLogEventSchema = z.object({
   providerAttempts: z.array(ProviderAttemptSchema).optional(),
 });
 export type AuditLogEvent = z.infer<typeof AuditLogEventSchema>;
+
+export {
+  PathContainmentError,
+  resolveWithinBase,
+  tryResolveWithinBase,
+} from "./lib/safePath.js";

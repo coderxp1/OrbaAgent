@@ -1,6 +1,6 @@
 "use client";
 
-import type { ChatMessage, NormalizedEvent, UsageStats } from "@orbaagent/shared";
+import type { AgentActivity, ChatMessage, NormalizedEvent, UsageStats } from "@orbaagent/shared";
 import { useCallback, useRef, useState } from "react";
 
 export function useAgentChat() {
@@ -9,6 +9,7 @@ export function useAgentChat() {
   const [error, setError] = useState<{ code: string; message: string } | null>(null);
   const [latestUsage, setLatestUsage] = useState<UsageStats | null>(null);
   const [activeTraceId, setActiveTraceId] = useState<string | null>(null);
+  const [activeActivity, setActiveActivity] = useState<AgentActivity | null>(null);
 
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -21,7 +22,17 @@ export function useAgentChat() {
   }, []);
 
   const sendMessage = useCallback(
-    async (userContent: string) => {
+    async (
+      userContent: string,
+      attachments?: Array<{
+        artifactId: string;
+        name?: string;
+        type?: string;
+        size?: number;
+        relPath?: string;
+        file?: File;
+      }>,
+    ) => {
       if (!userContent.trim() || isGenerating) return;
 
       setError(null);
@@ -55,6 +66,63 @@ export function useAgentChat() {
       abortControllerRef.current = controller;
 
       try {
+        const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
+        const SUPPORTED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+
+        let apiPayloadContent: any = userContent;
+        if (attachments?.some((a) => a.type?.startsWith("image/"))) {
+          const parts: any[] = [{ type: "text", text: userContent }];
+          for (const att of attachments) {
+            if (att.type?.startsWith("image/")) {
+              if (!SUPPORTED_IMAGE_TYPES.includes(att.type)) {
+                setError({
+                  code: "unsupported_image",
+                  message: `Unsupported image format: ${att.type}. Supported formats: JPEG, PNG, WEBP, GIF.`,
+                });
+                setIsGenerating(false);
+                setMessages(messages);
+                return;
+              }
+              if ((att.size || 0) > MAX_IMAGE_SIZE) {
+                setError({
+                  code: "image_too_large",
+                  message: `Image exceeds 5MB limit: ${att.name || "Unknown"}`,
+                });
+                setIsGenerating(false);
+                setMessages(messages);
+                return;
+              }
+              if (!att.file) {
+                setError({
+                  code: "image_read_error",
+                  message: `File data missing for image: ${att.name || "Unknown"}`,
+                });
+                setIsGenerating(false);
+                setMessages(messages);
+                return;
+              }
+              try {
+                const dataUrl = await new Promise<string>((resolve, reject) => {
+                  const reader = new FileReader();
+                  reader.onload = () => resolve(reader.result as string);
+                  reader.onerror = reject;
+                  reader.readAsDataURL(att.file as File);
+                });
+                parts.push({ type: "image_url", image_url: { url: dataUrl } });
+              } catch (e) {
+                setError({
+                  code: "image_read_error",
+                  message: `Failed to read image: ${att.name || "Unknown"}`,
+                });
+                setIsGenerating(false);
+                setMessages(messages);
+                return;
+              }
+            }
+          }
+          apiPayloadContent = parts;
+        }
+
         const response = await fetch("/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -63,9 +131,19 @@ export function useAgentChat() {
             modelId: "auto",
             messages: updatedMessages.map((m) => ({
               role: m.role,
-              content: m.content,
+              content: m.id === userMsgId ? apiPayloadContent : m.content,
             })),
             stream: true,
+            attachments:
+              attachments && attachments.length > 0
+                ? attachments.map((a) => ({
+                    artifactId: a.artifactId,
+                    name: a.name,
+                    type: a.type,
+                    size: a.size,
+                    relPath: a.relPath,
+                  }))
+                : undefined,
             trace: {
               traceId,
               tenantId: "default-tenant",
@@ -78,7 +156,8 @@ export function useAgentChat() {
 
         if (!response.ok) {
           const errData = await response.json().catch(() => ({}));
-          throw new Error(errData.error || `HTTP error ${response.status}`);
+          const details = errData?.error ? `: ${errData.error}` : "";
+          throw new Error(`HTTP ${response.status}${details}`);
         }
 
         const reader = response.body?.getReader();
@@ -112,17 +191,26 @@ export function useAgentChat() {
                   setMessages((prev) =>
                     prev.map((msg) =>
                       msg.id === assistantMsgId
-                        ? { ...msg, content: msg.content + event.textDelta }
+                        ? {
+                            ...msg,
+                            content:
+                              (typeof msg.content === "string" ? msg.content : "") +
+                              event.textDelta,
+                          }
                         : msg,
                     ),
                   );
                 } else if (event.type === "thinking_delta" && event.thinkingDelta) {
                   setMessages((prev) =>
-                    prev.map((msg) =>
-                      msg.id === assistantMsgId
-                        ? { ...msg, thinking: (msg.thinking || "") + event.thinkingDelta }
-                        : msg,
-                    ),
+                    prev.map((msg) => {
+                      if (msg.id !== assistantMsgId) return msg;
+                      const currentThinking = msg.thinking || "";
+                      const delta = event.thinkingDelta || "";
+                      if (currentThinking.endsWith(delta)) {
+                        return msg;
+                      }
+                      return { ...msg, thinking: currentThinking + delta };
+                    }),
                   );
                 } else if (event.type === "tool_call_start" && event.toolCall) {
                   const tc = event.toolCall;
@@ -131,6 +219,25 @@ export function useAgentChat() {
                       if (msg.id !== assistantMsgId) return msg;
                       const existing = msg.toolCalls || [];
                       return { ...msg, toolCalls: [...existing, tc] };
+                    }),
+                  );
+                } else if (event.type === "tool_call_result" && event.toolResult) {
+                  const tr = event.toolResult;
+                  setMessages((prev) =>
+                    prev.map((msg) => {
+                      if (msg.id !== assistantMsgId) return msg;
+                      const existing = msg.toolResults || [];
+                      return { ...msg, toolResults: [...existing, tr] };
+                    }),
+                  );
+                } else if (event.type === "agent_activity" && event.activity) {
+                  setActiveActivity(event.activity);
+                } else if (event.type === "file_changes_detected" && event.changes) {
+                  const detectedChanges = event.changes;
+                  setMessages((prev) =>
+                    prev.map((msg) => {
+                      if (msg.id !== assistantMsgId) return msg;
+                      return { ...msg, fileChanges: detectedChanges };
                     }),
                   );
                 } else if (event.type === "usage" && event.usage) {
@@ -149,21 +256,84 @@ export function useAgentChat() {
           // User explicitly cancelled generation
         } else {
           const msg = err instanceof Error ? err.message : String(err);
-          setError({ code: "client_error", message: msg });
+          // Normalize common fetch/network failures for clearer UX
+          const lower = msg.toLowerCase();
+          const isNetwork =
+            lower.includes("networkerror") ||
+            lower.includes("network error") ||
+            lower.includes("failed to fetch") ||
+            lower.includes("fetch failed") ||
+            lower.includes("load failed") ||
+            lower.includes("typeerror");
+          setError({
+            code: isNetwork ? "CLIENT_ERROR" : "client_error",
+            message: isNetwork
+              ? "network error — verify the API is reachable and streaming is allowed through the proxy"
+              : msg,
+          });
         }
       } finally {
         setIsGenerating(false);
+        setActiveActivity(null);
         abortControllerRef.current = null;
       }
     },
     [isGenerating, messages],
   );
 
+  const reviewFileChange = useCallback(
+    async (
+      action: "accept" | "reject" | "accept_all" | "reject_all",
+      changeId?: string,
+      agentRunId?: string,
+    ) => {
+      try {
+        await fetch("/api/changes/review", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action, changeId, agentRunId }),
+        });
+
+        // Optimistically update local message state
+        setMessages((prev) =>
+          prev.map((msg) => {
+            if (!msg.fileChanges || msg.fileChanges.length === 0) return msg;
+            const updated = msg.fileChanges.map((change) => {
+              if (action === "accept_all") {
+                return { ...change, reviewStatus: "accepted" as const };
+              }
+              if (action === "reject_all") {
+                return { ...change, reviewStatus: "rejected" as const };
+              }
+              if (change.changeId === changeId) {
+                return {
+                  ...change,
+                  reviewStatus: (action === "accept" ? "accepted" : "rejected") as
+                    | "accepted"
+                    | "rejected",
+                };
+              }
+              return change;
+            });
+            return { ...msg, fileChanges: updated };
+          }),
+        );
+      } catch (err) {
+        console.error("Failed to review file change:", err);
+      }
+    },
+    [],
+  );
+
   const retryLastMessage = useCallback(() => {
     const lastUserMsg = [...messages].reverse().find((m) => m.role === "user");
     if (lastUserMsg) {
       setMessages((prev) => prev.slice(0, -1)); // Remove failed assistant msg
-      sendMessage(lastUserMsg.content);
+      sendMessage(
+        typeof lastUserMsg.content === "string"
+          ? lastUserMsg.content
+          : lastUserMsg.content.map((p) => (p.type === "text" ? p.text : "")).join(""),
+      );
     }
   }, [messages, sendMessage]);
 
@@ -173,6 +343,7 @@ export function useAgentChat() {
     setError(null);
     setLatestUsage(null);
     setActiveTraceId(null);
+    setActiveActivity(null);
   }, [cancelGeneration]);
 
   return {
@@ -181,9 +352,11 @@ export function useAgentChat() {
     error,
     latestUsage,
     activeTraceId,
+    activeActivity,
     sendMessage,
     cancelGeneration,
     retryLastMessage,
     clearChat,
+    reviewFileChange,
   };
 }

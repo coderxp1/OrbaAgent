@@ -19,18 +19,21 @@ const MODEL_DEFAULT_TOKENS: Record<string, number> = {
   "gpt-5.2": 150000,
   "gpt-5.1": 250000,
   "gpt-5": 100000,
+  "gpt-5-mini": 100000,
   "gpt-5-eu": 250000,
   "gpt-5-mini-eu": 250000,
+  o3: 300000,
+  "o4-mini": 200000,
   "openrouter/auto": 500000,
   "openrouter/free": 100000,
 };
 
-// Local usage tracking map per composite key (tenant:credential:modelId or modelId)
+// Local usage tracking map per composite key (tenantId:modelId or modelId)
 const LOCAL_USAGE_MAP: Map<string, LocalUsage> = new Map();
 
-function getUsageKey(modelId: string, tenantId?: string, credentialId?: string): string {
-  if (tenantId || credentialId) {
-    return `${tenantId || "default"}:${credentialId || "default"}:${modelId}`;
+function getUsageKey(modelId: string, tenantId?: string): string {
+  if (tenantId) {
+    return `${tenantId}:${modelId}`;
   }
   return modelId;
 }
@@ -59,14 +62,10 @@ export function getConfiguredQuotaLimits(modelId?: string): QuotaLimits {
 }
 
 /**
- * Retrieve locally tracked usage metrics for a model (with BYOK tenant/credential isolation).
+ * Retrieve locally tracked usage metrics for a model (with platform tenant-level isolation).
  */
-export function getLocalTrackedUsage(
-  modelId: string,
-  tenantId?: string,
-  credentialId?: string,
-): LocalUsage {
-  const key = getUsageKey(modelId, tenantId, credentialId);
+export function getLocalTrackedUsage(modelId: string, tenantId?: string): LocalUsage {
+  const key = getUsageKey(modelId, tenantId);
   const existing = LOCAL_USAGE_MAP.get(key);
   if (existing) return existing;
   const initial = { requests: 0, tokens: 0 };
@@ -77,14 +76,9 @@ export function getLocalTrackedUsage(
 /**
  * Record successful request usage against locally tracked counters.
  */
-export function recordLocalUsage(
-  modelId: string,
-  tokens: number,
-  tenantId?: string,
-  credentialId?: string,
-): void {
-  const key = getUsageKey(modelId, tenantId, credentialId);
-  const usage = getLocalTrackedUsage(modelId, tenantId, credentialId);
+export function recordLocalUsage(modelId: string, tokens: number, tenantId?: string): void {
+  const key = getUsageKey(modelId, tenantId);
+  const usage = getLocalTrackedUsage(modelId, tenantId);
   usage.requests += 1;
   usage.tokens += tokens;
   LOCAL_USAGE_MAP.set(key, usage);
@@ -93,22 +87,18 @@ export function recordLocalUsage(
 /**
  * Check whether a model has reached its locally configured quota limit.
  */
-export function isLocalQuotaExhausted(
-  modelId: string,
-  tenantId?: string,
-  credentialId?: string,
-): boolean {
+export function isLocalQuotaExhausted(modelId: string, tenantId?: string): boolean {
   const limits = getConfiguredQuotaLimits(modelId);
-  const usage = getLocalTrackedUsage(modelId, tenantId, credentialId);
+  const usage = getLocalTrackedUsage(modelId, tenantId);
   return usage.requests >= limits.maxRequests || usage.tokens >= limits.maxTokens;
 }
 
 /**
  * Reset local usage counters (primarily for testing and environment resets).
  */
-export function resetLocalUsage(modelId?: string, tenantId?: string, credentialId?: string): void {
+export function resetLocalUsage(modelId?: string, tenantId?: string): void {
   if (modelId) {
-    const key = getUsageKey(modelId, tenantId, credentialId);
+    const key = getUsageKey(modelId, tenantId);
     LOCAL_USAGE_MAP.set(key, { requests: 0, tokens: 0 });
   } else {
     LOCAL_USAGE_MAP.clear();
@@ -132,91 +122,32 @@ export function hasConfirmedCapability(
   return !model.isUnconfirmed;
 }
 
-export const MODEL_REGISTRY: Record<string, ModelSpec> = {
-  // Confirmed Langdock Models (unverified specs marked isUnconfirmed: true)
-  "gpt-6-sol": {
-    id: "gpt-6-sol",
-    name: "Langdock Sol Engine",
-    provider: "langdock",
-    capabilities: ["text", "vision", "streaming", "tool_calling", "json_mode", "thinking"],
-    isUnconfirmed: true,
-  },
-  "gpt-5.4": {
-    id: "gpt-5.4",
-    name: "Langdock High Intelligence Engine",
-    provider: "langdock",
-    capabilities: ["text", "vision", "streaming", "tool_calling", "json_mode", "thinking"],
-    isDefault: true,
-    isUnconfirmed: true,
-  },
-  "gpt-5.4-mini": {
-    id: "gpt-5.4-mini",
-    name: "Langdock Fast Execution Engine",
-    provider: "langdock",
-    capabilities: ["text", "streaming", "tool_calling"],
-    isUnconfirmed: true,
-  },
-  "gpt-5.2-pro": {
-    id: "gpt-5.2-pro",
-    name: "Langdock Pro Reasoning Engine",
-    provider: "langdock",
-    capabilities: ["text", "vision", "streaming", "tool_calling", "json_mode", "thinking"],
-    isUnconfirmed: true,
-  },
-  "gpt-5.2": {
-    id: "gpt-5.2",
-    name: "Langdock Standard Engine",
-    provider: "langdock",
-    capabilities: ["text", "vision", "streaming", "tool_calling", "json_mode"],
-    isUnconfirmed: true,
-  },
-  "gpt-5.1": {
-    id: "gpt-5.1",
-    name: "Langdock Balanced Engine",
-    provider: "langdock",
-    capabilities: ["text", "streaming", "tool_calling"],
-    isUnconfirmed: true,
-  },
-  "gpt-5": {
-    id: "gpt-5",
-    name: "Langdock Base Engine",
-    provider: "langdock",
-    capabilities: ["text", "streaming", "tool_calling"],
-    isUnconfirmed: true,
-  },
-  "gpt-5-eu": {
-    id: "gpt-5-eu",
-    name: "Langdock EU Regional Engine",
-    provider: "langdock",
-    capabilities: ["text", "streaming", "tool_calling"],
-    isUnconfirmed: true,
-  },
-  "gpt-5-mini-eu": {
-    id: "gpt-5-mini-eu",
-    name: "Langdock Fast EU Regional Engine",
-    provider: "langdock",
-    capabilities: ["text", "streaming", "tool_calling"],
-    isUnconfirmed: true,
-  },
+import {
+  MODEL_CATALOG,
+  getUnavailableModelReason,
+  resolveModelDefinition,
+  toModelSpec,
+} from "./catalog.js";
 
-  // OpenRouter Secondary & Fallback Models
-  "openrouter/auto": {
-    id: "openrouter/auto",
-    name: "OpenRouter Unified Engine",
-    provider: "openrouter",
-    capabilities: ["text", "vision", "streaming", "tool_calling", "json_mode", "thinking"],
-  },
-  "openrouter/free": {
-    id: "openrouter/free",
-    name: "OpenRouter Free Fallback Engine",
-    provider: "openrouter",
-    capabilities: ["text", "streaming", "tool_calling"],
-  },
-};
+export const MODEL_REGISTRY: Record<string, ModelSpec> = {};
+for (const def of Object.values(MODEL_CATALOG)) {
+  MODEL_REGISTRY[def.id] = toModelSpec(def);
+}
 
 export function getModelSpec(modelId: string): ModelSpec {
   if (modelId === "auto" || modelId === "" || !modelId) {
-    return MODEL_REGISTRY["gpt-5.4"];
+    return MODEL_REGISTRY["gpt-5.4"] || Object.values(MODEL_REGISTRY)[0];
+  }
+
+  // Known-but-unavailable models must NOT silently resolve to a substitute.
+  const unavailableReason = getUnavailableModelReason(modelId);
+  if (unavailableReason) {
+    throw new Error(`Model "${modelId}" is unavailable. ${unavailableReason}`);
+  }
+
+  const resolved = resolveModelDefinition(modelId);
+  if (resolved) {
+    return toModelSpec(resolved);
   }
   const model = MODEL_REGISTRY[modelId];
   if (!model) {
@@ -226,7 +157,9 @@ export function getModelSpec(modelId: string): ModelSpec {
 }
 
 export function listAvailableModels(providerFilter?: ProviderId): ModelSpec[] {
-  const models = Object.values(MODEL_REGISTRY);
+  const models = Object.values(MODEL_CATALOG)
+    .filter((m) => m.enabled)
+    .map((m) => toModelSpec(m));
   if (providerFilter) {
     return models.filter((m) => m.provider === providerFilter);
   }

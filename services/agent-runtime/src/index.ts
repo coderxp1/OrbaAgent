@@ -1,9 +1,43 @@
-export const SERVICE_NAME = "agent-runtime";
-
-export async function run() {
-  console.log(`Starting ${SERVICE_NAME}...`);
-}
-
-if (process.env.NODE_ENV !== "test") {
-  run();
-}
+export * from "./tools/base.js";
+export * from "./tools/artifacts.js";
+export * from "./tools/mediaWorkerConfig.js";
+export * from "./tools/mediaImageGenerate.js";
+export * from "./tools/mediaVideoGenerate.js";
+export * from "./tools/shell.js";
+export * from "./tools/filesystem.js";
+export * from "./tools/filesystemExtended.js";
+export * from "./tools/git.js";
+export * from "./tools/github.js";
+export * from "./tools/web.js";
+export * from "./tools/taskPlanTool.js";
+export * from "./tools/taskStepTool.js";
+export * from "./tools/taskComplete.js";
+export * from "./taskPlan.js";
+export * from "./tools/toolsSearch.js";
+export * from "./tools/environment.js";
+export * from "./tools/processManager.js";
+export * from "./tools/terminalSession.js";
+export * from "./tools/browser.js";
+export * from "./tools/packageManager.js";
+export * from "./tools/testRunner.js";
+export * from "./tools/lintTypecheck.js";
+export * from "./mcp/transport.js";
+export * from "./mcp/provider.js";
+export * from "./memory.js";
+export * from "./changes.js";
+export * from "./integrations.js";
+export * from "./secrets.js";
+export * from "./tools/container.js";
+export * from "./tools/database.js";
+export * from "./tools/ci.js";
+export * from "./tools/deployment.js";
+export * from "./tools/jobManager.js";
+export * from "./jobs/manager.js";
+export * from "./connectors/types.js";
+export * from "./connectors/services.js";
+export * from "./connectors/provider.js";
+export * from "./native/provider.js";
+export * from "./permissions.js";
+export * from "./router.js";
+export * from "./registry.js";
+export * from "./capabilities.js";

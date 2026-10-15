@@ -1,3 +1,4 @@
+import type { ModelSpec } from "@orbaagent/shared";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   MODEL_REGISTRY,
@@ -47,13 +48,13 @@ describe("Model Gateway Registry & Spec Management", () => {
     expect(limitsGpt5.maxTokens).toBe(120000);
   });
 
-  it("should isolate quota tracking per BYOK tenant and credential ID", () => {
+  it("should isolate quota tracking per platform tenant ID", () => {
     // Record usage for Tenant A
-    recordLocalUsage("gpt-5", 100000, "tenant-A", "cred-A");
-    expect(isLocalQuotaExhausted("gpt-5", "tenant-A", "cred-A")).toBe(true);
+    recordLocalUsage("gpt-5", 100000, "tenant-A");
+    expect(isLocalQuotaExhausted("gpt-5", "tenant-A")).toBe(true);
 
     // Tenant B should remain completely unexhausted
-    expect(isLocalQuotaExhausted("gpt-5", "tenant-B", "cred-B")).toBe(false);
+    expect(isLocalQuotaExhausted("gpt-5", "tenant-B")).toBe(false);
   });
 
   it("should evaluate 499 requests as available and 500 as exhausted", () => {
@@ -69,18 +70,41 @@ describe("Model Gateway Registry & Spec Management", () => {
   });
 
   it("should not treat unconfirmed capabilities as confirmed for hard routing decisions", () => {
+    // All Langdock catalog entries are now provider-verified, so gpt-5.4 is
+    // confirmed and its declared vision capability is usable for routing.
     const gpt54 = MODEL_REGISTRY["gpt-5.4"];
-    expect(gpt54.isUnconfirmed).toBe(true);
+    expect(gpt54.isUnconfirmed).not.toBe(true);
 
-    // Standard text & tool_calling are basic
+    // Standard text & tool_calling are always basic
     expect(hasConfirmedCapability(gpt54, "text")).toBe(true);
     expect(hasConfirmedCapability(gpt54, "tool_calling")).toBe(true);
-
-    // Specialized vision capability requires confirmed status (isUnconfirmed: false)
-    expect(hasConfirmedCapability(gpt54, "vision")).toBe(false);
 
     // OpenRouter models have confirmed vision capability
     const openrouterAuto = MODEL_REGISTRY["openrouter/auto"];
     expect(hasConfirmedCapability(openrouterAuto, "vision")).toBe(true);
+  });
+
+  it("gates specialized capabilities on confirmed status for an unverified model", () => {
+    // The gate must still refuse specialized capabilities when a model has not
+    // been verified to exist, even if the capability is declared.
+    const unverifiedSpec: ModelSpec = {
+      ...MODEL_REGISTRY["gpt-5.4"],
+      id: "unverified-model",
+      capabilities: ["text", "streaming", "tool_calling", "vision", "thinking"],
+      isUnconfirmed: true,
+    };
+
+    expect(hasConfirmedCapability(unverifiedSpec, "text")).toBe(true);
+    expect(hasConfirmedCapability(unverifiedSpec, "streaming")).toBe(true);
+    expect(hasConfirmedCapability(unverifiedSpec, "tool_calling")).toBe(true);
+
+    // Specialized capabilities require confirmed status
+    expect(hasConfirmedCapability(unverifiedSpec, "vision")).toBe(false);
+    expect(hasConfirmedCapability(unverifiedSpec, "thinking")).toBe(false);
+
+    // And they open up once the model is confirmed
+    const verifiedSpec: ModelSpec = { ...unverifiedSpec, isUnconfirmed: false };
+    expect(hasConfirmedCapability(verifiedSpec, "vision")).toBe(true);
+    expect(hasConfirmedCapability(verifiedSpec, "thinking")).toBe(true);
   });
 });

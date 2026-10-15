@@ -35,6 +35,7 @@ services:
     read_only: true
     tmpfs:
       - /run
+      - /tmp
 
   catchall-404:
     image: nginx:1.27.4-alpine
@@ -66,9 +67,8 @@ services:
       - "80:80"
       - "443:443"
     environment:
-      - ACME_EMAIL=${ACME_EMAIL:-ph@klaw.at}
-      - IONOS_API_KEY=${IONOS_API_KEY:-}
-      - CERT_RESOLVER=${CERT_RESOLVER:-le-staging}
+      - ACME_EMAIL=${ACME_EMAIL:-admin@orbaagent.dev}
+      - CERT_RESOLVER=${CERT_RESOLVER:-le-http}
     volumes:
       - ./traefik.yml:/etc/traefik/traefik.yml:ro
       - ./dynamic:/etc/traefik/dynamic:ro

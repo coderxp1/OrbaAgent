@@ -1,0 +1,24 @@
+# OrbaAgent GPU media tunnel — production side (85.215.156.241)
+# Install to: /etc/wireguard/wg-orba.conf   (root:root 0600 — contains a private key)
+# Bring up:   sudo systemctl enable --now wg-quick@wg-orba
+#
+# This host DIALS. It has passwordless sudo, so bringing the tunnel up requires
+# no privileged action on the GPU host.
+#
+# Replace <PRODUCTION_PRIVATE_KEY> and <GPU_HOST_PUBLIC_KEY> with generated keys.
+# Never commit real keys.
+
+[Interface]
+Address = 10.77.0.1/32
+PrivateKey = <PRODUCTION_PRIVATE_KEY>
+# No ListenPort: this side is a client and uses an ephemeral source port, so no
+# inbound UDP rule is needed on production.
+
+[Peer]
+PublicKey = <GPU_HOST_PUBLIC_KEY>
+# The GPU worker's tunnel address, and nothing else. This deliberately does NOT
+# route the GPU host's public /25 or any general traffic over the tunnel, so a
+# compromised GPU host cannot reach production's other services through it.
+AllowedIPs = 10.77.0.2/32
+Endpoint = 45.84.65.76:51820
+PersistentKeepalive = 25

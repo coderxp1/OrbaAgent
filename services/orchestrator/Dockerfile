@@ -7,11 +7,17 @@ FROM base AS build
 WORKDIR /app
 COPY pnpm-lock.yaml* package.json pnpm-workspace.yaml tsconfig.base.json ./
 COPY packages/shared/package.json ./packages/shared/
+COPY services/model-gateway/package.json ./services/model-gateway/
+COPY services/agent-runtime/package.json ./services/agent-runtime/
 COPY services/orchestrator/package.json ./services/orchestrator/
 RUN pnpm install --frozen-lockfile || pnpm install
 COPY packages/shared/ ./packages/shared/
+COPY services/model-gateway/ ./services/model-gateway/
+COPY services/agent-runtime/ ./services/agent-runtime/
 COPY services/orchestrator/ ./services/orchestrator/
 RUN pnpm --filter @orbaagent/shared build
+RUN pnpm --filter @orbaagent/model-gateway build
+RUN pnpm --filter @orbaagent/agent-runtime build
 RUN pnpm --filter @orbaagent/orchestrator build
 
 FROM base AS runner
@@ -20,6 +26,10 @@ ENV NODE_ENV=production
 COPY --from=build /app/package.json /app/pnpm-workspace.yaml ./
 COPY --from=build /app/packages/shared/dist ./packages/shared/dist
 COPY --from=build /app/packages/shared/package.json ./packages/shared/package.json
+COPY --from=build /app/services/model-gateway/dist ./services/model-gateway/dist
+COPY --from=build /app/services/model-gateway/package.json ./services/model-gateway/package.json
+COPY --from=build /app/services/agent-runtime/dist ./services/agent-runtime/dist
+COPY --from=build /app/services/agent-runtime/package.json ./services/agent-runtime/package.json
 COPY --from=build /app/services/orchestrator/dist ./services/orchestrator/dist
 COPY --from=build /app/services/orchestrator/package.json ./services/orchestrator/package.json
 COPY --from=build /app/node_modules ./node_modules

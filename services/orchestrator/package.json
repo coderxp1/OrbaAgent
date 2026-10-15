@@ -3,13 +3,23 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
   "scripts": {
-    "build": "tsc -b",
+    "build": "tsc -b --force",
     "dev": "node dist/index.js",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@orbaagent/shared": "workspace:*"
+    "@orbaagent/shared": "workspace:*",
+    "@orbaagent/agent-runtime": "workspace:*",
+    "@orbaagent/model-gateway": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.13.5",
