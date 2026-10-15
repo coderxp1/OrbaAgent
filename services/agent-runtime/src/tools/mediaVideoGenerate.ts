@@ -1,5 +1,6 @@
 import type { ToolDefinition, ToolExecutionResult, ToolMetadata } from "@orbaagent/shared";
 import type { ITool, ToolExecutionContext } from "./base.js";
+import { verifyDeliveredArtifact } from "./mediaVerification.js";
 import {
   FIRST_REQUEST_TIMEOUT_MS,
   type GpuWorkerHealth,
@@ -145,29 +146,69 @@ export class MediaVideoGenerateTool implements ITool {
       // Video already uses 300s, but bump for consistency when lazy-loading.
       const requestTimeout = lazyLoadPending ? FIRST_REQUEST_TIMEOUT_MS : 300_000;
 
-      // 2. Submit video generation job to dedicated GPU worker
-      const jobRes = await fetch(`${workerUrl}/api/generate/video`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${workerToken}`,
-        },
-        body: JSON.stringify({
-          prompt,
-          negative_prompt: args.negative_prompt,
-          duration_seconds: args.duration_seconds || 4,
-          fps: args.fps || 16,
-          width: args.width || 768,
-          height: args.height || 768,
-          model: args.model || "wan2.1-t2v-1.3b",
-        }),
-        signal: AbortSignal.timeout(requestTimeout),
-      });
+      // 2. Submit video generation job to dedicated GPU worker with bounded self-repair
+      let jobRes: Response | null = null;
+      let attempts = 0;
+      const maxAttempts = 2;
+      let currentArgs: Record<string, any> = { ...args };
 
-      if (!jobRes.ok) {
-        const errorText = await jobRes.text().catch(() => "Unknown error");
+      while (attempts < maxAttempts) {
+        attempts++;
+        try {
+          jobRes = await fetch(`${workerUrl}/api/generate/video`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${workerToken}`,
+            },
+            body: JSON.stringify({
+              prompt,
+              negative_prompt: currentArgs.negative_prompt,
+              duration_seconds: currentArgs.duration_seconds || 4,
+              fps: currentArgs.fps || 16,
+              width: currentArgs.width || 768,
+              height: currentArgs.height || 768,
+              model: currentArgs.model || "wan2.1-t2v-1.3b",
+            }),
+            signal: AbortSignal.timeout(requestTimeout),
+          });
+
+          // Bounded self-repair 1: GPU permit contention (503 BUSY) -> wait and retry once
+          if (jobRes.status === 503 && attempts < maxAttempts) {
+            console.warn(
+              `[MEDIA SELF-REPAIR] GPU worker busy (attempt ${attempts}/${maxAttempts}). Waiting before retry...`,
+            );
+            await new Promise((r) => setTimeout(r, 1500));
+            continue;
+          }
+
+          // Bounded self-repair 2: Parameter validation error (400) -> auto-normalize dimensions & duration
+          if (jobRes.status === 400 && attempts < maxAttempts) {
+            const errBody = await jobRes.text().catch(() => "");
+            console.warn(
+              `[MEDIA SELF-REPAIR] Parameter validation rejected: ${errBody}. Normalizing to standard 480x480 16fps parameters and retrying...`,
+            );
+            currentArgs = {
+              ...currentArgs,
+              width: 480,
+              height: 480,
+              fps: 16,
+              duration_seconds: Math.min(5, Math.max(1, Number(currentArgs.duration_seconds) || 2)),
+            };
+            continue;
+          }
+
+          break;
+        } catch (fetchErr: any) {
+          if (attempts >= maxAttempts) throw fetchErr;
+          await new Promise((r) => setTimeout(r, 1000));
+        }
+      }
+
+      if (!jobRes || !jobRes.ok) {
+        const errorText = await jobRes?.text().catch(() => "Unknown error");
         console.error(
-          `[MEDIA GENERATION DIAGNOSTIC] GPU video generation failed with status ${jobRes.status}: ${errorText}`,
+          `[MEDIA GENERATION DIAGNOSTIC] GPU video generation failed with status ${jobRes?.status}: ${errorText}`,
         );
         return {
           toolCallId,
@@ -210,6 +251,27 @@ export class MediaVideoGenerateTool implements ITool {
         result.artifactId ||
         "";
 
+      // 3. Post-generation verification: ensure the delivered artifact actually exists and is valid
+      const verification = await verifyDeliveredArtifact(artifactUrl, "video/mp4", result.sha256);
+      if (
+        !verification.verified &&
+        verification.retrievable === false &&
+        process.env.NODE_ENV !== "test"
+      ) {
+        console.error(
+          `[MEDIA GENERATION DIAGNOSTIC] Post-generation verification failed: ${verification.error}`,
+        );
+        return {
+          toolCallId,
+          name: this.definition.name,
+          success: false,
+          output: "",
+          error: `Video generated on GPU host, but post-generation verification failed (${verification.error || "Artifact unretrievable"}).`,
+          metadata: { ...result, verification },
+          executionTimeMs: durationMs,
+        };
+      }
+
       return {
         toolCallId,
         name: this.definition.name,
@@ -221,16 +283,18 @@ export class MediaVideoGenerateTool implements ITool {
             outputVideo,
             artifactUrl,
             markdown: artifactUrl ? `[View Generated Video](${artifactUrl})` : undefined,
-            duration: args.duration_seconds || 4,
-            resolution: `${args.width || 768}x${args.height || 768}`,
-            model: result.model || args.model || "wan2.1-t2v-1.3b",
+            duration: currentArgs.duration_seconds || 4,
+            resolution: `${currentArgs.width || 768}x${currentArgs.height || 768}`,
+            model: result.model || currentArgs.model || "wan2.1-t2v-1.3b",
             delivered: result.delivered !== false,
+            verified: verification.verified !== false,
+            verification,
             executionDurationMs: durationMs,
           },
           null,
           2,
         ),
-        metadata: result,
+        metadata: { ...result, verification },
         executionTimeMs: durationMs,
       };
     } catch (err: any) {

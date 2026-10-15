@@ -412,6 +412,55 @@ function renderMarkdownInline(text: string) {
         );
       }
 
+      // Unified artifact presentation: render inline playable video player for video artifacts
+      const isVideoArtifact =
+        (href.startsWith("/api/artifacts/") ||
+          href.startsWith("http://") ||
+          href.startsWith("https://")) &&
+        (href.endsWith(".mp4") ||
+          href.endsWith(".webm") ||
+          linkText.toLowerCase().includes("video"));
+
+      if (isVideoArtifact) {
+        const filename = href.split("/").pop() || "video.mp4";
+        return (
+          <span key={i} className="my-3 block max-w-lg">
+            <span className="block overflow-hidden rounded-xl border border-zinc-750 bg-zinc-950/80 shadow-md">
+              <video
+                src={href}
+                controls
+                className="max-h-64 w-full object-contain bg-black"
+                preload="metadata"
+              >
+                <track kind="captions" />
+              </video>
+              <span className="p-2 flex items-center justify-between border-t border-zinc-800 bg-zinc-900/90 text-[11px] text-zinc-400">
+                <span className="font-mono truncate">{filename}</span>
+                <span className="flex items-center gap-2">
+                  <a
+                    href={href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-indigo-400 hover:text-indigo-300 underline shrink-0 font-sans"
+                  >
+                    Open artifact ↗
+                  </a>
+                  <a
+                    href={href}
+                    download
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-zinc-300 hover:text-white underline shrink-0 font-sans"
+                  >
+                    Download
+                  </a>
+                </span>
+              </span>
+            </span>
+          </span>
+        );
+      }
+
       return (
         <a
           key={i}
