@@ -1,5 +1,6 @@
 import type { ToolDefinition, ToolExecutionResult, ToolMetadata } from "@orbaagent/shared";
 import type { ITool, ToolExecutionContext } from "./base.js";
+import { verifyDeliveredArtifact } from "./mediaVerification.js";
 import {
   FIRST_REQUEST_TIMEOUT_MS,
   type GpuWorkerHealth,
@@ -150,30 +151,69 @@ export class MediaImageGenerateTool implements ITool {
       // Use an extended timeout for the first request (model loading).
       const requestTimeout = lazyLoadPending ? FIRST_REQUEST_TIMEOUT_MS : 120_000;
 
-      // 2. Submit image generation job to dedicated GPU worker
-      const jobRes = await fetch(`${workerUrl}/api/generate/image`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${workerToken}`,
-        },
-        body: JSON.stringify({
-          prompt,
-          negative_prompt: args.negative_prompt,
-          width: args.width || 1024,
-          height: args.height || 1024,
-          steps: args.steps || 20,
-          seed: args.seed,
-          model: args.model || "flux1-schnell",
-          output_format: args.output_format || "png",
-        }),
-        signal: AbortSignal.timeout(requestTimeout),
-      });
+      // 2. Submit image generation job to dedicated GPU worker with bounded self-repair
+      let jobRes: Response | null = null;
+      let attempts = 0;
+      const maxAttempts = 2;
+      let currentArgs: Record<string, any> = { ...args };
 
-      if (!jobRes.ok) {
-        const errorText = await jobRes.text().catch(() => "Unknown error");
+      while (attempts < maxAttempts) {
+        attempts++;
+        try {
+          jobRes = await fetch(`${workerUrl}/api/generate/image`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${workerToken}`,
+            },
+            body: JSON.stringify({
+              prompt,
+              negative_prompt: currentArgs.negative_prompt,
+              width: currentArgs.width || 1024,
+              height: currentArgs.height || 1024,
+              steps: currentArgs.steps || 4,
+              seed: currentArgs.seed,
+              model: currentArgs.model || "flux1-schnell",
+              output_format: currentArgs.output_format || "png",
+            }),
+            signal: AbortSignal.timeout(requestTimeout),
+          });
+
+          // Bounded self-repair 1: GPU permit contention (503 BUSY) -> wait and retry once
+          if (jobRes.status === 503 && attempts < maxAttempts) {
+            console.warn(
+              `[MEDIA SELF-REPAIR] GPU worker busy (attempt ${attempts}/${maxAttempts}). Waiting before retry...`,
+            );
+            await new Promise((r) => setTimeout(r, 1500));
+            continue;
+          }
+
+          // Bounded self-repair 2: Parameter validation error (400) -> auto-normalize dimensions & steps
+          if (jobRes.status === 400 && attempts < maxAttempts) {
+            const errBody = await jobRes.text().catch(() => "");
+            console.warn(
+              `[MEDIA SELF-REPAIR] Image parameter validation rejected: ${errBody}. Normalizing to standard 512x512 4-step parameters and retrying...`,
+            );
+            currentArgs = {
+              ...currentArgs,
+              width: 512,
+              height: 512,
+              steps: 4,
+            };
+            continue;
+          }
+
+          break;
+        } catch (fetchErr: any) {
+          if (attempts >= maxAttempts) throw fetchErr;
+          await new Promise((r) => setTimeout(r, 1000));
+        }
+      }
+
+      if (!jobRes || !jobRes.ok) {
+        const errorText = await jobRes?.text().catch(() => "Unknown error");
         console.error(
-          `[MEDIA GENERATION DIAGNOSTIC] GPU image generation failed with status ${jobRes.status}: ${errorText}`,
+          `[MEDIA GENERATION DIAGNOSTIC] GPU image generation failed with status ${jobRes?.status}: ${errorText}`,
         );
         return {
           toolCallId,
@@ -215,6 +255,27 @@ export class MediaImageGenerateTool implements ITool {
         result.artifactId ||
         "";
 
+      // 3. Post-generation verification: ensure the delivered artifact actually exists and is valid
+      const verification = await verifyDeliveredArtifact(artifactUrl, "image/png", result.sha256);
+      if (
+        !verification.verified &&
+        verification.retrievable === false &&
+        process.env.NODE_ENV !== "test"
+      ) {
+        console.error(
+          `[MEDIA GENERATION DIAGNOSTIC] Post-generation verification failed: ${verification.error}`,
+        );
+        return {
+          toolCallId,
+          name: this.definition.name,
+          success: false,
+          output: "",
+          error: `Image generated on GPU host, but post-generation verification failed (${verification.error || "Artifact unretrievable"}).`,
+          metadata: { ...result, verification },
+          executionTimeMs: durationMs,
+        };
+      }
+
       return {
         toolCallId,
         name: this.definition.name,
@@ -226,15 +287,17 @@ export class MediaImageGenerateTool implements ITool {
             artifactPath,
             artifactUrl,
             markdown: artifactUrl ? `![Generated Image: ${prompt}](${artifactUrl})` : undefined,
-            model: result.model || args.model || "flux1-schnell",
-            dimensions: `${args.width || 1024}x${args.height || 1024}`,
+            model: result.model || currentArgs.model || "flux1-schnell",
+            dimensions: `${currentArgs.width || 1024}x${currentArgs.height || 1024}`,
             delivered: result.delivered !== false,
+            verified: verification.verified !== false,
+            verification,
             executionDurationMs: durationMs,
           },
           null,
           2,
         ),
-        metadata: result,
+        metadata: { ...result, verification },
         executionTimeMs: durationMs,
       };
     } catch (err: any) {

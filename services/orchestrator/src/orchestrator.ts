@@ -13,6 +13,7 @@ import type {
   NormalizedEvent,
   ToolCall,
 } from "@orbaagent/shared";
+import { routeUserIntent } from "./intentRouter.js";
 
 export interface AgentOrchestratorOptions {
   gateway?: ModelGateway;
@@ -110,6 +111,13 @@ export class AgentOrchestrator {
 
     // Initialize dynamic tool state: start with core tools on turn 0
     this.registry.resetActiveToolsToCore();
+
+    // Natural-language intent routing: detect media or domain capabilities and activate relevant tools
+    const intentResult = routeUserIntent(rawRequest.messages, this.registry);
+    if (intentResult.toolsToActivate.length > 0) {
+      this.registry.activateTools(intentResult.toolsToActivate);
+    }
+
     const activeToolDefinitions = this.registry.getActiveToolDefinitions();
     const totalToolsCount = this.registry.getAllToolDefinitions().length;
     const initialToolsCount = activeToolDefinitions.length;
@@ -149,6 +157,9 @@ export class AgentOrchestrator {
 
     let systemContext = memoryPrompt ? `${capabilityPrompt}\n\n${memoryPrompt}` : capabilityPrompt;
     systemContext += autonomousPolicy + planContext;
+    if (intentResult.systemGuidance) {
+      systemContext += `\n\n${intentResult.systemGuidance}`;
+    }
 
     // Prepare current messages history
     const currentMessages: ChatMessage[] = [...rawRequest.messages];
@@ -164,6 +175,18 @@ export class AgentOrchestrator {
       currentMessages[0] = {
         ...currentMessages[0],
         content: `${currentMessages[0].content}\n\n${systemContext}`,
+      };
+    }
+
+    if (intentResult.toolsToActivate.length > 0) {
+      yield {
+        type: "agent_activity",
+        traceId: trace.traceId,
+        activity: {
+          step: `Intent routing: activated ${intentResult.toolsToActivate.join(", ")}`,
+          status: "in_progress",
+          details: `Detected ${intentResult.intent} intent with ${(intentResult.confidence * 100).toFixed(0)}% confidence`,
+        },
       };
     }
 
@@ -410,13 +433,18 @@ export class AgentOrchestrator {
           }
         }
 
-        if (call.name === "test_runner" || call.name === "lint_typecheck") {
+        if (
+          call.name === "test_runner" ||
+          call.name === "lint_typecheck" ||
+          call.name === "media_image_generate" ||
+          call.name === "media_video_generate"
+        ) {
           yield {
             type: "task_verification",
             traceId: trace.traceId,
             verification: {
               checkName: call.name,
-              passed: result.success,
+              passed: result.success && (result.metadata as any)?.delivered !== false,
               evidence: result.output || result.error || "",
             },
           };
