@@ -127,10 +127,20 @@ export class ContainerTool implements ITool {
       }
 
       const resolvedHostPath = path.resolve(workspaceDir, hostPath);
-      if (!resolvedHostPath.startsWith(resolvedWorkspace)) {
-        throw new Error(
-          `Security violation: Container volume '${hostPath}' resolves outside workspace boundary '${workspaceDir}'.`,
-        );
+      if (resolvedHostPath !== resolvedWorkspace) {
+        const rel = path.relative(resolvedWorkspace, resolvedHostPath);
+        if (
+          rel === "" ||
+          rel === ".." ||
+          rel.startsWith(`..${path.sep}`) ||
+          rel.startsWith("../") ||
+          rel.startsWith("..\\") ||
+          path.isAbsolute(rel)
+        ) {
+          throw new Error(
+            `Security violation: Container volume '${hostPath}' resolves outside workspace boundary '${workspaceDir}'.`,
+          );
+        }
       }
     }
   }

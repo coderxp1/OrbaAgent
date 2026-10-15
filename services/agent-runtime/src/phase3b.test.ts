@@ -55,19 +55,61 @@ describe("Phase 3B: Autonomous Infrastructure, Databases, CI/CD, Connectors & Jo
     it("strictly blocks volume mounts attempting to escape workspace boundary", async () => {
       const containerTool = new ContainerTool();
 
-      // Outside workspace volume
+      // 1. Relative traversal outside workspace
       expect(() => {
         containerTool.validateVolumeMounts(["../../etc/shadow:/etc/shadow"], tempWorkspace);
       }).toThrow(/resolves outside workspace boundary/);
 
-      // System root volume
+      expect(() => {
+        containerTool.validateVolumeMounts(["../outside:/app/outside"], tempWorkspace);
+      }).toThrow(/resolves outside workspace boundary/);
+
+      // 2. Sibling-prefix paths (same string prefix as workspace, but outside directory boundary)
+      const siblingEvilPath = `${tempWorkspace}-evil`;
+      expect(() => {
+        containerTool.validateVolumeMounts([`${siblingEvilPath}:/app/evil`], tempWorkspace);
+      }).toThrow(/resolves outside workspace boundary/);
+
+      const siblingRelativeEvil = `../${path.basename(tempWorkspace)}-evil:/app/evil`;
+      expect(() => {
+        containerTool.validateVolumeMounts([siblingRelativeEvil], tempWorkspace);
+      }).toThrow(/resolves outside workspace boundary/);
+
+      // 3. Absolute filesystem paths outside workspace
+      expect(() => {
+        containerTool.validateVolumeMounts(["/etc/passwd:/host_passwd"], tempWorkspace);
+      }).toThrow(/resolves outside workspace boundary/);
+
+      expect(() => {
+        containerTool.validateVolumeMounts(
+          ["/var/run/docker.sock:/var/run/docker.sock"],
+          tempWorkspace,
+        );
+      }).toThrow(/resolves outside workspace boundary/);
+
+      // 4. Windows drive-prefixed paths
       expect(() => {
         containerTool.validateVolumeMounts(["C:\\Windows:/host_root"], tempWorkspace);
       }).toThrow(/resolves outside workspace boundary/);
 
-      // Safe workspace volume
       expect(() => {
-        containerTool.validateVolumeMounts(["./src:/app/src", "data:/app/data"], tempWorkspace);
+        containerTool.validateVolumeMounts(["D:\\Data:/data"], tempWorkspace);
+      }).toThrow(/resolves outside workspace boundary/);
+
+      // 5. Valid internal mounts & current directory
+      expect(() => {
+        containerTool.validateVolumeMounts(
+          ["./src:/app/src", "subdir/data:/data", ".:/app/root"],
+          tempWorkspace,
+        );
+      }).not.toThrow();
+
+      // 6. Named Docker volumes
+      expect(() => {
+        containerTool.validateVolumeMounts(
+          ["data:/app/data", "db_data:/var/lib/postgresql/data", "my-named-vol.1:/vol"],
+          tempWorkspace,
+        );
       }).not.toThrow();
     });
 
