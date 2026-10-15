@@ -219,6 +219,7 @@ export const TraceMetadataSchema = z.object({
   agentRunId: z.string().default("default-run"),
   githubToken: z.string().optional(),
   executionSessionId: z.string().optional(),
+  credentialId: z.string().optional(),
 });
 export type TraceMetadata = z.infer<typeof TraceMetadataSchema>;
 
