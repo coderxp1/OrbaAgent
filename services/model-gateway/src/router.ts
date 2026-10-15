@@ -1,6 +1,11 @@
 import type { ChatCompletionRequest, ModelSpec, ProviderId } from "@orbaagent/shared";
 import { GpuAdmissionController } from "./admission.js";
-import { MODEL_CATALOG, type ModelDefinition, resolveCapabilityAlias, toModelSpec } from "./catalog.js";
+import {
+  MODEL_CATALOG,
+  type ModelDefinition,
+  resolveCapabilityAlias,
+  toModelSpec,
+} from "./catalog.js";
 import { type ModelHealthStatus, ModelHealthTracker } from "./health.js";
 import { hasConfirmedCapability, isLocalQuotaExhausted } from "./registry.js";
 
@@ -32,7 +37,10 @@ export class IntelligenceRouter {
   private readonly admissionController: GpuAdmissionController;
   private readonly cooldownMs = 60000; // 1 minute circuit breaker cooldown
 
-  constructor(customHealthTracker?: ModelHealthTracker, customAdmissionController?: GpuAdmissionController) {
+  constructor(
+    customHealthTracker?: ModelHealthTracker,
+    customAdmissionController?: GpuAdmissionController,
+  ) {
     this.healthTracker = customHealthTracker || new ModelHealthTracker(this.cooldownMs);
     this.admissionController = customAdmissionController || new GpuAdmissionController();
   }
@@ -146,21 +154,23 @@ export class IntelligenceRouter {
    */
   classifyTask(request: ChatCompletionRequest): TaskComplexity {
     const userMessages = request.messages.filter((m) => m.role === "user");
-    
+
     let hasExplicitImagePart = false;
 
     const fullText = (userMessages.length > 0 ? userMessages : request.messages)
       .map((m: any) => {
         if (typeof m.content === "string") return m.content;
         if (Array.isArray(m.content)) {
-          return m.content.map((part: any) => {
-            if (part.type === "image_url") {
-              hasExplicitImagePart = true;
+          return m.content
+            .map((part: any) => {
+              if (part.type === "image_url") {
+                hasExplicitImagePart = true;
+                return "";
+              }
+              if (part.type === "text") return part.text || "";
               return "";
-            }
-            if (part.type === "text") return part.text || "";
-            return "";
-          }).join(" ");
+            })
+            .join(" ");
         }
         return "";
       })
@@ -169,7 +179,10 @@ export class IntelligenceRouter {
 
     // Check for vision requirement
     const hasVisionKey =
-      hasExplicitImagePart || fullText.includes("image") || fullText.includes("screenshot") || fullText.includes("picture");
+      hasExplicitImagePart ||
+      fullText.includes("image") ||
+      fullText.includes("screenshot") ||
+      fullText.includes("picture");
     if (hasVisionKey) {
       return "vision";
     }
@@ -241,11 +254,11 @@ export class IntelligenceRouter {
     const needsVision = complexity === "vision";
     const needsReasoning = complexity === "high_reasoning";
     const needsTools =
-      Boolean(effectiveRequest.tools && effectiveRequest.tools.length > 0) || complexity === "coding";
+      Boolean(effectiveRequest.tools && effectiveRequest.tools.length > 0) ||
+      complexity === "coding";
 
     const isOllamaConfigured = this.isProviderConfigured("ollama") || this.isMockAllowed();
-    const isOllamaAvailable =
-      ollamaHealth.isHealthy && isOllamaConfigured;
+    const isOllamaAvailable = ollamaHealth.isHealthy && isOllamaConfigured;
 
     const isLangdockConfigured = this.isProviderConfigured("langdock") || this.isMockAllowed();
     const isLangdockAvailable =
@@ -345,8 +358,8 @@ export class IntelligenceRouter {
     // Determine whether to prioritize Local Ollama or Langdock based on the task complexity
     // Local models are preferred for coding and vision.
     // Cloud models (Langdock) are preferred for general intelligence and high reasoning.
-    const preferLocal = 
-      (sortedOllamaModels.length > 0) &&
+    const preferLocal =
+      sortedOllamaModels.length > 0 &&
       (!isAuto || complexity === "coding" || complexity === "vision");
 
     if (preferLocal) {

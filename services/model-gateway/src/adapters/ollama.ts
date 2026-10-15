@@ -38,10 +38,16 @@ export class OllamaAdapter implements IModelProviderAdapter {
     this.apiKey = config?.apiKey || process.env.OLLAMA_API_KEY || undefined;
     this.maxRetries = config?.maxRetries ?? Number(process.env.OLLAMA_MAX_RETRIES ?? 1);
     this.timeouts = {
-      connectTimeoutMs: config?.timeouts?.connectTimeoutMs ?? Number(process.env.OLLAMA_CONNECT_TIMEOUT_MS ?? 2500),
-      warmupTimeoutMs: config?.timeouts?.warmupTimeoutMs ?? Number(process.env.OLLAMA_WARMUP_TIMEOUT_MS ?? 45000),
-      firstTokenTimeoutMs: config?.timeouts?.firstTokenTimeoutMs ?? Number(process.env.OLLAMA_FIRST_TOKEN_TIMEOUT_MS ?? 12000),
-      requestTimeoutMs: config?.timeouts?.requestTimeoutMs ?? Number(process.env.OLLAMA_REQUEST_TIMEOUT_MS ?? 120000),
+      connectTimeoutMs:
+        config?.timeouts?.connectTimeoutMs ?? Number(process.env.OLLAMA_CONNECT_TIMEOUT_MS ?? 2500),
+      warmupTimeoutMs:
+        config?.timeouts?.warmupTimeoutMs ?? Number(process.env.OLLAMA_WARMUP_TIMEOUT_MS ?? 45000),
+      firstTokenTimeoutMs:
+        config?.timeouts?.firstTokenTimeoutMs ??
+        Number(process.env.OLLAMA_FIRST_TOKEN_TIMEOUT_MS ?? 12000),
+      requestTimeoutMs:
+        config?.timeouts?.requestTimeoutMs ??
+        Number(process.env.OLLAMA_REQUEST_TIMEOUT_MS ?? 120000),
     };
   }
 
@@ -120,7 +126,6 @@ export class OllamaAdapter implements IModelProviderAdapter {
 
         if (attempt < this.maxRetries) {
           await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
-          continue;
         }
       }
     }
@@ -328,7 +333,10 @@ export class OllamaAdapter implements IModelProviderAdapter {
     }
   }
 
-  private buildOpenAIPayload(request: ChatCompletionRequest, stream: boolean): Record<string, unknown> {
+  private buildOpenAIPayload(
+    request: ChatCompletionRequest,
+    stream: boolean,
+  ): Record<string, unknown> {
     const payload: Record<string, unknown> = {
       model: request.modelId || "qwen2.5-coder:32b",
       stream,
@@ -445,4 +453,3 @@ export class OllamaAdapter implements IModelProviderAdapter {
     };
   }
 }
-

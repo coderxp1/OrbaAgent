@@ -99,12 +99,14 @@ export const CAPABILITY_ALIASES: Record<
   "orba-reasoning-engine": {
     targetModel: "qwen2.5-coder:32b",
     task: "reasoning",
-    description: "Multi-step reasoning and architectural planning (escalates to cloud for deep chains)",
+    description:
+      "Multi-step reasoning and architectural planning (escalates to cloud for deep chains)",
   },
   "orba-vision-engine": {
     targetModel: "qwen3-vl:8b",
     task: "vision",
-    description: "Visual inspection, UI screenshots, and diagram analysis engine (validated initial fleet)",
+    description:
+      "Visual inspection, UI screenshots, and diagram analysis engine (validated initial fleet)",
   },
 };
 

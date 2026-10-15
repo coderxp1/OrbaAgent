@@ -1,6 +1,20 @@
 "use client";
 
-import { Book, ChevronRight, Code, FileCode, FileText, FolderUp, HardDrive, Image, ImagePlus, MoreHorizontal, Paperclip, Plus, Video } from "lucide-react";
+import {
+  Book,
+  ChevronRight,
+  Code,
+  FileCode,
+  FileText,
+  FolderUp,
+  HardDrive,
+  Image,
+  ImagePlus,
+  MoreHorizontal,
+  Paperclip,
+  Plus,
+  Video,
+} from "lucide-react";
 import type React from "react";
 import { useEffect, useRef, useState } from "react";
 
@@ -93,12 +107,18 @@ export function AttachmentMenu({ onAttachFiles, onInsertSnippet }: AttachmentMen
   const handleScreenshot = async () => {
     setIsOpen(false);
     try {
-      const stream = await (navigator.mediaDevices as MediaDevices & {
-        getDisplayMedia: (c: DisplayMediaStreamOptions) => Promise<MediaStream>;
-      }).getDisplayMedia({ video: true, preferCurrentTab: false } as DisplayMediaStreamOptions);
+      const stream = await (
+        navigator.mediaDevices as MediaDevices & {
+          getDisplayMedia: (c: DisplayMediaStreamOptions) => Promise<MediaStream>;
+        }
+      ).getDisplayMedia({ video: true, preferCurrentTab: false } as DisplayMediaStreamOptions);
       const track = stream.getVideoTracks()[0];
       // @ts-ignore - ImageCapture may not be in all TS lib defs
-      const capture = new (window as unknown as { ImageCapture: new (t: MediaStreamTrack) => { grabFrame: () => Promise<ImageBitmap> } }).ImageCapture(track);
+      const capture = new (
+        window as unknown as {
+          ImageCapture: new (t: MediaStreamTrack) => { grabFrame: () => Promise<ImageBitmap> };
+        }
+      ).ImageCapture(track);
       const bitmap = await capture.grabFrame();
       track.stop();
       const canvas = document.createElement("canvas");

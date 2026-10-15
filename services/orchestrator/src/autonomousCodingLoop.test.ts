@@ -32,7 +32,7 @@ describe("Autonomous Coding Loop: Plan -> Execute -> Verify -> Repair -> Complet
     await fs.mkdir(srcDir, { recursive: true });
 
     // Intentionally broken implementation: adds 1 extra to the sum
-    const bugCode = `export function add(a: number, b: number): number {\n  return a + b + 1;\n}\n`;
+    const bugCode = "export function add(a: number, b: number): number {\n  return a + b + 1;\n}\n";
     await fs.writeFile(path.join(srcDir, "math.ts"), bugCode, "utf-8");
 
     // Verification test script that exits with 1 on bug, 0 on fix
@@ -162,7 +162,7 @@ if (content.includes('a + b + 1')) {
             name: "write_file",
             arguments: {
               path: "src/math.ts",
-              content: `export function add(a: number, b: number): number {\n  return a + b;\n}\n`,
+              content: "export function add(a: number, b: number): number {\n  return a + b;\n}\n",
             },
           },
         };
@@ -224,7 +224,8 @@ if (content.includes('a + b + 1')) {
             id: "call_final_complete",
             name: "task_complete",
             arguments: {
-              summary: "Fixed bug in src/math.ts. Verified that node test-runner.js passed with code 0.",
+              summary:
+                "Fixed bug in src/math.ts. Verified that node test-runner.js passed with code 0.",
               verified: true,
               verificationEvidence: "PASS: all 2 math tests passed (100% assertions satisfied)",
             },
@@ -315,8 +316,16 @@ if (content.includes('a + b + 1')) {
             arguments: {
               goal: "Implement authentication and database schema",
               steps: [
-                { id: "step-auth", title: "Write auth handler", acceptanceCriteria: ["Tests pass"] },
-                { id: "step-db", title: "Apply db migration", acceptanceCriteria: ["Migration applied"] },
+                {
+                  id: "step-auth",
+                  title: "Write auth handler",
+                  acceptanceCriteria: ["Tests pass"],
+                },
+                {
+                  id: "step-db",
+                  title: "Apply db migration",
+                  acceptanceCriteria: ["Migration applied"],
+                },
               ],
             },
           },
@@ -387,8 +396,18 @@ if (content.includes('a + b + 1')) {
       workspaceId: "tenant_resume_test",
       steps: [
         { id: "step-1", title: "Setup config", status: "completed" },
-        { id: "step-2", title: "Implement stripe connector", status: "pending", dependencies: ["step-1"] },
-        { id: "step-3", title: "Run end-to-end tests", status: "pending", dependencies: ["step-2"] },
+        {
+          id: "step-2",
+          title: "Implement stripe connector",
+          status: "pending",
+          dependencies: ["step-1"],
+        },
+        {
+          id: "step-3",
+          title: "Run end-to-end tests",
+          status: "pending",
+          dependencies: ["step-2"],
+        },
       ],
     });
 

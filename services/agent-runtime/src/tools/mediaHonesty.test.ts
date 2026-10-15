@@ -628,7 +628,8 @@ describe("artifact delivery verification and honesty", () => {
           artifact_id: "local_vid_789",
           artifact_url: "",
           delivered: false,
-          ingest_note: "artifact generated but ingest failed: IngestError: 401 Invalid ingest token",
+          ingest_note:
+            "artifact generated but ingest failed: IngestError: 401 Invalid ingest token",
         }),
         { status: 200, headers: { "Content-Type": "application/json" } },
       );

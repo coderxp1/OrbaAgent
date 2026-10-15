@@ -1,6 +1,6 @@
+import type { ChatCompletionRequest } from "@orbaagent/shared";
 import { describe, expect, it } from "vitest";
 import { ModelGateway } from "./gateway.js";
-import { ChatCompletionRequest } from "@orbaagent/shared";
 
 describe("E2E Intelligence Fabric Routing", () => {
   it("orchestrates routing correctly without explicit configuration", async () => {
@@ -13,11 +13,17 @@ describe("E2E Intelligence Fabric Routing", () => {
     // 1. Coding task -> Qwen2.5 Coder
     const reqCode: ChatCompletionRequest = {
       messages: [{ role: "user", content: "Write a short bash script to echo Hello World." }],
-      modelId: "orba-code-engine", 
+      modelId: "orba-code-engine",
       stream: false,
-      trace: { traceId: "t1", tenantId: "test", userId: "test", conversationId: "c1", agentRunId: "r1" }
+      trace: {
+        traceId: "t1",
+        tenantId: "test",
+        userId: "test",
+        conversationId: "c1",
+        agentRunId: "r1",
+      },
     };
-    
+
     let decision = gateway.router.selectRouting(reqCode);
     expect(decision.primaryModel.id).toBe("qwen2.5-coder:32b");
     expect(decision.primaryModel.provider).toBe("ollama");
@@ -25,9 +31,15 @@ describe("E2E Intelligence Fabric Routing", () => {
     // 2. Vision task -> Qwen3-VL
     const reqVision: ChatCompletionRequest = {
       messages: [{ role: "user", content: "Describe the image briefly." }],
-      modelId: "orba-vision-engine", 
+      modelId: "orba-vision-engine",
       stream: false,
-      trace: { traceId: "t2", tenantId: "test", userId: "test", conversationId: "c2", agentRunId: "r2" }
+      trace: {
+        traceId: "t2",
+        tenantId: "test",
+        userId: "test",
+        conversationId: "c2",
+        agentRunId: "r2",
+      },
     };
     decision = gateway.router.selectRouting(reqVision);
     expect(decision.primaryModel.id).toBe("qwen3-vl:8b");
@@ -35,10 +47,27 @@ describe("E2E Intelligence Fabric Routing", () => {
 
     // 3. Combined/Auto Vision task -> Auto detects vision
     const reqCombined: ChatCompletionRequest = {
-      messages: [{ role: "user", content: [{ type: "image_url", image_url: { url: "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD" } }, { type: "text", text: "What is this?" }] }],
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "image_url",
+              image_url: { url: "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD" },
+            },
+            { type: "text", text: "What is this?" },
+          ],
+        },
+      ],
       modelId: "auto",
       stream: false,
-      trace: { traceId: "t3", tenantId: "test", userId: "test", conversationId: "c3", agentRunId: "r3" }
+      trace: {
+        traceId: "t3",
+        tenantId: "test",
+        userId: "test",
+        conversationId: "c3",
+        agentRunId: "r3",
+      },
     };
     decision = gateway.router.selectRouting(reqCombined);
     expect(decision.primaryModel.id).toBe("qwen3-vl:8b");

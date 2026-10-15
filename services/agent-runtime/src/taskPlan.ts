@@ -172,7 +172,8 @@ export class TaskPlanManager {
     if (updates.error !== undefined) step.error = updates.error;
     if (updates.assignedTool !== undefined) step.assignedTool = updates.assignedTool;
     if (updates.toolArguments !== undefined) step.toolArguments = updates.toolArguments;
-    if (updates.acceptanceCriteria !== undefined) step.acceptanceCriteria = updates.acceptanceCriteria;
+    if (updates.acceptanceCriteria !== undefined)
+      step.acceptanceCriteria = updates.acceptanceCriteria;
 
     plan.updatedAt = now;
 
@@ -187,7 +188,11 @@ export class TaskPlanManager {
   }
 
   public markStepCompleted(planId: string, stepId: string, evidence?: string): TaskStep {
-    return this.updateStep(planId, stepId, { status: "completed", resultEvidence: evidence, error: undefined });
+    return this.updateStep(planId, stepId, {
+      status: "completed",
+      resultEvidence: evidence,
+      error: undefined,
+    });
   }
 
   public markStepFailed(planId: string, stepId: string, error?: string): TaskStep {
@@ -219,7 +224,8 @@ export class TaskPlanManager {
     const failed = plan.steps.filter((s) => s.status === "failed");
     const completed = plan.steps.filter((s) => s.status === "completed" || s.status === "skipped");
 
-    const canComplete = pending.length === 0 && failed.length === 0 && completed.length === plan.steps.length;
+    const canComplete =
+      pending.length === 0 && failed.length === 0 && completed.length === plan.steps.length;
 
     return {
       canComplete,
@@ -234,7 +240,9 @@ export class TaskPlanManager {
     const allCompleted = plan.steps.every(
       (s) => s.status === "completed" || s.status === "skipped",
     );
-    const anyFailed = plan.steps.some((s) => s.status === "failed" && s.attempts >= plan.maxRetriesPerStep);
+    const anyFailed = plan.steps.some(
+      (s) => s.status === "failed" && s.attempts >= plan.maxRetriesPerStep,
+    );
 
     if (allCompleted) {
       plan.status = "completed";

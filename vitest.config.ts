@@ -18,6 +18,7 @@ export default defineConfig({
     alias: {
       "@orbaagent/shared": path.resolve(__dirname, "packages/shared/src/index.ts"),
       "@orbaagent/model-gateway": path.resolve(__dirname, "services/model-gateway/src/index.ts"),
+      "@orbaagent/agent-runtime": path.resolve(__dirname, "services/agent-runtime/src/index.ts"),
       "@": path.resolve(__dirname, "apps/web/src"),
     },
   },

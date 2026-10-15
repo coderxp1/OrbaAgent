@@ -1,6 +1,6 @@
 import type { ToolDefinition, ToolExecutionResult, ToolMetadata } from "@orbaagent/shared";
-import type { ITool, ToolExecutionContext } from "./base.js";
 import { TaskPlanManager } from "../taskPlan.js";
+import type { ITool, ToolExecutionContext } from "./base.js";
 
 export class TaskCompleteTool implements ITool {
   public readonly definition: ToolDefinition = {
@@ -16,11 +16,13 @@ export class TaskCompleteTool implements ITool {
         },
         verified: {
           type: "boolean",
-          description: "Whether all tests, builds, or checks passed successfully. Must be true for verified completion.",
+          description:
+            "Whether all tests, builds, or checks passed successfully. Must be true for verified completion.",
         },
         verificationEvidence: {
           type: "string",
-          description: "Concrete output or evidence from test suites, builds, or git diffs confirming satisfaction of acceptance criteria.",
+          description:
+            "Concrete output or evidence from test suites, builds, or git diffs confirming satisfaction of acceptance criteria.",
         },
       },
       required: ["summary"],
@@ -47,7 +49,9 @@ export class TaskCompleteTool implements ITool {
     const toolCallId = (args._toolCallId as string) || `tc_complete_${Date.now()}`;
     const summary = String(args.summary || "Task completed successfully.");
     const verified = args.verified !== false;
-    const verificationEvidence = args.verificationEvidence ? String(args.verificationEvidence) : undefined;
+    const verificationEvidence = args.verificationEvidence
+      ? String(args.verificationEvidence)
+      : undefined;
     const workspaceId = context.tenantId || "default-workspace";
 
     // Enforce truth-telling verification against active TaskPlan if one exists
@@ -94,7 +98,8 @@ export class TaskCompleteTool implements ITool {
           name: this.definition.name,
           success: false,
           output: "",
-          error: "Cannot complete task: 'verified' was false or unconfirmed. Run tests/checks to verify correctness before completion.",
+          error:
+            "Cannot complete task: 'verified' was false or unconfirmed. Run tests/checks to verify correctness before completion.",
           executionTimeMs: Date.now() - startTime,
           metadata: { planId: activePlan.planId, verified: false },
         };

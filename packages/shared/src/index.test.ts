@@ -94,11 +94,11 @@ describe("Shared Package Tests", () => {
 
   it("validates ChatMessageSchema with multimodal content array", async () => {
     const { ChatMessageSchema } = await import("./index.js");
-    
+
     // Legacy / Text-only
     const validText = {
       role: "user",
-      content: "Hello world"
+      content: "Hello world",
     };
     expect(ChatMessageSchema.safeParse(validText).success).toBe(true);
 
@@ -107,17 +107,17 @@ describe("Shared Package Tests", () => {
       role: "user",
       content: [
         { type: "text", text: "What is this image?" },
-        { type: "image_url", image_url: { url: "data:image/jpeg;base64,R0lG" } }
-      ]
+        { type: "image_url", image_url: { url: "data:image/jpeg;base64,R0lG" } },
+      ],
     };
     expect(ChatMessageSchema.safeParse(validMultimodal).success).toBe(true);
-    
+
     // Invalid Multimodal
     const invalidMultimodal = {
       role: "user",
       content: [
-        { type: "image_url", image_url: { wrong: "url" } } // Missing url inside image_url
-      ]
+        { type: "image_url", image_url: { wrong: "url" } }, // Missing url inside image_url
+      ],
     };
     expect(ChatMessageSchema.safeParse(invalidMultimodal).success).toBe(false);
   });

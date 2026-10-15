@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  GpuAdmissionController,
-  KNOWN_MODEL_FOOTPRINTS,
-} from "./admission.js";
+import { GpuAdmissionController, KNOWN_MODEL_FOOTPRINTS } from "./admission.js";
 
 describe("GpuAdmissionController (Resource & VRAM Admission)", () => {
   it("admits standard models when GPU 1 is idle and within budget", () => {
@@ -47,7 +44,9 @@ describe("GpuAdmissionController (Resource & VRAM Admission)", () => {
     const decisionDuringMedia = controller.evaluateAdmission("qwen2.5-coder:32b");
     expect(decisionDuringMedia.admitted).toBe(false);
     expect(decisionDuringMedia.action).toBe("ESCALATE_TO_CLOUD");
-    expect(decisionDuringMedia.reason).toContain("disallowed prior to empirical GPU 1 benchmarking");
+    expect(decisionDuringMedia.reason).toContain(
+      "disallowed prior to empirical GPU 1 benchmarking",
+    );
 
     // Once media completes, local admission recovers
     controller.setMediaActive(false);

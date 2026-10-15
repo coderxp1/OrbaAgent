@@ -37,9 +37,10 @@ export function MessageItem({
 
   const handleCopyMessage = () => {
     if (!message.content) return;
-    const textContent = typeof message.content === "string" 
-      ? message.content 
-      : message.content.map(p => p.type === "text" ? p.text : "").join("");
+    const textContent =
+      typeof message.content === "string"
+        ? message.content
+        : message.content.map((p) => (p.type === "text" ? p.text : "")).join("");
     navigator.clipboard.writeText(textContent);
     setMessageCopied(true);
     setTimeout(() => setMessageCopied(false), 2000);
@@ -47,9 +48,10 @@ export function MessageItem({
 
   const handleReply = () => {
     if (message.content && onReply) {
-      const textContent = typeof message.content === "string" 
-        ? message.content 
-        : message.content.map(p => p.type === "text" ? p.text : "").join("");
+      const textContent =
+        typeof message.content === "string"
+          ? message.content
+          : message.content.map((p) => (p.type === "text" ? p.text : "")).join("");
       onReply(textContent);
     }
   };
@@ -350,13 +352,22 @@ function renderMarkdownInline(text: string) {
 
       // Guard against unsafe URL schemes (javascript:, vbscript:, data html, etc.)
       if (!isSafeImageUrl(src)) {
-        return <span key={i} className="font-mono text-xs text-zinc-400">{token}</span>;
+        return (
+          <span key={i} className="font-mono text-xs text-zinc-400">
+            {token}
+          </span>
+        );
       }
 
       return (
         <span key={i} className="my-3 block max-w-lg">
           <span className="block overflow-hidden rounded-xl border border-zinc-700/80 bg-zinc-900/90 shadow-xl group/img relative">
-            <a href={src} target="_blank" rel="noopener noreferrer" className="block cursor-pointer">
+            <a
+              href={src}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block cursor-pointer"
+            >
               <img
                 src={src}
                 alt={alt || "Generated Media"}
@@ -394,7 +405,11 @@ function renderMarkdownInline(text: string) {
 
       // Guard against unsafe link schemes (javascript:, vbscript:, data:, etc.)
       if (!isSafeUrl(href)) {
-        return <span key={i} className="font-mono text-xs text-zinc-400">{token}</span>;
+        return (
+          <span key={i} className="font-mono text-xs text-zinc-400">
+            {token}
+          </span>
+        );
       }
 
       return (

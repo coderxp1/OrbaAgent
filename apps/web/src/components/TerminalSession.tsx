@@ -193,7 +193,10 @@ export function TerminalSession({
                     const parsed = JSON.parse(res.output);
                     const url = parsed.artifactUrl || parsed.artifact_url;
                     if (typeof url === "string" && url.startsWith("/api/artifacts/")) {
-                      const isVideo = url.endsWith(".mp4") || url.endsWith(".webm") || item.call.name.includes("video");
+                      const isVideo =
+                        url.endsWith(".mp4") ||
+                        url.endsWith(".webm") ||
+                        item.call.name.includes("video");
                       return (
                         <div className="pl-4 pt-1.5">
                           <div className="group/artifact relative inline-block rounded-xl overflow-hidden border border-zinc-750 bg-zinc-950/80 shadow-md max-w-sm">
@@ -202,7 +205,9 @@ export function TerminalSession({
                                 src={url}
                                 controls
                                 className="max-h-60 w-full object-contain bg-black"
-                              />
+                              >
+                                <track kind="captions" />
+                              </video>
                             ) : (
                               <a
                                 href={url}

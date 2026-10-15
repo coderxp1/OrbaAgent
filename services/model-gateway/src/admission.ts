@@ -11,7 +11,11 @@ export const KNOWN_MODEL_FOOTPRINTS: Record<string, ModelVramProfile> = {
   "qwen2.5-coder:7b": { baseWeightMiB: 4812, estimatedKvContextMiB: 2048, maxParallelSlots: 4 },
   "llama3.3:70b": { baseWeightMiB: 43520, estimatedKvContextMiB: 8192, maxParallelSlots: 2 },
   "qwen2.5:72b": { baseWeightMiB: 44544, estimatedKvContextMiB: 8192, maxParallelSlots: 2 },
-  "deepseek-coder-v2:16b": { baseWeightMiB: 9112, estimatedKvContextMiB: 4096, maxParallelSlots: 4 },
+  "deepseek-coder-v2:16b": {
+    baseWeightMiB: 9112,
+    estimatedKvContextMiB: 4096,
+    maxParallelSlots: 4,
+  },
   "codestral:22b": { baseWeightMiB: 13312, estimatedKvContextMiB: 4096, maxParallelSlots: 2 },
   "qwen3-vl:8b": { baseWeightMiB: 6144, estimatedKvContextMiB: 3072, maxParallelSlots: 2 },
   "mistral-small:24b": { baseWeightMiB: 14540, estimatedKvContextMiB: 4096, maxParallelSlots: 2 },
@@ -37,10 +41,10 @@ export class GpuAdmissionController {
   public readonly totalGpu1VramMiB: number;
   public readonly safetyHeadroomMiB: number;
   public readonly runtimeWorkspaceOverheadMiB: number;
-  private mediaWorkerVramReservationMiB: number = 0;
+  private mediaWorkerVramReservationMiB = 0;
   private activeLocalInferences: Map<string, number> = new Map();
   private runtimeTelemetry?: RuntimeGpuTelemetry;
-  public allowConcurrentMediaAndLlm: boolean = false;
+  public allowConcurrentMediaAndLlm = false;
 
   constructor(
     totalVramMiB = 97887, // Physical RTX 6000 Ada/Blackwell VRAM (95.6 GiB)
@@ -105,9 +109,7 @@ export class GpuAdmissionController {
 
     // Incremental requirement includes weights, KV context, and temporary CUDA/inference allocations
     const incrementalRequired =
-      profile.baseWeightMiB +
-      profile.estimatedKvContextMiB +
-      this.runtimeWorkspaceOverheadMiB;
+      profile.baseWeightMiB + profile.estimatedKvContextMiB + this.runtimeWorkspaceOverheadMiB;
 
     // 2. Telemetry-aware runtime evaluation (uses real GPU measurements if available)
     if (this.runtimeTelemetry) {
@@ -192,4 +194,3 @@ export class GpuAdmissionController {
     this.allowConcurrentMediaAndLlm = false;
   }
 }
-

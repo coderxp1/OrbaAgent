@@ -1,6 +1,6 @@
 import type { ToolDefinition, ToolExecutionResult, ToolMetadata } from "@orbaagent/shared";
-import type { ITool, ToolExecutionContext } from "./base.js";
 import { TaskPlanManager } from "../taskPlan.js";
+import type { ITool, ToolExecutionContext } from "./base.js";
 
 export class TaskPlanTool implements ITool {
   public readonly definition: ToolDefinition = {
@@ -19,9 +19,15 @@ export class TaskPlanTool implements ITool {
           items: {
             type: "object",
             properties: {
-              id: { type: "string", description: "Unique identifier for this step (e.g. step-1, step-2)" },
+              id: {
+                type: "string",
+                description: "Unique identifier for this step (e.g. step-1, step-2)",
+              },
               title: { type: "string", description: "Short, actionable step title" },
-              description: { type: "string", description: "Detailed instructions or scope of this step" },
+              description: {
+                type: "string",
+                description: "Detailed instructions or scope of this step",
+              },
               dependencies: {
                 type: "array",
                 items: { type: "string" },
@@ -44,7 +50,8 @@ export class TaskPlanTool implements ITool {
         verificationCriteria: {
           type: "array",
           items: { type: "string" },
-          description: "Global acceptance criteria and verification commands (e.g. npm test, git diff check)",
+          description:
+            "Global acceptance criteria and verification commands (e.g. npm test, git diff check)",
         },
       },
       required: ["goal", "steps"],
@@ -99,14 +106,16 @@ export class TaskPlanTool implements ITool {
         `[TASK_PLAN CREATED] Plan ID: ${plan.planId}`,
         `Goal: ${plan.goal}`,
         `Total Steps: ${plan.steps.length}`,
-        `Steps:`,
+        "Steps:",
         ...plan.steps.map(
           (s) =>
             `  • [${s.status.toUpperCase()}] ${s.id}: ${s.title}${
               s.dependencies.length > 0 ? ` (depends on: ${s.dependencies.join(", ")})` : ""
             }`,
         ),
-        nextStep ? `\nNext Ready Step: ${nextStep.id} (${nextStep.title})` : "\nNo ready step found.",
+        nextStep
+          ? `\nNext Ready Step: ${nextStep.id} (${nextStep.title})`
+          : "\nNo ready step found.",
       ].join("\n");
 
       return {

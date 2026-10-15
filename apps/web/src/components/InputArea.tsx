@@ -2,7 +2,7 @@
 
 import { Send, Square } from "lucide-react";
 import { type KeyboardEvent, useRef, useState } from "react";
-import { AttachmentMenu, type AttachedFile } from "./AttachmentMenu";
+import { type AttachedFile, AttachmentMenu } from "./AttachmentMenu";
 
 interface InputAreaProps {
   onSendMessage: (text: string, attachments?: AttachedFile[]) => void;
@@ -100,7 +100,6 @@ export function InputArea({ onSendMessage, isGenerating, onCancelGeneration }: I
   return (
     <div className="border-t border-zinc-800 bg-zinc-950 p-4">
       <div className="mx-auto flex max-w-4xl flex-col gap-2">
-
         {/* Attachment Chips */}
         {attachments.length > 0 && (
           <div className="flex flex-wrap gap-1.5 px-1">

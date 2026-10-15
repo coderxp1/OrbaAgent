@@ -1,0 +1,3 @@
+# Gitleaks ignore file
+# Ignores deliberate fake mock token in unit test fixture introduced in commit 0b70dbafe3592aa643eaf3b0a5ced0afd9322377
+0b70dbafe3592aa643eaf3b0a5ced0afd9322377:services/agent-runtime/src/runtime.test.ts:generic-api-key:354

@@ -127,10 +127,14 @@ export class AgentOrchestrator {
     const existingPlan = planManager.getActivePlan(workspaceId);
     let planContext = "";
     if (existingPlan && existingPlan.status !== "completed") {
-      const pendingSteps = existingPlan.steps.filter((s) => s.status !== "completed" && s.status !== "skipped");
+      const pendingSteps = existingPlan.steps.filter(
+        (s) => s.status !== "completed" && s.status !== "skipped",
+      );
       planContext = `\n\n## Resumed Active Plan (${existingPlan.planId})\nGoal: ${existingPlan.goal}\nRemaining Steps:\n${pendingSteps
         .map((s) => `- ${s.id}: ${s.title} [${s.status}]`)
-        .join("\n")}\nResume execution from the next pending step. Do not repeat already completed steps.\n`;
+        .join(
+          "\n",
+        )}\nResume execution from the next pending step. Do not repeat already completed steps.\n`;
     }
 
     const autonomousPolicy = `
@@ -143,9 +147,7 @@ export class AgentOrchestrator {
 6. Call 'task_complete' only after all steps are completed and verification has confirmed the work.
 `;
 
-    let systemContext = memoryPrompt
-      ? `${capabilityPrompt}\n\n${memoryPrompt}`
-      : capabilityPrompt;
+    let systemContext = memoryPrompt ? `${capabilityPrompt}\n\n${memoryPrompt}` : capabilityPrompt;
     systemContext += autonomousPolicy + planContext;
 
     // Prepare current messages history
@@ -212,11 +214,7 @@ export class AgentOrchestrator {
         const activePlan = planManager.getActivePlan(workspaceId);
         const planEval = activePlan ? planManager.evaluatePlanCompletion(activePlan.planId) : null;
 
-        if (
-          planEval &&
-          !planEval.canComplete &&
-          iteration < this.maxIterations
-        ) {
+        if (planEval && !planEval.canComplete && iteration < this.maxIterations) {
           const nextStep = planManager.getNextExecutableStep(activePlan!.planId);
           currentMessages.push({
             role: "assistant",

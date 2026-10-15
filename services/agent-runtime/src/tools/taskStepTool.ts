@@ -1,6 +1,11 @@
-import type { ToolDefinition, ToolExecutionResult, ToolMetadata } from "@orbaagent/shared";
-import type { ITool, ToolExecutionContext } from "./base.js";
+import type {
+  TaskStep,
+  ToolDefinition,
+  ToolExecutionResult,
+  ToolMetadata,
+} from "@orbaagent/shared";
 import { TaskPlanManager } from "../taskPlan.js";
+import type { ITool, ToolExecutionContext } from "./base.js";
 
 export class TaskStepTool implements ITool {
   public readonly definition: ToolDefinition = {
@@ -21,15 +26,18 @@ export class TaskStepTool implements ITool {
         },
         evidence: {
           type: "string",
-          description: "Concrete verification evidence, outputs, or test results demonstrating step completion.",
+          description:
+            "Concrete verification evidence, outputs, or test results demonstrating step completion.",
         },
         error: {
           type: "string",
-          description: "Diagnostic error details explaining why the step failed (required when action is 'fail').",
+          description:
+            "Diagnostic error details explaining why the step failed (required when action is 'fail').",
         },
         plan_id: {
           type: "string",
-          description: "Optional plan ID. Defaults to the active plan in the current workspace context.",
+          description:
+            "Optional plan ID. Defaults to the active plan in the current workspace context.",
         },
       },
       required: ["step_id", "action"],
@@ -61,7 +69,7 @@ export class TaskStepTool implements ITool {
     const workspaceId = context.tenantId || "default-workspace";
 
     const manager = TaskPlanManager.getInstance();
-    let plan = args.plan_id
+    const plan = args.plan_id
       ? manager.getPlan(String(args.plan_id))
       : manager.getActivePlan(workspaceId);
 
@@ -77,7 +85,7 @@ export class TaskStepTool implements ITool {
     }
 
     try {
-      let updatedStep;
+      let updatedStep: TaskStep | null = null;
       if (action === "start") {
         updatedStep = manager.markStepRunning(plan.planId, stepId);
       } else if (action === "complete") {
@@ -101,8 +109,8 @@ export class TaskStepTool implements ITool {
         nextStep
           ? `Next Step: ${nextStep.id} (${nextStep.title})`
           : evalResult.canComplete
-          ? "All steps completed! Ready to verify and call 'task_complete'."
-          : "No pending step currently executable (check dependencies or repair failed steps).",
+            ? "All steps completed! Ready to verify and call 'task_complete'."
+            : "No pending step currently executable (check dependencies or repair failed steps).",
       ].filter(Boolean);
 
       return {

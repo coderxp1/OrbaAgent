@@ -353,14 +353,14 @@ describe("OrbaAgent Runtime & Security Foundation", () => {
 
   describe("Secret Isolation & Masking", () => {
     it("redacts raw tokens and registered credentials in outputs and logs", () => {
-      secretManager.registerSecret("super-secret-pat-xyz12345", "TEST_SECRET");
+      secretManager.registerSecret("test-token-for-unit-test", "TEST_SECRET");
 
       const textWithSecret =
-        "Found token super-secret-pat-xyz12345 and sk-abcdef01234567890abcdef0 in log";
+        "Found token test-token-for-unit-test and sk-test-key-mock-0123456789 in log";
       const redacted = secretManager.redact(textWithSecret);
 
-      expect(redacted).not.toContain("super-secret-pat-xyz12345");
-      expect(redacted).not.toContain("sk-abcdef01234567890abcdef0");
+      expect(redacted).not.toContain("test-token-for-unit-test");
+      expect(redacted).not.toContain("sk-test-key-mock-0123456789");
       expect(redacted).toContain("***REDACTED***");
     });
 
@@ -368,9 +368,9 @@ describe("OrbaAgent Runtime & Security Foundation", () => {
       const dirtyEnv = {
         PATH: "/usr/bin",
         HOME: "/home/user",
-        GITHUB_TOKEN: "ghp_1234567890abcdef1234567890",
-        OPENROUTER_API_KEY: "sk-or-secret",
-        LANGDOCK_API_KEY: "sk-ld-secret",
+        GITHUB_TOKEN: "ghp_fakeFAKEfake0000",
+        OPENROUTER_API_KEY: "sk-or-fake-test",
+        LANGDOCK_API_KEY: "sk-ld-fake-test",
         DATABASE_URL: "postgres://user:pass@localhost:5432/db",
         NORMAL_VAR: "safe_value",
       };

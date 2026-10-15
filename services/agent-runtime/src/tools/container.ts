@@ -120,6 +120,12 @@ export class ContainerTool implements ITool {
       }
       if (!hostPath) continue;
 
+      if (/^[a-zA-Z]:/.test(hostPath) && process.platform !== "win32") {
+        throw new Error(
+          `Security violation: Container volume '${hostPath}' resolves outside workspace boundary '${workspaceDir}'.`,
+        );
+      }
+
       const resolvedHostPath = path.resolve(workspaceDir, hostPath);
       if (!resolvedHostPath.startsWith(resolvedWorkspace)) {
         throw new Error(

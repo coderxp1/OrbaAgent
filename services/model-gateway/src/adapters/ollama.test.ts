@@ -14,6 +14,7 @@ describe("OllamaAdapter", () => {
   });
 
   it("configures defaults and WireGuard endpoint", () => {
+    // biome-ignore lint/performance/noDelete: delete is required to unset environment variables in Node.js
     delete process.env.OLLAMA_BASE_URL;
     const adapter = new OllamaAdapter();
     expect(adapter.providerId).toBe("ollama");

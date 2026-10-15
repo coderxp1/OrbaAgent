@@ -64,7 +64,10 @@ function prepareEnrichedRequest(request: ChatCompletionRequest): ChatCompletionR
       role: "system",
       content: ORBAAGENT_SYSTEM_PROMPT,
     });
-  } else if (typeof messages[0].content === "string" && !messages[0].content.includes("OrbaAgent")) {
+  } else if (
+    typeof messages[0].content === "string" &&
+    !messages[0].content.includes("OrbaAgent")
+  ) {
     messages[0] = {
       ...messages[0],
       content: `${ORBAAGENT_SYSTEM_PROMPT}\n\n${messages[0].content}`,

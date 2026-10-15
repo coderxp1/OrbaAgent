@@ -1,4 +1,5 @@
 import { CapabilitiesInspectTool } from "../capabilities.js";
+import { ArtifactListTool, ArtifactReadTool } from "../tools/artifacts.js";
 import type { ITool } from "../tools/base.js";
 import { BrowserTool } from "../tools/browser.js";
 import { CITool } from "../tools/ci.js";
@@ -18,6 +19,8 @@ import { GitTool } from "../tools/git.js";
 import { GitHubTool } from "../tools/github.js";
 import { BackgroundJobTool } from "../tools/jobManager.js";
 import { CodeQualityTool } from "../tools/lintTypecheck.js";
+import { MediaImageGenerateTool } from "../tools/mediaImageGenerate.js";
+import { MediaVideoGenerateTool } from "../tools/mediaVideoGenerate.js";
 import { PackageManagerTool } from "../tools/packageManager.js";
 import { ProcessManagerTool } from "../tools/processManager.js";
 import { ShellTool } from "../tools/shell.js";
@@ -26,11 +29,8 @@ import { TaskPlanTool } from "../tools/taskPlanTool.js";
 import { TaskStepTool } from "../tools/taskStepTool.js";
 import { TestRunnerTool } from "../tools/testRunner.js";
 import type { IToolSearchableRegistry } from "../tools/toolsSearch.js";
-import { MediaImageGenerateTool } from "../tools/mediaImageGenerate.js";
-import { MediaVideoGenerateTool } from "../tools/mediaVideoGenerate.js";
 import { ToolsSearchTool } from "../tools/toolsSearch.js";
 import { WebFetchTool } from "../tools/web.js";
-import { ArtifactListTool, ArtifactReadTool } from "../tools/artifacts.js";
 
 export class NativeProvider {
   private readonly tools: ITool[] = [];
