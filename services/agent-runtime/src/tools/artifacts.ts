@@ -3,6 +3,7 @@ import * as path from "node:path";
 import type { ToolDefinition, ToolExecutionResult, ToolMetadata } from "@orbaagent/shared";
 import { PathContainmentError, resolveWithinBase } from "@orbaagent/shared";
 import type { ITool, ToolExecutionContext } from "./base.js";
+import { parseDocument } from "./documentParser.js";
 
 function decodeArtifactId(artifactId: string): { w: string; b: string; p: string } {
   try {
@@ -241,26 +242,18 @@ export class ArtifactReadTool implements ITool {
       const stat = await fs.stat(filePath);
       const filename = path.basename(p);
       const lower = filename.toLowerCase();
-      const isText =
-        lower.endsWith(".txt") ||
-        lower.endsWith(".md") ||
-        lower.endsWith(".json") ||
-        lower.endsWith(".csv") ||
-        lower.endsWith(".ts") ||
-        lower.endsWith(".tsx") ||
-        lower.endsWith(".js") ||
-        lower.endsWith(".jsx") ||
-        lower.endsWith(".py") ||
-        lower.endsWith(".go") ||
-        lower.endsWith(".rs") ||
-        lower.endsWith(".sql") ||
-        lower.endsWith(".yaml") ||
-        lower.endsWith(".yml") ||
-        lower.endsWith(".html") ||
-        lower.endsWith(".css");
+      const isMedia =
+        lower.endsWith(".png") ||
+        lower.endsWith(".jpg") ||
+        lower.endsWith(".jpeg") ||
+        lower.endsWith(".gif") ||
+        lower.endsWith(".webp") ||
+        lower.endsWith(".mp4") ||
+        lower.endsWith(".mov") ||
+        lower.endsWith(".webm");
 
-      if (!isText) {
-        // Return structured metadata and retrieval URL for media / binary files
+      if (isMedia) {
+        // Return structured metadata and retrieval URL for media files
         const meta = {
           filename,
           size: stat.size,
@@ -275,9 +268,7 @@ export class ArtifactReadTool implements ITool {
             lower.endsWith(".gif") ||
             lower.endsWith(".webp")
               ? "image"
-              : lower.endsWith(".mp4") || lower.endsWith(".mov") || lower.endsWith(".webm")
-                ? "video"
-                : "binary",
+              : "video",
         };
         return {
           toolCallId,
@@ -289,22 +280,20 @@ export class ArtifactReadTool implements ITool {
         };
       }
 
-      const fh = await fs.open(filePath, "r");
-      const toRead = Math.min(stat.size, maxBytes);
-      const buf = Buffer.alloc(Number(toRead));
-      await fh.read(buf, 0, Number(toRead), 0);
-      await fh.close();
-      const text = buf.toString("utf-8");
+      // Extract document contents (supports TXT, PDF, DOCX, CSV, JSON, code, ZIP)
+      const parseResult = await parseDocument(filePath, filename, maxBytes);
       return {
         toolCallId,
         name: this.definition.name,
         success: true,
-        output: text,
+        output: parseResult.text,
         metadata: {
           filename,
           size: stat.size,
           relPath: `${b}/${p}`,
-          truncated: stat.size > toRead,
+          kind: parseResult.kind,
+          pageCount: parseResult.pageCount,
+          truncated: parseResult.truncated,
         },
         executionTimeMs: Date.now() - start,
       };

@@ -1,5 +1,6 @@
 export * from "./tools/base.js";
 export * from "./tools/artifacts.js";
+export * from "./tools/documentParser.js";
 export * from "./tools/mediaWorkerConfig.js";
 export * from "./tools/mediaImageGenerate.js";
 export * from "./tools/mediaVideoGenerate.js";

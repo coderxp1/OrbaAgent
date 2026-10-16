@@ -35,12 +35,14 @@ export function InputArea({ onSendMessage, isGenerating, onCancelGeneration }: I
         if (res.ok) {
           const data = await res.json();
           const urls: string[] = (data.artifacts || []).map((a: any) => a.url);
-          const structured = (data.artifacts || []).map((a: any) => ({
+          const structured = (data.artifacts || []).map((a: any, idx: number) => ({
             artifactId: a.id,
             name: a.name,
             type: a.type,
             size: a.size,
             relPath: a.relPath,
+            url: a.url,
+            file: filesToUpload[idx]?.file,
           }));
           if (urls.length > 0) {
             const prefix = urls.map((u) => `[Attachment]: ${u}`).join("\n");

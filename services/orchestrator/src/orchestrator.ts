@@ -1,3 +1,4 @@
+import * as path from "node:path";
 import {
   AgentMemoryManager,
   CapabilityManager,
@@ -6,6 +7,7 @@ import {
   TaskPlanManager,
   ToolRegistry,
   ToolRouter,
+  parseDocument,
 } from "@orbaagent/agent-runtime";
 import { ModelGateway } from "@orbaagent/model-gateway";
 import type {
@@ -206,6 +208,33 @@ OrbaAgent is a professional conversational AI assistant first.
 
     if (intentResult.systemGuidance) {
       systemContext += `\n\n${intentResult.systemGuidance}`;
+    }
+
+    // Pre-extract document contents for immediate understanding
+    if (rawRequest.attachments && rawRequest.attachments.length > 0) {
+      const docExcerpts: string[] = [];
+      const baseDir = process.env.ORBA_UPLOAD_DIR || path.join(process.cwd(), ".uploads");
+      for (const att of rawRequest.attachments) {
+        const isDoc = /\.(pdf|docx|txt|csv|tsv|json|md|xml|yaml|yml|ts|js|py|html|css|zip)$/i.test(
+          att.name || "",
+        );
+        if (isDoc && att.artifactId) {
+          try {
+            const decoded = JSON.parse(Buffer.from(att.artifactId, "base64url").toString("utf-8"));
+            const filePath = path.join(baseDir, decoded.w, decoded.b, decoded.p);
+            const parsed = await parseDocument(filePath, decoded.p, 25000);
+            docExcerpts.push(
+              `[Attached Document: ${att.name || decoded.p} (${parsed.kind})]\n${parsed.text.slice(0, 10000)}${parsed.truncated ? "\n...(content truncated)" : ""}`,
+            );
+          } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err);
+            docExcerpts.push(`[Attached Document: ${att.name}]: Error reading document: ${msg}`);
+          }
+        }
+      }
+      if (docExcerpts.length > 0) {
+        systemContext += `\n\n## Attached User Documents\n${docExcerpts.join("\n\n")}`;
+      }
     }
 
     // Prepare current messages history
@@ -555,10 +584,14 @@ OrbaAgent is a professional conversational AI assistant first.
         let completionDetails = result.output ? result.output.slice(0, 200) : result.error;
         if (call.name === "media_video_generate") {
           completionStep = result.success ? "Your video is ready" : "Video generation failed";
-          completionDetails = result.success ? "Ready for playback" : result.error || "Generation could not be completed";
+          completionDetails = result.success
+            ? "Ready for playback"
+            : result.error || "Generation could not be completed";
         } else if (call.name === "media_image_generate") {
           completionStep = result.success ? "Your image is ready" : "Image generation failed";
-          completionDetails = result.success ? "Ready for viewing" : result.error || "Generation could not be completed";
+          completionDetails = result.success
+            ? "Ready for viewing"
+            : result.error || "Generation could not be completed";
         }
 
         yield {

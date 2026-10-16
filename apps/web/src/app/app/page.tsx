@@ -30,7 +30,7 @@ import {
   X,
 } from "lucide-react";
 import type React from "react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AgentsModal } from "../../components/AgentsModal";
 import {
   AsanaIcon,
@@ -133,7 +133,10 @@ export default function WorkspacePage() {
           : "Conversation"
       : "Conversation";
     const title =
-      firstText.trim().replace(/^\[Attachment\]:[^\n]+\n*/g, "").slice(0, 36) || "Conversation";
+      firstText
+        .trim()
+        .replace(/^\[Attachment\]:[^\n]+\n*/g, "")
+        .slice(0, 36) || "Conversation";
 
     setSessions((prev) => {
       const existingIdx = prev.findIndex((s) => s.id === currentSessionId);
@@ -178,14 +181,14 @@ export default function WorkspacePage() {
     }
   };
 
-  const handleStartNewChat = () => {
+  const handleStartNewChat = useCallback(() => {
     setCurrentSessionId(`session_${Date.now()}`);
     clearChat();
     setInputPrompt("");
     setAttachedFiles([]);
     setIsMobileSidebarOpen(false);
     textareaRef.current?.focus();
-  };
+  }, [clearChat]);
 
   // Fetch initial connection state
   useEffect(() => {
@@ -229,7 +232,7 @@ export default function WorkspacePage() {
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  }, [handleStartNewChat]);
 
   const toggleListening = () => {
     if (isListening) {
@@ -299,12 +302,14 @@ export default function WorkspacePage() {
         if (res.ok) {
           const data = await res.json();
           const urls: string[] = (data.artifacts || []).map((a: any) => a.url);
-          const structured = (data.artifacts || []).map((a: any) => ({
+          const structured = (data.artifacts || []).map((a: any, idx: number) => ({
             artifactId: a.id,
             name: a.name,
             type: a.type,
             size: a.size,
             relPath: a.relPath,
+            url: a.url,
+            file: (filesToUpload[idx] as any)?.file,
           }));
           if (urls.length > 0) {
             const prefix = urls.map((u) => `[Attachment]: ${u}`).join("\n");
@@ -478,15 +483,11 @@ export default function WorkspacePage() {
             <div className="flex items-center justify-between px-2 text-[11px] font-semibold text-zinc-500">
               <span>Recent chats</span>
               {sessions.length > 0 && (
-                <span className="text-[10px] text-zinc-600 font-mono">
-                  {sessions.length}
-                </span>
+                <span className="text-[10px] text-zinc-600 font-mono">{sessions.length}</span>
               )}
             </div>
             {sessions.length === 0 ? (
-              <div className="px-2 py-2 text-[11px] text-zinc-600 italic">
-                No past chats yet
-              </div>
+              <div className="px-2 py-2 text-[11px] text-zinc-600 italic">No past chats yet</div>
             ) : (
               <div className="flex flex-col gap-0.5 max-h-56 overflow-y-auto no-scrollbar">
                 {sessions.map((s) => {

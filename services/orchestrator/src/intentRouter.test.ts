@@ -428,5 +428,26 @@ describe("Natural-Language Intent Routing", () => {
       expect(registry.getActiveToolNames()).not.toContain("media_video_generate");
       expect(registry.getActiveToolNames()).not.toContain("media_image_generate");
     });
+
+    it("routes 'Generate a viral commercial with this logo that is attached' to media_video with 15s duration and artifact tools active", () => {
+      const registry = new ToolRegistry();
+      registry.resetActiveToolsToCore();
+
+      const userPrompt = "Generate a viral commercial with this logo that is attached";
+      const result = routeUserIntent([{ role: "user", content: userPrompt }], registry);
+
+      expect(result.intent).toBe("media_video");
+      expect(result.confidence).toBeGreaterThanOrEqual(0.9);
+      expect(result.toolsToActivate).toContain("media_video_generate");
+      expect(result.toolsToActivate).toContain("artifact_read");
+      expect(result.toolsToActivate).toContain("artifact_list");
+      expect(registry.getActiveToolNames()).toContain("media_video_generate");
+      expect(result.extractedParameters?.duration_seconds).toBe(15);
+
+      // Confidentiality check: zero model names in system guidance or parameters
+      expect(JSON.stringify(result)).not.toMatch(/wan2/i);
+      expect(JSON.stringify(result)).not.toMatch(/flux/i);
+      expect(JSON.stringify(result)).not.toMatch(/gpu 1/i);
+    });
   });
 });

@@ -1,3 +1,5 @@
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
 import { IntegrationsManager } from "@orbaagent/agent-runtime";
 import { AgentOrchestrator } from "@orbaagent/orchestrator";
 import type { ChatCompletionRequest } from "@orbaagent/shared";
@@ -55,8 +57,72 @@ export async function POST(request: Request) {
       body.trace?.executionSessionId ||
       `exec_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
 
+    // Server-side multimodal hydration: if attachments contain images and user message hasn't embedded image_url, hydrate it from storage
+    const rawAttachments = Array.isArray((body as any).attachments)
+      ? (body as any).attachments
+      : [];
+    const hydratedMessages = [...body.messages];
+    const lastUserIdx = hydratedMessages.map((m) => m.role).lastIndexOf("user");
+
+    if (lastUserIdx >= 0 && rawAttachments.length > 0) {
+      const lastUser = hydratedMessages[lastUserIdx];
+      const hasImagePart =
+        Array.isArray(lastUser.content) &&
+        lastUser.content.some((p: any) => p.type === "image_url");
+
+      if (!hasImagePart) {
+        const imageParts: any[] = [];
+        const baseDir = process.env.ORBA_UPLOAD_DIR || path.join(process.cwd(), ".uploads");
+
+        for (const att of rawAttachments) {
+          const isImage =
+            att.type?.startsWith("image/") || /\.(png|jpe?g|webp|gif|bmp)$/i.test(att.name || "");
+
+          if (isImage && att.artifactId) {
+            try {
+              const decoded = JSON.parse(
+                Buffer.from(att.artifactId, "base64url").toString("utf-8"),
+              );
+              const filePath = path.join(baseDir, decoded.w, decoded.b, decoded.p);
+              const fileBuf = await fs.readFile(filePath);
+              const lowerP = decoded.p.toLowerCase();
+              const mime =
+                att.type ||
+                (lowerP.endsWith(".png")
+                  ? "image/png"
+                  : lowerP.endsWith(".webp")
+                    ? "image/webp"
+                    : lowerP.endsWith(".gif")
+                      ? "image/gif"
+                      : "image/jpeg");
+              imageParts.push({
+                type: "image_url",
+                image_url: { url: `data:${mime};base64,${fileBuf.toString("base64")}` },
+              });
+            } catch (err) {
+              console.warn("[CHAT API] Failed to hydrate server image attachment:", err);
+            }
+          }
+        }
+
+        if (imageParts.length > 0) {
+          const existingText =
+            typeof lastUser.content === "string"
+              ? lastUser.content
+              : Array.isArray(lastUser.content)
+                ? lastUser.content.map((p: any) => (p.type === "text" ? p.text : "")).join(" ")
+                : "";
+          hydratedMessages[lastUserIdx] = {
+            ...lastUser,
+            content: [{ type: "text", text: existingText }, ...imageParts],
+          };
+        }
+      }
+    }
+
     const fullRequest: ChatCompletionRequest = {
       ...body,
+      messages: hydratedMessages,
       modelId: "auto", // Always enforce automatic intelligence routing
       trace: {
         traceId,
@@ -67,7 +133,7 @@ export async function POST(request: Request) {
         githubToken,
         executionSessionId,
       },
-      attachments: Array.isArray((body as any).attachments) ? (body as any).attachments : undefined,
+      attachments: rawAttachments.length > 0 ? rawAttachments : undefined,
     };
 
     // Establish Server-Sent Events stream with buffering disabled for proxies

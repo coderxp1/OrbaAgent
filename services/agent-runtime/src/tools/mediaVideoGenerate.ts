@@ -4,7 +4,12 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { promisify } from "node:util";
-import { resolveWithinBase, type ToolDefinition, type ToolExecutionResult, type ToolMetadata } from "@orbaagent/shared";
+import {
+  type ToolDefinition,
+  type ToolExecutionResult,
+  type ToolMetadata,
+  resolveWithinBase,
+} from "@orbaagent/shared";
 import type { ITool, ToolExecutionContext } from "./base.js";
 import { verifyDeliveredArtifact } from "./mediaVerification.js";
 import {
@@ -64,6 +69,11 @@ export class MediaVideoGenerateTool implements ITool {
         model: {
           type: "string",
           description: "Optional model preset name.",
+        },
+        logo_url: {
+          type: "string",
+          description:
+            "Optional URL or artifactId of a company logo or brand image to visibly incorporate into the commercial.",
         },
       },
       required: ["prompt"],
@@ -235,9 +245,36 @@ export class MediaVideoGenerateTool implements ITool {
     return tmpDest;
   }
 
+  /**
+   * Overlays an image logo on top of a video using ffmpeg.
+   */
+  private async applyLogoOverlay(
+    videoPath: string,
+    logoPath: string,
+    outputPath: string,
+    fps: number,
+  ): Promise<void> {
+    await execFileAsync("ffmpeg", [
+      "-y",
+      "-i",
+      videoPath,
+      "-i",
+      logoPath,
+      "-filter_complex",
+      "[1:v]scale=120:-1[logo];[0:v][logo]overlay=main_w-overlay_w-20:20:format=auto",
+      "-c:v",
+      "libx264",
+      "-pix_fmt",
+      "yuv420p",
+      "-r",
+      String(fps),
+      outputPath,
+    ]);
+  }
+
   async execute(
     args: Record<string, unknown>,
-    _context: ToolExecutionContext,
+    context: ToolExecutionContext,
   ): Promise<ToolExecutionResult> {
     const startTime = Date.now();
     const toolCallId = (args._toolCallId as string) || `tc_vid_${Date.now()}`;
@@ -313,6 +350,27 @@ export class MediaVideoGenerateTool implements ITool {
       let rawResultMetadata: any = {};
       let jobId = `job_${Date.now()}`;
 
+      // Detect logo artifact URL from parameters or context attachments
+      let logoArtifactUrl: string | undefined = args.logo_url ? String(args.logo_url) : undefined;
+      if (!logoArtifactUrl && context?.attachments && context.attachments.length > 0) {
+        const logoAtt = context.attachments.find(
+          (a) =>
+            a.type?.startsWith("image/") ||
+            /\.(png|jpe?g|webp|gif)$/i.test(a.name || "") ||
+            /logo/i.test(a.name || ""),
+        );
+        if (logoAtt) {
+          if (logoAtt.artifactId) {
+            try {
+              const decoded = JSON.parse(
+                Buffer.from(logoAtt.artifactId, "base64url").toString("utf-8"),
+              );
+              logoArtifactUrl = `/api/artifacts/${encodeURIComponent(decoded.w)}/${encodeURIComponent(decoded.b)}/${encodeURIComponent(decoded.p)}`;
+            } catch {}
+          }
+        }
+      }
+
       if (requestedDuration > 8 && requestedDuration <= 20) {
         // Multi-segment generation pipeline for extended duration (e.g. 15s)
         console.log(
@@ -385,6 +443,22 @@ export class MediaVideoGenerateTool implements ITool {
             tmpConcat,
           ]);
 
+          let finalVideoPath = tmpConcat;
+          if (logoArtifactUrl) {
+            try {
+              const tmpLogo = path.join(tmpDir, "logo.png");
+              const resolvedLogo = await this.resolveOrDownloadArtifact(logoArtifactUrl, tmpLogo);
+              const tmpWithLogo = path.join(tmpDir, "final_with_logo.mp4");
+              await this.applyLogoOverlay(tmpConcat, resolvedLogo, tmpWithLogo, fps);
+              finalVideoPath = tmpWithLogo;
+              console.log(
+                `[MEDIA VIDEO GENERATE] Composited logo from ${logoArtifactUrl} into 15s commercial`,
+              );
+            } catch (err) {
+              console.warn("[MEDIA VIDEO GENERATE] Logo compositing warning:", err);
+            }
+          }
+
           const baseDir = process.env.ORBA_UPLOAD_DIR || path.join(process.cwd(), ".uploads");
           const workspace = process.env.ORBA_TENANT_ID || "default-tenant";
           const bundle = clip1.bundle || `vid_${Date.now().toString(36)}`;
@@ -393,7 +467,7 @@ export class MediaVideoGenerateTool implements ITool {
           await fs.mkdir(targetDir, { recursive: true });
           const targetPath = path.join(targetDir, filename);
 
-          await fs.copyFile(tmpConcat, targetPath);
+          await fs.copyFile(finalVideoPath, targetPath);
 
           const finalBytes = await fs.readFile(targetPath);
           finalSha256 = crypto.createHash("sha256").update(finalBytes).digest("hex");
@@ -405,6 +479,7 @@ export class MediaVideoGenerateTool implements ITool {
             multiSegment: true,
             segments: [clip1.artifactUrl, clip2.artifactUrl],
             targetDuration: requestedDuration,
+            logoApplied: Boolean(logoArtifactUrl),
           };
         } finally {
           await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
@@ -437,12 +512,52 @@ export class MediaVideoGenerateTool implements ITool {
         finalArtifactUrl = clip.artifactUrl || "";
         finalSha256 = clip.sha256;
         rawResultMetadata = clip.rawResult || {};
+
+        if (logoArtifactUrl && clip.artifactUrl) {
+          const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "orba-vid-logo-"));
+          try {
+            const tmpVid = path.join(tmpDir, "clip.mp4");
+            const tmpLogo = path.join(tmpDir, "logo.png");
+            const tmpWithLogo = path.join(tmpDir, "final_with_logo.mp4");
+            const resolvedVid = await this.resolveOrDownloadArtifact(clip.artifactUrl, tmpVid);
+            const resolvedLogo = await this.resolveOrDownloadArtifact(logoArtifactUrl, tmpLogo);
+            await this.applyLogoOverlay(resolvedVid, resolvedLogo, tmpWithLogo, fps);
+
+            const baseDir = process.env.ORBA_UPLOAD_DIR || path.join(process.cwd(), ".uploads");
+            const workspace = process.env.ORBA_TENANT_ID || "default-tenant";
+            const bundle = clip.bundle || `vid_${Date.now().toString(36)}`;
+            const filename = `${crypto.randomUUID()}.mp4`;
+            const targetDir = path.join(baseDir, workspace, bundle);
+            await fs.mkdir(targetDir, { recursive: true });
+            const targetPath = path.join(targetDir, filename);
+
+            await fs.copyFile(tmpWithLogo, targetPath);
+
+            const finalBytes = await fs.readFile(targetPath);
+            finalSha256 = crypto.createHash("sha256").update(finalBytes).digest("hex");
+            finalArtifactUrl = `/api/artifacts/${encodeURIComponent(workspace)}/${encodeURIComponent(
+              bundle,
+            )}/${encodeURIComponent(filename)}`;
+            rawResultMetadata.logoApplied = true;
+            console.log(
+              `[MEDIA VIDEO GENERATE] Composited logo into single clip: ${finalArtifactUrl}`,
+            );
+          } catch (err) {
+            console.warn("[MEDIA VIDEO GENERATE] Single clip logo compositing warning:", err);
+          } finally {
+            await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+          }
+        }
       }
 
       const durationMs = Date.now() - startTime;
 
       // Post-generation verification: ensure the delivered artifact actually exists and is valid
-      const verification = await verifyDeliveredArtifact(finalArtifactUrl, "video/mp4", finalSha256);
+      const verification = await verifyDeliveredArtifact(
+        finalArtifactUrl,
+        "video/mp4",
+        finalSha256,
+      );
       if (
         !verification.verified &&
         verification.retrievable === false &&

@@ -14,7 +14,7 @@ RUN pnpm --filter @orbaagent/orchestrator build
 RUN pnpm --filter @orbaagent/web build
 
 FROM base AS runner
-RUN apk add --no-cache ffmpeg
+RUN apk add --no-cache ffmpeg poppler-utils
 WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=build /app/package.json /app/pnpm-workspace.yaml ./

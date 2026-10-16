@@ -110,7 +110,10 @@ export function MessageItem({
             )}
             {message.timestamp && (
               <span className="text-[11px] text-zinc-500 font-mono pr-1">
-                {new Date(message.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                {new Date(message.timestamp).toLocaleTimeString([], {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
               </span>
             )}
           </div>
@@ -136,7 +139,10 @@ export function MessageItem({
           <span className="font-semibold text-xs tracking-tight text-white">OrbaAgent</span>
           {message.timestamp && (
             <time className="text-[11px] text-zinc-500 font-normal">
-              {new Date(message.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+              {new Date(message.timestamp).toLocaleTimeString([], {
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
             </time>
           )}
         </div>
@@ -167,12 +173,7 @@ export function MessageItem({
         {mediaToolCalls.map((call) => {
           const result = message.toolResults?.find((r) => r.toolCallId === call.id);
           return (
-            <MediaToolItem
-              key={call.id}
-              call={call}
-              result={result}
-              textContent={textContent}
-            />
+            <MediaToolItem key={call.id} call={call} result={result} textContent={textContent} />
           );
         })}
 
@@ -392,7 +393,10 @@ function MarkdownBlock({ text }: { text: string }) {
         );
       } else {
         elements.push(
-          <ol key={`ol_${elements.length}`} className="my-2 space-y-1 pl-1 list-decimal list-inside text-zinc-300">
+          <ol
+            key={`ol_${elements.length}`}
+            className="my-2 space-y-1 pl-1 list-decimal list-inside text-zinc-300"
+          >
             {currentList.items.map((item, i) => (
               <li key={i} className="leading-relaxed">
                 {item}
@@ -427,7 +431,10 @@ function MarkdownBlock({ text }: { text: string }) {
     if (trimmed.startsWith("## ")) {
       flushList();
       elements.push(
-        <h2 key={i} className="text-lg font-semibold text-white mt-5 mb-1.5 border-b border-zinc-800/60 pb-1">
+        <h2
+          key={i}
+          className="text-lg font-semibold text-white mt-5 mb-1.5 border-b border-zinc-800/60 pb-1"
+        >
           {renderInlineMarkdown(trimmed.slice(3))}
         </h2>,
       );
@@ -436,7 +443,10 @@ function MarkdownBlock({ text }: { text: string }) {
     if (trimmed.startsWith("# ")) {
       flushList();
       elements.push(
-        <h1 key={i} className="text-xl font-bold text-white mt-6 mb-2 border-b border-zinc-800/80 pb-1.5">
+        <h1
+          key={i}
+          className="text-xl font-bold text-white mt-6 mb-2 border-b border-zinc-800/80 pb-1.5"
+        >
           {renderInlineMarkdown(trimmed.slice(2))}
         </h1>,
       );
@@ -734,7 +744,11 @@ function MediaToolItem({ call, result, textContent }: MediaToolItemProps) {
       <div className="my-2.5 rounded-2xl border border-violet-900/50 bg-gradient-to-r from-violet-950/40 via-zinc-900/60 to-violet-950/30 p-3.5 shadow-lg backdrop-blur-xs">
         <div className="flex items-center gap-3">
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-violet-600/20 border border-violet-500/30 text-violet-400">
-            {isVideo ? <Film className="h-5 w-5 animate-pulse" /> : <ImageIcon className="h-5 w-5 animate-pulse" />}
+            {isVideo ? (
+              <Film className="h-5 w-5 animate-pulse" />
+            ) : (
+              <ImageIcon className="h-5 w-5 animate-pulse" />
+            )}
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
@@ -746,9 +760,7 @@ function MediaToolItem({ call, result, textContent }: MediaToolItemProps) {
                 Processing
               </span>
             </div>
-            <p className="mt-1 truncate text-xs text-zinc-300 italic">
-              &ldquo;{prompt}&rdquo;
-            </p>
+            <p className="mt-1 truncate text-xs text-zinc-300 italic">&ldquo;{prompt}&rdquo;</p>
           </div>
         </div>
       </div>

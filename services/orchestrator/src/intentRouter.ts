@@ -310,7 +310,6 @@ export function routeUserIntent(
           width: pendingMedia.width,
           height: pendingMedia.height,
           fps: 16,
-          model: isVideo ? "wan2.1-t2v-1.3b" : "black-forest-labs/FLUX.1-schnell",
         },
         systemGuidance: `[Intent Router: Resumed Pending Media Generation]
 The user approved the pending ${pendingMedia.type} generation task ("${content}").
@@ -390,18 +389,19 @@ Do NOT execute any tools or task plans for this capability inquiry.`,
     };
   }
 
-  // Video generation intent patterns (explicit video requests or rich cinematic scene descriptions with camera motion)
+  // Video generation intent patterns (explicit video requests, commercials, or rich cinematic scenes)
   const videoPatterns = [
     /\b(?:create|generate|make|render|produce)\s+(?:an?\s+)?(?:[\w-]+\s+)*videos?\b/,
-    /\b(?:create|generate|make|render|produce)\s+(?:an?\s+)?(?:[\w-]+\s+)*(?:cinematic\s+scene|action\s+scene|motion\s+scene|dramatic\s+scene|thriller\s+scene|chase\s+scene|clip|animation)\b/,
+    /\b(?:create|generate|make|render|produce)\s+(?:an?\s+)?(?:[\w-]+\s+)*(?:cinematic\s+scene|action\s+scene|motion\s+scene|dramatic\s+scene|thriller\s+scene|chase\s+scene|clip|animation|commercial|advertisement|promo|trailer)\b/,
     /\bvideo\s+of\b/,
     /\banimate\b/,
     /\banimation\s+of\b/,
     /\bmotion\s+clip\b/,
-    /\b(?:two|three|four|five|\d+)[-\s]+second\s+(?:video|clip|animation|scene)\b/,
+    /\b(?:two|three|four|five|\d+)[-\s]+second\s+(?:video|clip|animation|scene|commercial|ad)\b/,
     /\btext[- ]to[- ]video\b/,
     /\bt2v\b/,
-    /\bwan2(?:\.1)?\b/,
+    /\bcommercial\b/,
+    /\badvertisement\b/,
     /\b(?:camera\s+movement|camera\s+motion|tracking\s+camera|tracking\s+shot|dolly\s+shot|dolly\s+zoom|panning\s+shot|pan\s+across|camera\s+move|cinematic\s+shot)\b/,
   ];
 
@@ -412,10 +412,13 @@ Do NOT execute any tools or task plans for this capability inquiry.`,
     videoPatterns.some((pattern) => pattern.test(lower));
 
   if (isVideoIntent) {
-    const duration = extractVideoDurationSeconds(content) || 2;
+    const isCommercial = /\b(?:commercial|advertisement|promo|trailer|viral\s+commercial)\b/i.test(
+      lower,
+    );
+    const duration = extractVideoDurationSeconds(content) || (isCommercial ? 15 : 2);
     const dims = extractDimensions(content) || { width: 480, height: 480 };
 
-    const toolsToActivate = ["media_video_generate"];
+    const toolsToActivate = ["media_video_generate", "artifact_read", "artifact_list"];
     if (registry) {
       registry.activateTools(toolsToActivate);
     }
@@ -429,10 +432,10 @@ Do NOT execute any tools or task plans for this capability inquiry.`,
         width: dims.width,
         height: dims.height,
         fps: 16,
-        model: "wan2.1-t2v-1.3b",
       },
-      systemGuidance: `[Intent Router: Detected Video Generation Request]
-The user wants to generate an AI video. Tool 'media_video_generate' has been activated.
+      systemGuidance: `[Intent Router: Detected ${isCommercial ? "Commercial Video" : "Video"} Generation Request]
+The user wants to generate ${isCommercial ? "a viral commercial video" : "an AI video"}. Tool 'media_video_generate' has been activated.
+${isCommercial ? "If a company logo or image is attached, inspect it and generate an energetic commercial featuring the brand." : ""}
 For clear scene descriptions, execute 'media_video_generate' directly without asking for clarification.
 Do NOT say 'Generating now' before executing the tool call. Call 'media_video_generate' directly with:
 - prompt: Detailed description of scene motion and elements based on user request
@@ -451,7 +454,6 @@ Do NOT say 'Generating now' before executing the tool call. Call 'media_video_ge
     /\b(?:image|picture|photo|photograph|illustration|artwork|drawing|painting)\s+of\b/,
     /\btext[- ]to[- ]image\b/,
     /\bt2i\b/,
-    /\bflux(?:\.1)?\b/,
     /\bdiffusion\s+render\b/,
   ];
 

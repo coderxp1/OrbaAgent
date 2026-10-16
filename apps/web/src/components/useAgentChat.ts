@@ -30,6 +30,7 @@ export function useAgentChat() {
         type?: string;
         size?: number;
         relPath?: string;
+        url?: string;
         file?: File;
       }>,
     ) => {
@@ -66,61 +67,73 @@ export function useAgentChat() {
       abortControllerRef.current = controller;
 
       try {
-        const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
-        const SUPPORTED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
-
+        const MAX_IMAGE_SIZE = 15 * 1024 * 1024;
         let apiPayloadContent: any = userContent;
-        if (attachments?.some((a) => a.type?.startsWith("image/"))) {
+
+        if (
+          attachments?.some(
+            (a) =>
+              a.type?.startsWith("image/") || /\.(png|jpe?g|webp|gif|bmp)$/i.test(a.name || ""),
+          )
+        ) {
           const parts: any[] = [{ type: "text", text: userContent }];
           for (const att of attachments) {
-            if (att.type?.startsWith("image/")) {
-              if (!SUPPORTED_IMAGE_TYPES.includes(att.type)) {
-                setError({
-                  code: "unsupported_image",
-                  message: `Unsupported image format: ${att.type}. Supported formats: JPEG, PNG, WEBP, GIF.`,
-                });
-                setIsGenerating(false);
-                setMessages(messages);
-                return;
-              }
+            const isImage =
+              att.type?.startsWith("image/") || /\.(png|jpe?g|webp|gif|bmp)$/i.test(att.name || "");
+            if (isImage) {
               if ((att.size || 0) > MAX_IMAGE_SIZE) {
                 setError({
                   code: "image_too_large",
-                  message: `Image exceeds 5MB limit: ${att.name || "Unknown"}`,
+                  message: `Image exceeds limit: ${att.name || "Unknown"}`,
                 });
                 setIsGenerating(false);
                 setMessages(messages);
                 return;
               }
-              if (!att.file) {
-                setError({
-                  code: "image_read_error",
-                  message: `File data missing for image: ${att.name || "Unknown"}`,
-                });
-                setIsGenerating(false);
-                setMessages(messages);
-                return;
+
+              let dataUrl: string | null = null;
+
+              // 1. Read from browser File if present
+              if (att.file) {
+                try {
+                  dataUrl = await new Promise<string>((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = () => resolve(reader.result as string);
+                    reader.onerror = reject;
+                    reader.readAsDataURL(att.file as File);
+                  });
+                } catch (e) {
+                  console.warn("Could not read File via FileReader:", e);
+                }
               }
-              try {
-                const dataUrl = await new Promise<string>((resolve, reject) => {
-                  const reader = new FileReader();
-                  reader.onload = () => resolve(reader.result as string);
-                  reader.onerror = reject;
-                  reader.readAsDataURL(att.file as File);
-                });
+
+              // 2. Fallback: fetch artifact URL as blob if file not attached in memory
+              if (!dataUrl && att.url) {
+                try {
+                  const res = await fetch(att.url);
+                  if (res.ok) {
+                    const blob = await res.blob();
+                    dataUrl = await new Promise<string>((resolve, reject) => {
+                      const reader = new FileReader();
+                      reader.onload = () => resolve(reader.result as string);
+                      reader.onerror = reject;
+                      reader.readAsDataURL(blob);
+                    });
+                  }
+                } catch (e) {
+                  console.warn("Could not load artifact URL as blob:", e);
+                }
+              }
+
+              if (dataUrl) {
                 parts.push({ type: "image_url", image_url: { url: dataUrl } });
-              } catch (e) {
-                setError({
-                  code: "image_read_error",
-                  message: `Failed to read image: ${att.name || "Unknown"}`,
-                });
-                setIsGenerating(false);
-                setMessages(messages);
-                return;
               }
             }
           }
-          apiPayloadContent = parts;
+
+          if (parts.length > 1) {
+            apiPayloadContent = parts;
+          }
         }
 
         const response = await fetch("/api/chat", {
@@ -142,6 +155,7 @@ export function useAgentChat() {
                     type: a.type,
                     size: a.size,
                     relPath: a.relPath,
+                    url: a.url,
                   }))
                 : undefined,
             trace: {
