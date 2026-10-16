@@ -1,7 +1,24 @@
 "use client";
 
-import type { ChatMessage } from "@orbaagent/shared";
-import { Brain, Check, Copy, CornerUpLeft, ThumbsDown, ThumbsUp, User } from "lucide-react";
+import type { ChatMessage, ToolCall, ToolExecutionResult } from "@orbaagent/shared";
+import {
+  AlertCircle,
+  Brain,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Copy,
+  CornerUpLeft,
+  Download,
+  ExternalLink,
+  Film,
+  Image as ImageIcon,
+  Loader2,
+  Sparkles,
+  ThumbsDown,
+  ThumbsUp,
+  User,
+} from "lucide-react";
 import { useState } from "react";
 import { FileChangesReview } from "./FileChangesReview";
 import { TerminalSession } from "./TerminalSession";
@@ -56,17 +73,32 @@ export function MessageItem({
     }
   };
 
+  const terminalToolCalls = (message.toolCalls || []).filter(
+    (c) => c.name !== "media_image_generate" && c.name !== "media_video_generate",
+  );
+  const mediaToolCalls = (message.toolCalls || []).filter(
+    (c) => c.name === "media_image_generate" || c.name === "media_video_generate",
+  );
+  const textContent =
+    typeof message.content === "string"
+      ? message.content
+      : Array.isArray(message.content)
+        ? message.content.map((p) => (p.type === "text" ? p.text : "")).join("")
+        : "";
+
   return (
     <div
       className={`group/msg flex w-full gap-4 p-4 rounded-xl transition-colors ${
-        isUser ? "bg-zinc-950/40 border border-zinc-900" : "bg-[#161616] border border-[#242424]"
+        isUser
+          ? "bg-zinc-950/60 border border-zinc-850/80 shadow-xs"
+          : "bg-[#161616] border border-[#242424] shadow-sm"
       }`}
     >
       {/* Avatar */}
       <div
         className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg overflow-hidden ${
           isUser
-            ? "bg-zinc-800 text-zinc-300"
+            ? "bg-zinc-800 text-zinc-300 ring-1 ring-zinc-700/50"
             : "bg-white p-1 ring-1 ring-white/20 shadow-md shadow-black/40"
         }`}
       >
@@ -83,7 +115,7 @@ export function MessageItem({
 
       <div className="flex flex-1 flex-col gap-3 overflow-hidden text-sm">
         <div className="flex items-center gap-2 font-semibold text-xs text-zinc-400">
-          <span>{isUser ? "You" : "OrbaAgent"}</span>
+          <span className={isUser ? "text-zinc-300" : "text-white"}>{isUser ? "You" : "OrbaAgent"}</span>
           {message.timestamp && (
             <time className="font-mono text-zinc-500 font-normal">
               {new Date(message.timestamp).toLocaleTimeString()}
@@ -113,10 +145,23 @@ export function MessageItem({
           </div>
         )}
 
-        {/* Unified Live Terminal Session */}
-        {message.toolCalls && message.toolCalls.length > 0 && (
+        {/* Media Generation Items (Images and Videos rendered directly, no terminal window) */}
+        {mediaToolCalls.map((call) => {
+          const result = message.toolResults?.find((r) => r.toolCallId === call.id);
+          return (
+            <MediaToolItem
+              key={call.id}
+              call={call}
+              result={result}
+              textContent={textContent}
+            />
+          );
+        })}
+
+        {/* Legitimate Terminal Session (Only for actual shell / git / coding operations) */}
+        {terminalToolCalls.length > 0 && (
           <TerminalSession
-            toolCalls={message.toolCalls}
+            toolCalls={terminalToolCalls}
             toolResults={message.toolResults}
             isLive={false}
           />
@@ -425,34 +470,43 @@ function renderMarkdownInline(text: string) {
         const filename = href.split("/").pop() || "video.mp4";
         return (
           <span key={i} className="my-3 block max-w-lg">
-            <span className="block overflow-hidden rounded-xl border border-zinc-750 bg-zinc-950/80 shadow-md">
+            <span className="block overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950/90 shadow-xl">
+              <span className="px-3.5 py-2 bg-zinc-900/95 border-b border-zinc-800/80 flex items-center justify-between text-xs text-zinc-400 select-none">
+                <span className="flex items-center gap-2 font-medium text-zinc-200">
+                  <Film className="h-3.5 w-3.5 text-violet-400" />
+                  <span className="truncate max-w-[200px]">{linkText || "Cinematic Video"}</span>
+                </span>
+                <span className="inline-flex items-center gap-1 rounded bg-zinc-800/90 px-1.5 py-0.5 text-[10px] font-mono text-zinc-400 border border-zinc-750">
+                  MP4
+                </span>
+              </span>
               <video
                 src={href}
                 controls
-                className="max-h-64 w-full object-contain bg-black"
+                className="max-h-72 w-full object-contain bg-black"
                 preload="metadata"
               >
                 <track kind="captions" />
               </video>
-              <span className="p-2 flex items-center justify-between border-t border-zinc-800 bg-zinc-900/90 text-[11px] text-zinc-400">
-                <span className="font-mono truncate">{filename}</span>
-                <span className="flex items-center gap-2">
+              <span className="p-2.5 flex items-center justify-between border-t border-zinc-800/80 bg-zinc-900/90 text-[11px] text-zinc-400">
+                <span className="font-mono truncate max-w-[180px]">{filename}</span>
+                <span className="flex items-center gap-3">
                   <a
                     href={href}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-indigo-400 hover:text-indigo-300 underline shrink-0 font-sans"
+                    className="text-violet-400 hover:text-violet-300 inline-flex items-center gap-1 font-sans"
                   >
-                    Open artifact ↗
+                    Open artifact <ExternalLink className="h-3 w-3" />
                   </a>
                   <a
                     href={href}
                     download
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-zinc-300 hover:text-white underline shrink-0 font-sans"
+                    className="text-zinc-300 hover:text-white inline-flex items-center gap-1 font-sans"
                   >
-                    Download
+                    Download <Download className="h-3 w-3" />
                   </a>
                 </span>
               </span>
@@ -476,4 +530,186 @@ function renderMarkdownInline(text: string) {
 
     return <span key={i}>{token}</span>;
   });
+}
+
+interface MediaToolItemProps {
+  call: ToolCall;
+  result?: ToolExecutionResult;
+  textContent: string;
+}
+
+function MediaToolItem({ call, result, textContent }: MediaToolItemProps) {
+  const isVideo = call.name === "media_video_generate";
+  const args = (call.arguments || {}) as Record<string, any>;
+  const prompt = args.prompt || "Generating media...";
+
+  // 1. Result not yet available -> in-progress honest status
+  if (!result) {
+    return (
+      <div className="my-2.5 rounded-xl border border-violet-900/50 bg-gradient-to-r from-violet-950/40 via-zinc-900/60 to-violet-950/30 p-3.5 shadow-lg backdrop-blur-xs">
+        <div className="flex items-center gap-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-violet-600/20 border border-violet-500/30 text-violet-400">
+            {isVideo ? <Film className="h-5 w-5 animate-pulse" /> : <ImageIcon className="h-5 w-5 animate-pulse" />}
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="font-semibold text-xs text-violet-200">
+                {isVideo ? "Generating video…" : "Generating image…"}
+              </span>
+              <span className="inline-flex items-center gap-1 rounded-full bg-violet-950/80 px-2 py-0.5 text-[10px] font-mono font-medium text-violet-300 border border-violet-700/60">
+                <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                GPU 1 active
+              </span>
+            </div>
+            <p className="mt-1 truncate text-xs text-zinc-300 italic">
+              &ldquo;{prompt}&rdquo;
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // 2. Failed state
+  if (!result.success) {
+    return (
+      <div className="my-2.5 rounded-xl border border-red-900/60 bg-red-950/30 p-3.5 text-xs text-red-300 shadow-md">
+        <div className="flex items-start gap-2.5">
+          <AlertCircle className="h-4 w-4 shrink-0 text-red-400 mt-0.5" />
+          <div className="flex-1">
+            <span className="font-semibold text-red-200">
+              {isVideo ? "Video generation failed" : "Image generation failed"}
+            </span>
+            <p className="mt-1 text-red-300/90 font-mono text-[11px] leading-relaxed">
+              {result.error || "The media worker encountered an error executing this request."}
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // 3. Completed state
+  let data: any = null;
+  try {
+    data = typeof result.output === "string" ? JSON.parse(result.output) : result.output;
+  } catch {}
+
+  const artifactUrl = data?.artifactUrl;
+  const executionMs = data?.executionDurationMs || result.executionTimeMs;
+  const contentHasArtifact = Boolean(artifactUrl && textContent.includes(artifactUrl));
+
+  return (
+    <div className="my-2.5 flex flex-col gap-2">
+      {/* If message text does not already embed the artifact via markdown, render the full preview */}
+      {!contentHasArtifact && artifactUrl && (
+        <div className="rounded-xl overflow-hidden border border-zinc-800 bg-zinc-950 shadow-xl max-w-lg">
+          {isVideo ? (
+            <div className="relative">
+              <div className="px-3 py-1.5 bg-zinc-900/90 border-b border-zinc-800 flex items-center justify-between text-xs text-zinc-400">
+                <span className="flex items-center gap-1.5 font-medium text-zinc-200">
+                  <Film className="h-3.5 w-3.5 text-violet-400" />
+                  <span>Generated Video</span>
+                </span>
+                <span className="font-mono text-[10px] text-zinc-500">
+                  {data?.model || "Wan2.1-T2V"}
+                </span>
+              </div>
+              <video
+                src={artifactUrl}
+                controls
+                className="max-h-80 w-full object-contain bg-black"
+                preload="metadata"
+              >
+                <track kind="captions" />
+              </video>
+              <div className="p-2.5 flex items-center justify-between border-t border-zinc-800/80 bg-zinc-900/80 text-xs text-zinc-400">
+                <span className="truncate max-w-[200px] text-zinc-300 font-mono text-[11px]">
+                  {artifactUrl.split("/").pop()}
+                </span>
+                <div className="flex items-center gap-2 font-sans text-[11px]">
+                  <a
+                    href={artifactUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-violet-400 hover:text-violet-300 inline-flex items-center gap-1"
+                  >
+                    Open artifact <ExternalLink className="h-3 w-3" />
+                  </a>
+                  <a
+                    href={artifactUrl}
+                    download
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-zinc-300 hover:text-white inline-flex items-center gap-1"
+                  >
+                    Download <Download className="h-3 w-3" />
+                  </a>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div>
+              <a
+                href={artifactUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block relative group/preview cursor-pointer"
+              >
+                <img
+                  src={artifactUrl}
+                  alt={prompt}
+                  className="w-full max-h-[480px] object-contain rounded-t-xl"
+                  loading="lazy"
+                />
+                <span className="absolute inset-0 bg-black/40 opacity-0 group-hover/preview:opacity-100 transition-opacity flex items-center justify-center text-white text-xs font-medium">
+                  Click to open full size ↗
+                </span>
+              </a>
+              <div className="p-2.5 flex items-center justify-between border-t border-zinc-800/80 bg-zinc-900/80 text-xs text-zinc-400">
+                <span className="truncate max-w-[240px] text-zinc-300 text-[11px]">
+                  {prompt}
+                </span>
+                <a
+                  href={artifactUrl}
+                  download
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-violet-400 hover:text-violet-300 inline-flex items-center gap-1 text-[11px]"
+                >
+                  Download <Download className="h-3 w-3" />
+                </a>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Developer / Diagnostic Trace — Collapsed by default */}
+      <details className="group/diag text-xs text-zinc-500 font-mono">
+        <summary className="cursor-pointer select-none py-1 text-[11px] text-zinc-500 hover:text-zinc-400 flex items-center gap-2 list-none">
+          <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-zinc-900 border border-zinc-800 text-zinc-400 group-open/diag:text-violet-400">
+            DEBUG TRACE
+          </span>
+          <span>{call.name}</span>
+          <span className="text-zinc-600">•</span>
+          <span>{data?.model || "GPU 1"}</span>
+          {executionMs && (
+            <>
+              <span className="text-zinc-600">•</span>
+              <span>{(executionMs / 1000).toFixed(1)}s</span>
+            </>
+          )}
+        </summary>
+        <div className="mt-1.5 p-3 rounded-lg bg-zinc-950/70 border border-zinc-800/80 text-[11px] text-zinc-400 space-y-1">
+          {data?.jobId && <div><span className="text-zinc-500">Job ID:</span> {data.jobId}</div>}
+          {data?.dimensions && <div><span className="text-zinc-500">Dimensions:</span> {data.dimensions}</div>}
+          {artifactUrl && <div className="truncate"><span className="text-zinc-500">Artifact:</span> {artifactUrl}</div>}
+          {data?.verified !== undefined && (
+            <div><span className="text-zinc-500">Integrity:</span> {data.verified ? "Verified SHA-256" : "Unverified"}</div>
+          )}
+        </div>
+      </details>
+    </div>
+  );
 }

@@ -153,8 +153,13 @@ def run_video_inference(
     target_frames = max(1, int(round(duration_seconds * fps)))
 
     # Wan architecture uses 4x temporal compression, requiring (num_frames - 1) % 4 == 0 (4N + 1).
+    # Round UP to the next valid 4N + 1 frame count so that requested duration is never truncated below requested seconds.
     if getattr(pipeline, "_class_name", "") == "WanPipeline" or hasattr(pipeline, "vae_scale_factor_temporal"):
-        target_frames = max(1, ((target_frames - 1) // 4) * 4 + 1)
+        rem = (target_frames - 1) % 4
+        if rem != 0:
+            target_frames = (target_frames - 1 + (4 - rem)) + 1
+        else:
+            target_frames = max(1, target_frames)
 
     kwargs = {
         "prompt": prompt,

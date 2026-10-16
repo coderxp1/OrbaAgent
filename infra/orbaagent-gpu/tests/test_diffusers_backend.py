@@ -162,6 +162,49 @@ class TestRunInferenceNumpyTruthValue:
         assert output_mp4.exists()
         assert output_mp4.stat().st_size > 0
 
+    def test_wan_target_frames_rounds_up_to_honor_duration(self, tmp_path):
+        """Wan 4x temporal compression requires (num_frames - 1) % 4 == 0.
+        Verify that 2s @ 16fps (32 frames) rounds UP to 33 frames (2.0625s),
+        and 4s @ 16fps (64 frames) rounds UP to 65 frames (4.0625s), so duration is not truncated."""
+        mock_result = MagicMock()
+        mock_result.frames = [[np.zeros((64, 64, 3), dtype=np.uint8)] * 33]
+        mock_pipeline = MagicMock(return_value=mock_result)
+        mock_pipeline._class_name = "WanPipeline"
+
+        output_mp4 = tmp_path / "out_dur.mp4"
+        mock_torch = self._make_mock_torch()
+        mock_diffusers = MagicMock()
+        mock_diffusers_utils = MagicMock()
+        mock_diffusers_utils.export_to_video = lambda frames, path, fps: Path(path).write_bytes(b"\x00" * 64)
+        mock_diffusers.utils = mock_diffusers_utils
+
+        def fake_subprocess(cmd, **kwargs):
+            output_mp4.write_bytes(b"\x00" * 64)
+            r = MagicMock()
+            r.returncode = 0
+            return r
+
+        with (
+            patch.dict(sys.modules, {"diffusers": mock_diffusers, "diffusers.utils": mock_diffusers_utils}),
+            patch("orba_gpu.backends.diffusers_backend._torch", return_value=mock_torch),
+            patch("orba_gpu.backends.diffusers_backend._device", return_value="cuda"),
+            patch("orba_gpu.backends.diffusers_backend.subprocess.run", fake_subprocess),
+        ):
+            run_video_inference(
+                pipeline=mock_pipeline,
+                prompt="test duration",
+                negative_prompt=None,
+                duration_seconds=2,
+                fps=16,
+                width=64,
+                height=64,
+                output_path=output_mp4,
+            )
+
+        call_kwargs = mock_pipeline.call_args.kwargs
+        assert call_kwargs["num_frames"] == 33
+        assert (call_kwargs["num_frames"] - 1) % 4 == 0
+
     def test_run_video_inference_none_frames_raises_runtime_error(self, tmp_path):
         """result.frames = None must raise RuntimeError, not TypeError."""
         mock_result = MagicMock()

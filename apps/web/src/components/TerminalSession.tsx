@@ -23,11 +23,20 @@ export function TerminalSession({
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [copied, setCopied] = useState(false);
 
+  // Filter out any media tools from terminal display — media is rendered natively
+  const validCalls = toolCalls.filter(
+    (call) => call.name !== "media_image_generate" && call.name !== "media_video_generate",
+  );
+
   // Pair calls with their matching results
-  const items: TerminalItem[] = toolCalls.map((call) => ({
+  const items: TerminalItem[] = validCalls.map((call) => ({
     call,
     result: toolResults.find((r) => r.toolCallId === call.id),
   }));
+
+  if (items.length === 0) {
+    return null;
+  }
 
   const getCommandLine = (call: ToolCall): string => {
     const args = call.arguments as Record<string, unknown>;

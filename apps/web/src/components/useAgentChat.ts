@@ -346,6 +346,18 @@ export function useAgentChat() {
     setActiveActivity(null);
   }, [cancelGeneration]);
 
+  const loadMessages = useCallback(
+    (newMessages: ChatMessage[]) => {
+      cancelGeneration();
+      setMessages(newMessages);
+      setError(null);
+      setLatestUsage(null);
+      setActiveTraceId(null);
+      setActiveActivity(null);
+    },
+    [cancelGeneration],
+  );
+
   return {
     messages,
     isGenerating,
@@ -357,6 +369,7 @@ export function useAgentChat() {
     cancelGeneration,
     retryLastMessage,
     clearChat,
+    loadMessages,
     reviewFileChange,
   };
 }

@@ -66,8 +66,19 @@ export default function WorkspacePage() {
     cancelGeneration,
     retryLastMessage,
     clearChat,
+    loadMessages,
     reviewFileChange,
   } = useAgentChat();
+
+  interface ChatSession {
+    id: string;
+    title: string;
+    updatedAt: string;
+    messages: ChatMessage[];
+  }
+
+  const [sessions, setSessions] = useState<ChatSession[]>([]);
+  const [currentSessionId, setCurrentSessionId] = useState<string>(() => `session_${Date.now()}`);
 
   const [inputPrompt, setInputPrompt] = useState<string>("");
   const [showPlanBanner, setShowPlanBanner] = useState<boolean>(true);
@@ -95,6 +106,85 @@ export default function WorkspacePage() {
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Load saved sessions on mount
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem("orba_recent_sessions");
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed)) {
+          setSessions(parsed);
+        }
+      }
+    } catch {}
+  }, []);
+
+  // Sync active conversation to sessions history
+  useEffect(() => {
+    if (messages.length === 0) return;
+    const firstUser = messages.find((m) => m.role === "user");
+    const firstText = firstUser
+      ? typeof firstUser.content === "string"
+        ? firstUser.content
+        : Array.isArray(firstUser.content)
+          ? firstUser.content.map((p) => (p.type === "text" ? p.text : "")).join("")
+          : "Conversation"
+      : "Conversation";
+    const title =
+      firstText.trim().replace(/^\[Attachment\]:[^\n]+\n*/g, "").slice(0, 36) || "Conversation";
+
+    setSessions((prev) => {
+      const existingIdx = prev.findIndex((s) => s.id === currentSessionId);
+      const updated: ChatSession = {
+        id: currentSessionId,
+        title,
+        updatedAt: new Date().toISOString(),
+        messages,
+      };
+      let next: ChatSession[];
+      if (existingIdx >= 0) {
+        next = [...prev];
+        next[existingIdx] = updated;
+      } else {
+        next = [updated, ...prev].slice(0, 30);
+      }
+      try {
+        localStorage.setItem("orba_recent_sessions", JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  }, [messages, currentSessionId]);
+
+  const handleSelectSession = (session: ChatSession) => {
+    setCurrentSessionId(session.id);
+    loadMessages(session.messages);
+    setIsMobileSidebarOpen(false);
+  };
+
+  const handleDeleteSession = (sessionId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSessions((prev) => {
+      const next = prev.filter((s) => s.id !== sessionId);
+      try {
+        localStorage.setItem("orba_recent_sessions", JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+    if (currentSessionId === sessionId) {
+      clearChat();
+      setCurrentSessionId(`session_${Date.now()}`);
+    }
+  };
+
+  const handleStartNewChat = () => {
+    setCurrentSessionId(`session_${Date.now()}`);
+    clearChat();
+    setInputPrompt("");
+    setAttachedFiles([]);
+    setIsMobileSidebarOpen(false);
+    textareaRef.current?.focus();
+  };
 
   // Fetch initial connection state
   useEffect(() => {
@@ -133,14 +223,12 @@ export default function WorkspacePage() {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "o") {
         e.preventDefault();
-        clearChat();
-        setInputPrompt("");
-        setAttachedFiles([]);
+        handleStartNewChat();
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [clearChat]);
+  }, []);
 
   const toggleListening = () => {
     if (isListening) {
@@ -367,22 +455,68 @@ export default function WorkspacePage() {
             </div>
           )}
 
-          {/* Private Section */}
-          <div className="flex flex-col gap-1 pt-1">
-            <span className="text-[11px] font-semibold text-zinc-500 px-2">Private</span>
+          {/* New Chat Primary Button */}
+          <div className="px-1">
             <button
-              onClick={() => {
-                clearChat();
-                setInputPrompt("");
-                setAttachedFiles([]);
-                textareaRef.current?.focus();
-              }}
+              onClick={handleStartNewChat}
               type="button"
-              className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs text-zinc-400 hover:text-zinc-200 hover:bg-[#1f1f1f] transition-colors"
+              className="flex items-center justify-between w-full px-3 py-2 rounded-xl bg-[#202023] hover:bg-[#28282d] border border-zinc-700/60 text-xs font-semibold text-white shadow-sm transition-all group/new"
             >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Add new</span>
+              <div className="flex items-center gap-2">
+                <Plus className="w-4 h-4 text-violet-400 group-hover/new:rotate-90 transition-transform" />
+                <span>New chat</span>
+              </div>
+              <span className="text-[10px] text-zinc-400 font-mono bg-zinc-900 px-1.5 py-0.5 rounded border border-zinc-750">
+                Ctrl+O
+              </span>
             </button>
+          </div>
+
+          {/* Recent Conversations History */}
+          <div className="flex flex-col gap-1 pt-1">
+            <div className="flex items-center justify-between px-2 text-[11px] font-semibold text-zinc-500">
+              <span>Recent chats</span>
+              {sessions.length > 0 && (
+                <span className="text-[10px] text-zinc-600 font-mono">
+                  {sessions.length}
+                </span>
+              )}
+            </div>
+            {sessions.length === 0 ? (
+              <div className="px-2 py-2 text-[11px] text-zinc-600 italic">
+                No past chats yet
+              </div>
+            ) : (
+              <div className="flex flex-col gap-0.5 max-h-56 overflow-y-auto no-scrollbar">
+                {sessions.map((s) => {
+                  const isActive = currentSessionId === s.id && messages.length > 0;
+                  return (
+                    <div
+                      key={s.id}
+                      onClick={() => handleSelectSession(s)}
+                      className={`group/sess flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs cursor-pointer transition-colors ${
+                        isActive
+                          ? "bg-[#25252a] text-white font-medium border border-zinc-700/60 shadow-xs"
+                          : "text-zinc-400 hover:text-zinc-200 hover:bg-[#1a1a1d]"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 truncate min-w-0">
+                        <MessageSquare className="w-3.5 h-3.5 shrink-0 opacity-70 text-violet-400" />
+                        <span className="truncate text-[12px]">{s.title}</span>
+                      </div>
+                      <button
+                        onClick={(e) => handleDeleteSession(s.id, e)}
+                        type="button"
+                        className="opacity-0 group-hover/sess:opacity-100 p-1 hover:text-red-400 rounded transition-opacity"
+                        title="Delete chat"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           {/* Navigation Items */}
@@ -624,20 +758,30 @@ export default function WorkspacePage() {
                           </span>
                         )}
                       </button>
-                      <button
-                        onClick={handleSend}
-                        disabled={
-                          (!inputPrompt.trim() && attachedFiles.length === 0) || isGenerating
-                        }
-                        type="button"
-                        className={`w-7 h-7 rounded-full flex items-center justify-center transition-all ${
-                          (inputPrompt.trim() || attachedFiles.length > 0) && !isGenerating
-                            ? "bg-white text-black hover:bg-zinc-200"
-                            : "bg-[#2a2a2a] text-zinc-600 cursor-not-allowed"
-                        }`}
-                      >
-                        <ArrowUp className="w-4 h-4 stroke-[2.5]" />
-                      </button>
+                      {isGenerating ? (
+                        <button
+                          onClick={cancelGeneration}
+                          type="button"
+                          className="px-3 py-1 rounded-full bg-red-950/60 border border-red-800/40 text-red-300 text-xs font-medium hover:bg-red-900/60 transition-colors"
+                        >
+                          Stop
+                        </button>
+                      ) : (
+                        <button
+                          onClick={handleSend}
+                          disabled={
+                            (!inputPrompt.trim() && attachedFiles.length === 0) || isGenerating
+                          }
+                          type="button"
+                          className={`w-7 h-7 rounded-full flex items-center justify-center transition-all ${
+                            (inputPrompt.trim() || attachedFiles.length > 0) && !isGenerating
+                              ? "bg-white text-black hover:bg-zinc-200"
+                              : "bg-[#2a2a2a] text-zinc-600 cursor-not-allowed"
+                          }`}
+                        >
+                          <ArrowUp className="w-4 h-4 stroke-[2.5]" />
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -881,11 +1025,25 @@ export default function WorkspacePage() {
                       ({activeActivity.details.slice(0, 100)})
                     </span>
                   )}
+                  <button
+                    onClick={cancelGeneration}
+                    type="button"
+                    className="ml-1 text-[10px] text-zinc-400 hover:text-white px-1.5 py-0.5 rounded bg-black/40 border border-zinc-700/50 transition-colors"
+                  >
+                    Cancel
+                  </button>
                 </div>
               ) : isGenerating ? (
                 <div className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-zinc-900/80 border border-zinc-800 text-zinc-400 text-xs w-fit">
                   <Loader2 className="w-3.5 h-3.5 animate-spin text-zinc-400" />
                   <span className="font-medium text-zinc-300">Thinking...</span>
+                  <button
+                    onClick={cancelGeneration}
+                    type="button"
+                    className="ml-1 text-[10px] text-zinc-400 hover:text-white px-1.5 py-0.5 rounded bg-black/40 border border-zinc-700/50 transition-colors"
+                  >
+                    Cancel
+                  </button>
                 </div>
               ) : null}
             </div>
