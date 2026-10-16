@@ -48,6 +48,15 @@ export function useAgentChat() {
         role: "user",
         content: userContent,
         timestamp: new Date().toISOString(),
+        attachments: attachments?.map((att) => ({
+          artifactId: att.artifactId,
+          name: att.name,
+          type: att.type,
+          size: att.size,
+          relPath: att.relPath,
+          url: att.url,
+          previewUrl: (att as any).previewUrl || att.url,
+        })),
       };
 
       const assistantMsg: ChatMessage = {

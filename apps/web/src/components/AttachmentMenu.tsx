@@ -26,6 +26,7 @@ export interface AttachedFile {
   content?: string;
   file?: File; // raw browser File for upload pipeline
   relativePath?: string; // preserved when selecting directories
+  previewUrl?: string; // object URL or data URL for instant image previews
 }
 
 interface AttachmentMenuProps {
@@ -69,6 +70,14 @@ export function AttachmentMenu({ onAttachFiles, onInsertSnippet }: AttachmentMen
           content = await file.text();
         } catch {}
       }
+
+      let previewUrl: string | undefined;
+      if (file.type.startsWith("image/") || /\.(png|jpe?g|webp|gif|svg)$/i.test(file.name)) {
+        try {
+          previewUrl = URL.createObjectURL(file);
+        } catch {}
+      }
+
       newAttachments.push({
         id: `att_${Date.now()}_${i}`,
         name: file.name,
@@ -76,6 +85,7 @@ export function AttachmentMenu({ onAttachFiles, onInsertSnippet }: AttachmentMen
         type: file.type || "application/octet-stream",
         content,
         file,
+        previewUrl,
         // @ts-ignore — Chromium-only webkitRelativePath
         relativePath: (file as any).webkitRelativePath || undefined,
       });

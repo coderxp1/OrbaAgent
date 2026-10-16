@@ -208,6 +208,8 @@ export const ChatMessageSchema = z.object({
   thinking: z.string().optional(),
   timestamp: z.string().optional(),
   fileChanges: z.array(AgentFileChangeSchema).optional(),
+  attachments: z.array(z.any()).optional(),
+  suggestions: z.array(z.string()).optional(),
 });
 export type ChatMessage = z.infer<typeof ChatMessageSchema>;
 

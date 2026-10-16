@@ -3,23 +3,34 @@
 import type { ChatMessage, ToolCall, ToolExecutionResult } from "@orbaagent/shared";
 import {
   AlertCircle,
+  ArrowDownToLine,
+  Bot,
   Brain,
   Check,
+  CheckCircle2,
   ChevronDown,
   ChevronRight,
+  ChevronUp,
+  Clock,
   Copy,
+  CornerDownLeft,
   CornerUpLeft,
   Download,
   ExternalLink,
+  FileText,
   Film,
   Image as ImageIcon,
   Loader2,
+  MoreHorizontal,
+  Play,
   Sparkles,
   ThumbsDown,
   ThumbsUp,
   User,
+  Volume2,
+  VolumeX,
 } from "lucide-react";
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { FileChangesReview } from "./FileChangesReview";
 import { TerminalSession } from "./TerminalSession";
 
@@ -86,15 +97,92 @@ export function MessageItem({
         ? message.content.map((p) => (p.type === "text" ? p.text : "")).join("")
         : "";
 
-  // 1. User Message: Aligned to right, self-contained message bubble (ChatGPT style)
+  // 1. User Message: Aligned to right, self-contained message bubble with visual attachment previews (ChatGPT style)
   if (isUser) {
+    // Strip raw [Attachment]: /api/artifacts/... from text content
+    const cleanPrompt = textContent
+      .replace(/\[Attachment\]:\s*\/api\/artifacts\/\S+\s*/gi, "")
+      .trim();
+
+    // Extract attachments from message.attachments or fallback to legacy regex from textContent
+    const attachedItems: Array<{ url: string; name?: string; type?: string }> = [];
+    if (Array.isArray((message as any).attachments) && (message as any).attachments.length > 0) {
+      for (const a of (message as any).attachments) {
+        attachedItems.push({
+          url: a.previewUrl || a.url || "",
+          name: a.name || "Attachment",
+          type: a.type || "",
+        });
+      }
+    } else {
+      const legacyMatches = [
+        ...textContent.matchAll(/\[Attachment\]:\s*(\/api\/artifacts\/\S+)/gi),
+      ];
+      for (const match of legacyMatches) {
+        if (match[1]) {
+          const u = match[1];
+          const fname = decodeURIComponent(u.split("/").pop() || "Attachment");
+          attachedItems.push({
+            url: u,
+            name: fname,
+            type: /\.(png|jpe?g|webp|gif|svg)$/i.test(fname)
+              ? "image/png"
+              : "application/octet-stream",
+          });
+        }
+      }
+    }
+
     return (
       <div className="group/msg flex w-full justify-end px-2 sm:px-0">
-        <div className="flex flex-col items-end max-w-[85%] sm:max-w-[75%]">
-          <div className="rounded-3xl bg-[#2a2a2e] text-zinc-100 px-5 py-3 text-[15px] leading-relaxed shadow-sm border border-zinc-700/40 select-text whitespace-pre-wrap">
-            {textContent}
-          </div>
-          <div className="flex items-center gap-1.5 mt-1.5 opacity-0 group-hover/msg:opacity-100 group-focus-within/msg:opacity-100 transition-opacity">
+        <div className="flex flex-col items-end max-w-[85%] sm:max-w-[75%] gap-2">
+          {cleanPrompt && (
+            <div className="rounded-3xl bg-[#2a2a2e] text-zinc-100 px-5 py-3 text-[15px] leading-relaxed shadow-sm border border-zinc-700/40 select-text whitespace-pre-wrap">
+              {cleanPrompt}
+            </div>
+          )}
+
+          {/* Attached Image/File Badges (matching input_file_0.png & input_file_1.png) */}
+          {attachedItems.length > 0 && (
+            <div className="flex flex-wrap justify-end gap-2.5">
+              {attachedItems.map((att, idx) => {
+                const isImg =
+                  att.type?.startsWith("image/") ||
+                  /\.(png|jpe?g|webp|gif|svg)$/i.test(att.name || "") ||
+                  att.url.startsWith("data:image/") ||
+                  att.url.includes("Logo") ||
+                  att.url.startsWith("/api/artifacts/");
+
+                return isImg ? (
+                  <div
+                    key={idx}
+                    className="relative group/att-thumb w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-[#2a2a2e] border border-zinc-700/50 p-1 flex items-center justify-center overflow-hidden shadow-md cursor-pointer hover:border-zinc-500/80 transition-all"
+                    onClick={() => att.url && window.open(att.url, "_blank")}
+                    title={att.name}
+                  >
+                    <img
+                      src={att.url}
+                      alt={att.name || "Attachment"}
+                      className="w-full h-full object-contain rounded-xl"
+                    />
+                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/att-thumb:opacity-100 transition-opacity flex items-center justify-center text-[10px] text-white font-medium">
+                      View
+                    </div>
+                  </div>
+                ) : (
+                  <div
+                    key={idx}
+                    className="flex items-center gap-2 rounded-2xl bg-[#2a2a2e] border border-zinc-700/50 px-3.5 py-2 text-xs text-zinc-200 shadow-md"
+                  >
+                    <FileText className="w-4 h-4 text-blue-400 shrink-0" />
+                    <span className="truncate max-w-[150px] font-medium">{att.name}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          <div className="flex items-center gap-1.5 mt-1 opacity-0 group-hover/msg:opacity-100 group-focus-within/msg:opacity-100 transition-opacity">
             <ActionIconButton
               onClick={handleCopyMessage}
               title={messageCopied ? "Copied!" : "Copy message"}
@@ -173,7 +261,13 @@ export function MessageItem({
         {mediaToolCalls.map((call) => {
           const result = message.toolResults?.find((r) => r.toolCallId === call.id);
           return (
-            <MediaToolItem key={call.id} call={call} result={result} textContent={textContent} />
+            <MediaToolItem
+              key={call.id}
+              call={call}
+              result={result}
+              textContent={textContent}
+              onReply={onReply}
+            />
           );
         })}
 
@@ -731,36 +825,288 @@ interface MediaToolItemProps {
   call: ToolCall;
   result?: ToolExecutionResult;
   textContent: string;
+  onReply?: (content: string) => void;
 }
 
-function MediaToolItem({ call, result, textContent }: MediaToolItemProps) {
+function CommercialVideoPlayer({
+  src,
+  artifactUrl,
+  prompt,
+  duration,
+  onSuggestionClick,
+}: {
+  src: string;
+  artifactUrl: string;
+  prompt: string;
+  duration?: number;
+  onSuggestionClick?: (text: string) => void;
+}) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [videoDuration, setVideoDuration] = useState(duration || 0);
+  const [isMuted, setIsMuted] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [feedback, setFeedback] = useState<"up" | "down" | null>(null);
+
+  const togglePlay = () => {
+    if (!videoRef.current) return;
+    if (isPlaying) {
+      videoRef.current.pause();
+    } else {
+      videoRef.current.play();
+    }
+  };
+
+  const toggleMute = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!videoRef.current) return;
+    videoRef.current.muted = !videoRef.current.muted;
+    setIsMuted(videoRef.current.muted);
+  };
+
+  const handleTimeUpdate = () => {
+    if (videoRef.current) {
+      setCurrentTime(videoRef.current.currentTime);
+      if (videoRef.current.duration && !videoDuration) {
+        setVideoDuration(videoRef.current.duration);
+      }
+    }
+  };
+
+  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const time = Number(e.target.value);
+    setCurrentTime(time);
+    if (videoRef.current) {
+      videoRef.current.currentTime = time;
+    }
+  };
+
+  const formatTime = (secs: number) => {
+    const m = Math.floor(secs / 60);
+    const s = Math.floor(secs % 60);
+    return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+  };
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(window.location.origin + artifactUrl);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const suggestions = [
+    "Can I provide more details for the video content?",
+    "How long will it take to generate the video?",
+    "Can I see a preview of the video before it's finalized?",
+  ];
+
+  return (
+    <div className="flex flex-col gap-3 max-w-xl my-2">
+      {/* Video Container (matching input_file_2.png & input_file_3.png) */}
+      <div
+        className="relative group/player rounded-3xl overflow-hidden border border-zinc-800/80 bg-black shadow-2xl cursor-pointer"
+        onClick={togglePlay}
+      >
+        {/* Top-Right Download Button (matching input_file_2.png) */}
+        <a
+          href={artifactUrl}
+          download
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className="absolute top-3 right-3 w-8 h-8 rounded-full bg-black/60 hover:bg-black/90 backdrop-blur-md text-white/90 hover:text-white flex items-center justify-center transition-all z-20 border border-white/10 shadow-lg"
+          title="Download commercial video"
+        >
+          <ArrowDownToLine className="w-4 h-4" />
+        </a>
+
+        {/* Video Element */}
+        <video
+          ref={videoRef}
+          src={src}
+          className="w-full max-h-[380px] object-cover bg-black"
+          playsInline
+          onPlay={() => setIsPlaying(true)}
+          onPause={() => setIsPlaying(false)}
+          onTimeUpdate={handleTimeUpdate}
+          onLoadedMetadata={() => {
+            if (videoRef.current?.duration) {
+              setVideoDuration(videoRef.current.duration);
+            }
+          }}
+        >
+          <track kind="captions" />
+        </video>
+
+        {/* Center Play Button Overlay (when paused, matching input_file_2.png) */}
+        {!isPlaying && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/20 backdrop-blur-[1px] transition-all z-10 pointer-events-none">
+            <div className="w-14 h-14 rounded-full bg-black/50 border border-white/20 text-white flex items-center justify-center shadow-2xl backdrop-blur-md hover:scale-105 transition-transform">
+              <Play className="w-6 h-6 fill-white text-white ml-0.5" />
+            </div>
+          </div>
+        )}
+
+        {/* Bottom Control Bar (matching input_file_3.png) */}
+        <div
+          className="absolute bottom-0 inset-x-0 p-3 pt-6 bg-gradient-to-t from-black/90 via-black/50 to-transparent flex items-center gap-3 text-xs text-white z-20"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <span className="font-mono text-[11px] text-zinc-300 shrink-0">
+            {formatTime(currentTime)} / {formatTime(videoDuration || duration || 8)}
+          </span>
+
+          <input
+            type="range"
+            min={0}
+            max={videoDuration || duration || 8}
+            step={0.1}
+            value={currentTime}
+            onChange={handleSeek}
+            className="flex-1 h-1 bg-white/30 rounded-lg appearance-none cursor-pointer accent-white"
+          />
+
+          <button
+            type="button"
+            onClick={toggleMute}
+            className="p-1 rounded-full text-zinc-300 hover:text-white transition-colors"
+            title={isMuted ? "Unmute" : "Mute"}
+          >
+            {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+          </button>
+        </div>
+      </div>
+
+      {/* Action Row below video (matching input_file_4.png) */}
+      <div className="flex items-center gap-3 px-1 text-zinc-400">
+        <button
+          type="button"
+          onClick={() => setFeedback(feedback === "up" ? null : "up")}
+          className={`p-1.5 rounded-lg hover:text-zinc-200 hover:bg-zinc-800/60 transition-colors ${
+            feedback === "up" ? "text-emerald-400" : ""
+          }`}
+          title="Good response"
+        >
+          <ThumbsUp className="w-4 h-4" />
+        </button>
+        <button
+          type="button"
+          onClick={() => setFeedback(feedback === "down" ? null : "down")}
+          className={`p-1.5 rounded-lg hover:text-zinc-200 hover:bg-zinc-800/60 transition-colors ${
+            feedback === "down" ? "text-rose-400" : ""
+          }`}
+          title="Poor response"
+        >
+          <ThumbsDown className="w-4 h-4" />
+        </button>
+        <button
+          type="button"
+          onClick={handleCopy}
+          className="p-1.5 rounded-lg hover:text-zinc-200 hover:bg-zinc-800/60 transition-colors"
+          title={copied ? "Copied!" : "Copy link"}
+        >
+          {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+        </button>
+        <button
+          type="button"
+          className="p-1.5 rounded-lg hover:text-zinc-200 hover:bg-zinc-800/60 transition-colors"
+          title="More options"
+        >
+          <MoreHorizontal className="w-4 h-4" />
+        </button>
+      </div>
+
+      {/* Follow-up Suggestion Chips (matching input_file_4.png) */}
+      <div className="flex flex-col gap-2 pt-1">
+        {suggestions.map((suggestion, idx) => (
+          <button
+            key={idx}
+            type="button"
+            onClick={() => onSuggestionClick?.(suggestion)}
+            className="flex items-center gap-2.5 px-4 py-2 rounded-2xl bg-[#212124] hover:bg-[#2a2a2e] border border-zinc-700/40 text-xs text-zinc-200 text-left transition-all hover:border-zinc-500/50 w-fit group"
+          >
+            <CornerDownLeft className="w-3.5 h-3.5 text-zinc-400 group-hover:text-zinc-200 transition-colors shrink-0" />
+            <span>{suggestion}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function MediaToolItem({ call, result, textContent, onReply }: MediaToolItemProps) {
   const isVideo = call.name === "media_video_generate";
   const args = (call.arguments || {}) as Record<string, any>;
   const prompt = args.prompt || "Generating media...";
 
-  // 1. Result not yet available -> in-progress honest status
+  // 1. Result not yet available -> in-progress step tracker card matching input_file_1.png
   if (!result) {
+    if (isVideo) {
+      return (
+        <div className="my-2.5 flex flex-col gap-2 max-w-lg">
+          <div className="rounded-2xl border border-zinc-800 bg-[#1e1e20] p-4 shadow-xl text-zinc-200">
+            <div className="flex items-center justify-between pb-3 border-b border-zinc-800/80">
+              <div className="flex items-center gap-2 text-xs font-semibold text-zinc-200">
+                <ChevronUp className="w-4 h-4 text-zinc-400" />
+                <span>Generate Commercial Video</span>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-3 pt-3 text-xs">
+              {/* Step 1: Transfer To Agent */}
+              <div className="flex items-center justify-between text-zinc-300">
+                <div className="flex items-center gap-2.5">
+                  <Bot className="w-4 h-4 text-zinc-400" />
+                  <span className="font-medium">Transfer To Agent</span>
+                </div>
+                <CheckCircle2 className="w-4 h-4 text-zinc-400" />
+              </div>
+
+              {/* Step 2: Gen Video */}
+              <div className="flex items-center justify-between text-zinc-200">
+                <div className="flex items-center gap-2.5">
+                  <Bot className="w-4 h-4 text-zinc-400" />
+                  <span className="font-medium">Gen Video</span>
+                </div>
+                <Loader2 className="w-4 h-4 text-blue-400 animate-spin" />
+              </div>
+
+              {/* Step 3: Clock Note */}
+              <div className="flex items-center gap-2 text-zinc-400 pt-1 text-[11px]">
+                <Clock className="w-3.5 h-3.5 text-zinc-500" />
+                <span>Generating video. This may take a few minutes...</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Working on it indicator (matching input_file_0.png & input_file_1.png) */}
+          <div className="flex items-center gap-2 text-xs text-zinc-400 px-1">
+            <div className="flex items-center gap-1">
+              <span className="h-1.5 w-1.5 rounded-full bg-zinc-400 animate-pulse" />
+              <span className="h-1.5 w-1.5 rounded-full bg-zinc-400 animate-pulse [animation-delay:200ms]" />
+            </div>
+            <span>Working on it..</span>
+          </div>
+        </div>
+      );
+    }
+
+    // Image generation in-progress
     return (
-      <div className="my-2.5 rounded-2xl border border-violet-900/50 bg-gradient-to-r from-violet-950/40 via-zinc-900/60 to-violet-950/30 p-3.5 shadow-lg backdrop-blur-xs">
+      <div className="my-2.5 rounded-2xl border border-zinc-800 bg-[#1e1e20] p-3.5 shadow-lg backdrop-blur-xs max-w-lg">
         <div className="flex items-center gap-3">
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-violet-600/20 border border-violet-500/30 text-violet-400">
-            {isVideo ? (
-              <Film className="h-5 w-5 animate-pulse" />
-            ) : (
-              <ImageIcon className="h-5 w-5 animate-pulse" />
-            )}
+            <ImageIcon className="h-5 w-5 animate-pulse" />
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
-              <span className="font-semibold text-xs text-violet-200">
-                {isVideo ? "Creating your video…" : "Creating your image…"}
-              </span>
-              <span className="inline-flex items-center gap-1 rounded-full bg-violet-950/80 px-2 py-0.5 text-[10px] font-medium text-violet-300 border border-violet-700/60">
-                <Loader2 className="h-2.5 w-2.5 animate-spin" />
+              <span className="font-semibold text-xs text-zinc-200">Creating your image…</span>
+              <span className="inline-flex items-center gap-1 rounded-full bg-zinc-800 px-2 py-0.5 text-[10px] font-medium text-zinc-300 border border-zinc-700">
+                <Loader2 className="h-2.5 w-2.5 animate-spin text-blue-400" />
                 Processing
               </span>
             </div>
-            <p className="mt-1 truncate text-xs text-zinc-300 italic">&ldquo;{prompt}&rdquo;</p>
+            <p className="mt-1 truncate text-xs text-zinc-400 italic">&ldquo;{prompt}&rdquo;</p>
           </div>
         </div>
       </div>
@@ -770,7 +1116,7 @@ function MediaToolItem({ call, result, textContent }: MediaToolItemProps) {
   // 2. Failed state
   if (!result.success) {
     return (
-      <div className="my-2.5 rounded-2xl border border-red-900/60 bg-red-950/30 p-3.5 text-xs text-red-300 shadow-md">
+      <div className="my-2.5 rounded-2xl border border-red-900/60 bg-red-950/30 p-3.5 text-xs text-red-300 shadow-md max-w-xl">
         <div className="flex items-start gap-2.5">
           <AlertCircle className="h-4 w-4 shrink-0 text-red-400 mt-0.5" />
           <div className="flex-1">
@@ -795,89 +1141,52 @@ function MediaToolItem({ call, result, textContent }: MediaToolItemProps) {
   const artifactUrl = data?.artifactUrl;
   const contentHasArtifact = Boolean(artifactUrl && textContent.includes(artifactUrl));
 
+  if (isVideo && artifactUrl) {
+    return (
+      <CommercialVideoPlayer
+        src={artifactUrl}
+        artifactUrl={artifactUrl}
+        prompt={prompt}
+        duration={data?.duration}
+        onSuggestionClick={onReply}
+      />
+    );
+  }
+
   return (
-    <div className="my-2.5 flex flex-col gap-2">
-      {/* If message text does not already embed the artifact via markdown, render the full preview */}
+    <div className="my-2.5 flex flex-col gap-2 max-w-xl">
       {!contentHasArtifact && artifactUrl && (
-        <div className="rounded-2xl overflow-hidden border border-zinc-800/90 bg-[#121214] shadow-2xl max-w-xl">
-          {isVideo ? (
-            <div className="relative">
-              <div className="px-4 py-2 bg-zinc-900/95 border-b border-zinc-800 flex items-center justify-between text-xs text-zinc-400">
-                <span className="flex items-center gap-2 font-medium text-zinc-200">
-                  <Film className="h-3.5 w-3.5 text-violet-400" />
-                  <span>Generated Video</span>
-                </span>
-                <span className="inline-flex items-center gap-1 rounded bg-zinc-800/90 px-2 py-0.5 text-[10px] font-mono text-zinc-300 border border-zinc-700">
-                  {data?.duration ? `${data.duration}s` : "Video"}
-                </span>
-              </div>
-              <video
-                src={artifactUrl}
-                controls
-                className="max-h-80 w-full object-contain bg-black"
-                preload="metadata"
-              >
-                <track kind="captions" />
-              </video>
-              <div className="p-3 flex items-center justify-between border-t border-zinc-800/80 bg-zinc-900/90 text-xs text-zinc-400">
-                <span className="truncate max-w-[200px] text-zinc-300 font-mono text-[11px]">
-                  {artifactUrl.split("/").pop()}
-                </span>
-                <div className="flex items-center gap-2.5 font-sans text-[11px]">
-                  <a
-                    href={artifactUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-violet-400 hover:text-violet-300 inline-flex items-center gap-1"
-                  >
-                    Open artifact <ExternalLink className="h-3 w-3" />
-                  </a>
-                  <a
-                    href={artifactUrl}
-                    download
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-zinc-200 hover:text-white inline-flex items-center gap-1 bg-zinc-800/80 hover:bg-zinc-700/80 px-2.5 py-1 rounded-md border border-zinc-700/60 transition-colors"
-                  >
-                    Download <Download className="h-3 w-3" />
-                  </a>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div>
-              <a
-                href={artifactUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="block relative group/preview cursor-pointer overflow-hidden bg-black/40"
-              >
-                <img
-                  src={artifactUrl}
-                  alt={prompt}
-                  className="w-full max-h-[480px] object-contain rounded-t-2xl transition-transform duration-300 group-hover/preview:scale-[1.015]"
-                  loading="lazy"
-                />
-                <span className="absolute inset-0 bg-black/30 opacity-0 group-hover/preview:opacity-100 transition-opacity flex items-center justify-center text-white text-xs font-medium backdrop-blur-xs">
-                  Click to open full size ↗
-                </span>
-              </a>
-              <div className="px-4 py-2.5 flex items-center justify-between border-t border-zinc-800/80 bg-zinc-900/90 text-xs text-zinc-400">
-                <span className="truncate max-w-[320px] text-zinc-300 font-medium text-[11px]">
-                  {prompt}
-                </span>
-                <a
-                  href={artifactUrl}
-                  download
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-zinc-200 hover:text-white inline-flex items-center gap-1 text-[11px] bg-zinc-800/80 hover:bg-zinc-700/80 px-2.5 py-1 rounded-md border border-zinc-700/60 transition-colors"
-                >
-                  Download <Download className="h-3 w-3" />
-                </a>
-              </div>
-            </div>
-          )}
+        <div className="rounded-2xl overflow-hidden border border-zinc-800/90 bg-[#121214] shadow-2xl">
+          <a
+            href={artifactUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="block relative group/preview cursor-pointer overflow-hidden bg-black/40"
+          >
+            <img
+              src={artifactUrl}
+              alt={prompt}
+              className="w-full max-h-[480px] object-contain rounded-t-2xl transition-transform duration-300 group-hover/preview:scale-[1.015]"
+              loading="lazy"
+            />
+            <span className="absolute inset-0 bg-black/30 opacity-0 group-hover/preview:opacity-100 transition-opacity flex items-center justify-center text-white text-xs font-medium backdrop-blur-xs">
+              Click to open full size ↗
+            </span>
+          </a>
+          <div className="px-4 py-2.5 flex items-center justify-between border-t border-zinc-800/80 bg-zinc-900/90 text-xs text-zinc-400">
+            <span className="truncate max-w-[320px] text-zinc-300 font-medium text-[11px]">
+              {prompt}
+            </span>
+            <a
+              href={artifactUrl}
+              download
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-zinc-200 hover:text-white inline-flex items-center gap-1 text-[11px] bg-zinc-800/80 hover:bg-zinc-700/80 px-2.5 py-1 rounded-md border border-zinc-700/60 transition-colors"
+            >
+              Download <Download className="h-3 w-3" />
+            </a>
+          </div>
         </div>
       )}
     </div>

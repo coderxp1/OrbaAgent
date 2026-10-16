@@ -1,6 +1,6 @@
 "use client";
 
-import { Send, Square } from "lucide-react";
+import { FileText, Send, Square, X } from "lucide-react";
 import { type KeyboardEvent, useRef, useState } from "react";
 import { type AttachedFile, AttachmentMenu } from "./AttachmentMenu";
 
@@ -17,8 +17,8 @@ export function InputArea({ onSendMessage, isGenerating, onCancelGeneration }: I
 
   const handleSend = async () => {
     if ((!text.trim() && attachments.length === 0) || isGenerating) return;
-    let content = text;
-    let uploaded = attachments;
+    const content = text;
+    const uploaded = attachments;
     // Upload files if present
     const filesToUpload = attachments.filter((a) => a.file).map((a) => a);
     if (filesToUpload.length > 0) {
@@ -43,14 +43,9 @@ export function InputArea({ onSendMessage, isGenerating, onCancelGeneration }: I
             relPath: a.relPath,
             url: a.url,
             file: filesToUpload[idx]?.file,
+            previewUrl: (filesToUpload[idx] as any)?.previewUrl || a.url,
           }));
-          if (urls.length > 0) {
-            const prefix = urls.map((u) => `[Attachment]: ${u}`).join("\n");
-            content = content ? `${prefix}\n\n${content}` : prefix;
-            // Replace attachments with metadata-only entries post-upload
-            uploaded = attachments.map((a) => ({ ...a, file: undefined, content: undefined }));
-          }
-          // Send structured attachments to /api/chat
+          // Send structured attachments to /api/chat WITHOUT prepending raw prefix to content
           onSendMessage(content, structured);
           setText("");
           setAttachments([]);
@@ -102,25 +97,58 @@ export function InputArea({ onSendMessage, isGenerating, onCancelGeneration }: I
   return (
     <div className="border-t border-zinc-800 bg-zinc-950 p-4">
       <div className="mx-auto flex max-w-4xl flex-col gap-2">
-        {/* Attachment Chips */}
+        {/* Attachment Previews */}
         {attachments.length > 0 && (
-          <div className="flex flex-wrap gap-1.5 px-1">
-            {attachments.map((att) => (
-              <div
-                key={att.id}
-                className="flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-800 px-2 py-1 text-[11px] text-zinc-300"
-              >
-                <span className="max-w-[120px] truncate">{att.name}</span>
-                <button
-                  type="button"
-                  onClick={() => removeAttachment(att.id)}
-                  className="text-zinc-500 hover:text-zinc-200 transition-colors leading-none"
-                  aria-label="Remove attachment"
+          <div className="flex flex-wrap gap-2.5 px-1 pb-1">
+            {attachments.map((att) => {
+              const isImg =
+                att.type?.startsWith("image/") || /\.(png|jpe?g|webp|gif|svg)$/i.test(att.name);
+              const previewSrc =
+                att.previewUrl || (att.file ? URL.createObjectURL(att.file) : null);
+
+              return (
+                <div
+                  key={att.id}
+                  className="group/att relative flex items-center gap-2 p-1.5 pr-2.5 rounded-xl bg-zinc-800 border border-zinc-700/60 shadow-md transition-all hover:border-zinc-500/60"
                 >
-                  ×
-                </button>
-              </div>
-            ))}
+                  {isImg && previewSrc ? (
+                    <div className="relative w-11 h-11 rounded-lg overflow-hidden bg-black/40 border border-zinc-700/40 shrink-0">
+                      <img src={previewSrc} alt={att.name} className="w-full h-full object-cover" />
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-zinc-900 border border-zinc-700/50 text-blue-400 shrink-0">
+                      <FileText className="w-4 h-4" />
+                    </div>
+                  )}
+
+                  <div className="flex flex-col min-w-0 pr-1">
+                    <span
+                      className="text-xs font-medium text-zinc-200 truncate max-w-[120px]"
+                      title={att.name}
+                    >
+                      {att.name}
+                    </span>
+                    <span className="text-[10px] text-zinc-400 font-mono">
+                      {att.size > 0
+                        ? att.size > 1024 * 1024
+                          ? `${(att.size / (1024 * 1024)).toFixed(1)} MB`
+                          : `${Math.round(att.size / 1024)} KB`
+                        : "Ready"}
+                    </span>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => removeAttachment(att.id)}
+                    className="p-1 rounded-full text-zinc-400 hover:text-white hover:bg-zinc-700/80 transition-colors"
+                    title="Remove attachment"
+                    aria-label="Remove attachment"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              );
+            })}
           </div>
         )}
 

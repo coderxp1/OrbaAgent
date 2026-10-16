@@ -11,6 +11,7 @@ RUN pnpm --filter @orbaagent/shared build
 RUN pnpm --filter @orbaagent/api build
 
 FROM base AS runner
+RUN apk add --no-cache ffmpeg poppler-utils
 WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=build /app/package.json /app/pnpm-workspace.yaml ./

@@ -2,11 +2,13 @@
 
 import type { ChatMessage } from "@orbaagent/shared";
 import {
+  AlertCircle,
   ArrowUp,
   BookOpen,
   Bot,
   Calendar,
   Compass,
+  FileText,
   Gift,
   Grid,
   HelpCircle,
@@ -100,6 +102,8 @@ export default function WorkspacePage() {
   // Attachments & Speech state
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [isListening, setIsListening] = useState<boolean>(false);
+  const [isUploading, setIsUploading] = useState<boolean>(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const speechRecognitionRef = useRef<any>(null);
 
   // Mobile sidebar state
@@ -285,10 +289,12 @@ export default function WorkspacePage() {
   };
 
   const handleSend = async () => {
-    if ((!inputPrompt.trim() && attachedFiles.length === 0) || isGenerating) return;
-    let text = inputPrompt.trim();
+    if ((!inputPrompt.trim() && attachedFiles.length === 0) || isGenerating || isUploading) return;
+    const text = inputPrompt.trim();
     const filesToUpload = attachedFiles.filter((a) => (a as any).file);
     if (filesToUpload.length > 0) {
+      setIsUploading(true);
+      setUploadError(null);
       const form = new FormData();
       const bundle = `bundle_${Date.now()}`;
       form.set("bundle", bundle);
@@ -301,7 +307,6 @@ export default function WorkspacePage() {
         const res = await fetch("/api/uploads", { method: "POST", body: form });
         if (res.ok) {
           const data = await res.json();
-          const urls: string[] = (data.artifacts || []).map((a: any) => a.url);
           const structured = (data.artifacts || []).map((a: any, idx: number) => ({
             artifactId: a.id,
             name: a.name,
@@ -310,21 +315,115 @@ export default function WorkspacePage() {
             relPath: a.relPath,
             url: a.url,
             file: (filesToUpload[idx] as any)?.file,
+            previewUrl: (filesToUpload[idx] as any)?.previewUrl || a.url,
           }));
-          if (urls.length > 0) {
-            const prefix = urls.map((u) => `[Attachment]: ${u}`).join("\n");
-            text = text ? `${prefix}\n\n${text}` : prefix;
-          }
+          setIsUploading(false);
           sendMessage(text, structured);
           setInputPrompt("");
           setAttachedFiles([]);
           return;
         }
-      } catch {}
+        setIsUploading(false);
+        setUploadError("Attachment upload failed. Please verify the file and try again.");
+        return;
+      } catch {
+        setIsUploading(false);
+        setUploadError("Attachment upload failed due to a network error. Click retry to resend.");
+        return;
+      }
     }
+    setIsUploading(false);
     setInputPrompt("");
     setAttachedFiles([]);
     sendMessage(text, undefined);
+  };
+
+  const renderAttachmentPreviews = () => {
+    if (attachedFiles.length === 0 && !uploadError) return null;
+
+    return (
+      <div className="flex flex-col gap-2 pb-2.5 border-b border-[#292929]/80">
+        {uploadError && (
+          <div className="flex items-center justify-between gap-2 p-2 rounded-xl bg-red-950/40 border border-red-800/60 text-xs text-red-200">
+            <div className="flex items-center gap-1.5">
+              <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+              <span>{uploadError}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => handleSend()}
+              className="px-2 py-0.5 rounded-lg bg-red-900/60 hover:bg-red-800 text-[11px] font-medium text-white transition-colors"
+            >
+              Retry
+            </button>
+          </div>
+        )}
+
+        {attachedFiles.length > 0 && (
+          <div className="flex flex-wrap gap-2.5">
+            {attachedFiles.map((file) => {
+              const isImg =
+                file.type?.startsWith("image/") || /\.(png|jpe?g|webp|gif|svg)$/i.test(file.name);
+              const previewSrc =
+                (file as any).previewUrl ||
+                ((file as any).file ? URL.createObjectURL((file as any).file) : null);
+
+              return (
+                <div
+                  key={file.id}
+                  className="group/att relative flex items-center gap-2 p-1.5 pr-2.5 rounded-xl bg-[#28282c] border border-zinc-700/60 shadow-md transition-all hover:border-zinc-500/60"
+                >
+                  {isImg && previewSrc ? (
+                    <div className="relative w-12 h-12 rounded-lg overflow-hidden bg-black/40 border border-zinc-700/40 shrink-0">
+                      <img
+                        src={previewSrc}
+                        alt={file.name}
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-zinc-800 border border-zinc-700/50 text-blue-400 shrink-0">
+                      <FileText className="w-5 h-5" />
+                    </div>
+                  )}
+
+                  <div className="flex flex-col min-w-0 pr-1">
+                    <span
+                      className="text-xs font-medium text-zinc-200 truncate max-w-[130px]"
+                      title={file.name}
+                    >
+                      {file.name}
+                    </span>
+                    <span className="text-[10px] text-zinc-400 font-mono">
+                      {isUploading
+                        ? "Uploading..."
+                        : file.size > 0
+                          ? file.size > 1024 * 1024
+                            ? `${(file.size / (1024 * 1024)).toFixed(1)} MB`
+                            : `${Math.round(file.size / 1024)} KB`
+                          : "Ready"}
+                    </span>
+                  </div>
+
+                  <button
+                    onClick={() => {
+                      setAttachedFiles((prev) => prev.filter((f) => f.id !== file.id));
+                      setUploadError(null);
+                    }}
+                    type="button"
+                    className="p-1 rounded-full text-zinc-400 hover:text-white hover:bg-zinc-700/80 transition-colors"
+                    title="Remove attachment"
+                    aria-label="Remove attachment"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -681,29 +780,8 @@ export default function WorkspacePage() {
               {/* Center Input Card (Matching Mockup) */}
               <div className="w-full rounded-2xl bg-[#1e1e1e] border border-[#2e2e2e] shadow-xl text-left mb-6">
                 <div className="p-4 flex flex-col gap-3">
-                  {/* Attached Files Badges */}
-                  {attachedFiles.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5 pb-2 border-b border-[#292929]">
-                      {attachedFiles.map((file) => (
-                        <div
-                          key={file.id}
-                          className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-[#28282c] text-[11px] text-zinc-300 border border-[#38383c]"
-                        >
-                          <Paperclip className="w-3 h-3 text-blue-400" />
-                          <span className="truncate max-w-[140px]">{file.name}</span>
-                          <button
-                            onClick={() =>
-                              setAttachedFiles(attachedFiles.filter((f) => f.id !== file.id))
-                            }
-                            type="button"
-                            className="text-zinc-500 hover:text-white"
-                          >
-                            <X className="w-3 h-3" />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                  {/* Attached Files Visual Previews */}
+                  {renderAttachmentPreviews()}
 
                   <textarea
                     ref={textareaRef}
@@ -1062,29 +1140,8 @@ export default function WorkspacePage() {
             <div className="max-w-3xl mx-auto">
               <div className="w-full rounded-3xl bg-[#18181b]/95 border border-zinc-800/80 shadow-2xl backdrop-blur-xl overflow-hidden focus-within:border-zinc-700 focus-within:ring-1 focus-within:ring-zinc-700/50 transition-all">
                 <div className="p-3.5 flex flex-col gap-2">
-                  {/* Attached Files Badges */}
-                  {attachedFiles.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5 pb-2 border-b border-[#292929]">
-                      {attachedFiles.map((file) => (
-                        <div
-                          key={file.id}
-                          className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-[#28282c] text-[11px] text-zinc-300 border border-[#38383c]"
-                        >
-                          <Paperclip className="w-3 h-3 text-blue-400" />
-                          <span className="truncate max-w-[140px]">{file.name}</span>
-                          <button
-                            onClick={() =>
-                              setAttachedFiles(attachedFiles.filter((f) => f.id !== file.id))
-                            }
-                            type="button"
-                            className="text-zinc-500 hover:text-white"
-                          >
-                            <X className="w-3 h-3" />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                  {/* Attached Files Visual Previews */}
+                  {renderAttachmentPreviews()}
 
                   <textarea
                     rows={2}

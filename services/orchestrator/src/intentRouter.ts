@@ -415,7 +415,8 @@ Do NOT execute any tools or task plans for this capability inquiry.`,
     const isCommercial = /\b(?:commercial|advertisement|promo|trailer|viral\s+commercial)\b/i.test(
       lower,
     );
-    const duration = extractVideoDurationSeconds(content) || (isCommercial ? 15 : 2);
+    const explicitDuration = extractVideoDurationSeconds(content);
+    const duration = explicitDuration || (isCommercial ? 15 : 2);
     const dims = extractDimensions(content) || { width: 480, height: 480 };
 
     const toolsToActivate = ["media_video_generate", "artifact_read", "artifact_list"];
@@ -434,10 +435,11 @@ Do NOT execute any tools or task plans for this capability inquiry.`,
         fps: 16,
       },
       systemGuidance: `[Intent Router: Detected ${isCommercial ? "Commercial Video" : "Video"} Generation Request]
-The user wants to generate ${isCommercial ? "a viral commercial video" : "an AI video"}. Tool 'media_video_generate' has been activated.
-${isCommercial ? "If a company logo or image is attached, inspect it and generate an energetic commercial featuring the brand." : ""}
-For clear scene descriptions, execute 'media_video_generate' directly without asking for clarification.
-Do NOT say 'Generating now' before executing the tool call. Call 'media_video_generate' directly with:
+The user wants to generate ${isCommercial ? "a commercial video" : "an AI video"}. Tool 'media_video_generate' has been activated.
+${isCommercial ? 'Respond naturally with: "I will transfer this request to the video generation agent to create your commercial video using the uploaded logo."' : ""}
+${explicitDuration ? `The user explicitly requested a duration of ${explicitDuration} seconds.` : `The user did NOT specify a duration; use the standard default of ${duration} seconds. Do NOT claim the user requested this duration.`}
+${isCommercial ? "If a company logo or image is attached, inspect it and compose a high-end commercial tailored to the brand with sleek product staging, vibrant brand color accents, and dynamic motion." : ""}
+Call 'media_video_generate' directly with:
 - prompt: Detailed description of scene motion and elements based on user request
 - duration_seconds: ${duration}
 - width: ${dims.width}
