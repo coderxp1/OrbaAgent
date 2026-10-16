@@ -392,16 +392,16 @@ Do NOT execute any tools or task plans for this capability inquiry.`,
 
   // Video generation intent patterns (explicit video requests or rich cinematic scene descriptions with camera motion)
   const videoPatterns = [
-    /\b(?:create|generate|make|render|produce)\s+(?:an?\s+)?(?:[\w-]+\s+)?videos?\b/,
-    /\b(?:create|generate|make|render|produce)\s+(?:an?\s+)?(?:[\w-]+\s+)?(?:cinematic\s+scene|action\s+scene|motion\s+scene|dramatic\s+scene|thriller\s+scene|chase\s+scene)\b/,
+    /\b(?:create|generate|make|render|produce)\s+(?:an?\s+)?(?:[\w-]+\s+)*videos?\b/,
+    /\b(?:create|generate|make|render|produce)\s+(?:an?\s+)?(?:[\w-]+\s+)*(?:cinematic\s+scene|action\s+scene|motion\s+scene|dramatic\s+scene|thriller\s+scene|chase\s+scene|clip|animation)\b/,
     /\bvideo\s+of\b/,
     /\banimate\b/,
     /\banimation\s+of\b/,
     /\bmotion\s+clip\b/,
-    /\b(?:two|three|four|five|\d+)[-\s]+second\s+video\b/,
+    /\b(?:two|three|four|five|\d+)[-\s]+second\s+(?:video|clip|animation|scene)\b/,
     /\btext[- ]to[- ]video\b/,
     /\bt2v\b/,
-    /\bwan2\.1\b/,
+    /\bwan2(?:\.1)?\b/,
     /\b(?:camera\s+movement|camera\s+motion|tracking\s+camera|tracking\s+shot|dolly\s+shot|dolly\s+zoom|panning\s+shot|pan\s+across|camera\s+move|cinematic\s+shot)\b/,
   ];
 
@@ -446,10 +446,10 @@ Do NOT say 'Generating now' before executing the tool call. Call 'media_video_ge
 
   // Image generation intent patterns
   const imagePatterns = [
-    /\b(?:create|generate|make|render|produce)\s+(?:an?\s+)?(?:[\w-]+\s+)?(?:images?|pictures?|photos?|illustrations?|artworks?|paintings?|graphics?|scenes?|visuals?|wallpapers?|portraits?|landscapes?)\b/,
-    /\b(?:draw|paint|sketch|illustrate)\s+(?:me\s+)?(?:an?\s+)?(?:[\w-]+\s+)?(?:images?|pictures?|photos?|illustrations?|artworks?|paintings?|portraits?|scenes?|landscapes?|characters?|creatures?|animals?|cats?|dogs?|spheres?|avatars?|objects?|backgrounds?|wallpapers?)\b/,
+    /\b(?:create|generate|make|render|produce)\s+(?:an?\s+)?(?:[\w-]+\s+)*(?:images?|pictures?|photos?|photographs?|illustrations?|artworks?|paintings?|graphics?|scenes?|visuals?|wallpapers?|portraits?|landscapes?)\b/,
+    /\b(?:draw|paint|sketch|illustrate)\s+(?:me\s+)?(?:an?\s+)?(?:[\w-]+\s+)*(?:images?|pictures?|photos?|photographs?|illustrations?|artworks?|paintings?|portraits?|scenes?|landscapes?|characters?|creatures?|animals?|cats?|dogs?|spheres?|avatars?|objects?|backgrounds?|wallpapers?)\b/,
     /\b(?:draw|paint|sketch|illustrate)\s+(?:me\s+)?(?:an?\s+)?(?:a|an|the)\s+(?!(?:out|up|plan|diagram|architecture|flowchart|schema|class|interface|function|code|test|table|api|migration|solution|system)\b)[\w\s]{2,40}\b/,
-    /\b(?:image|picture|photo|illustration|artwork|drawing|painting)\s+of\b/,
+    /\b(?:image|picture|photo|photograph|illustration|artwork|drawing|painting)\s+of\b/,
     /\btext[- ]to[- ]image\b/,
     /\bt2i\b/,
     /\bflux(?:\.1)?\b/,
