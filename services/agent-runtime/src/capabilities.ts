@@ -499,7 +499,7 @@ STRICT CAPABILITY & HONESTY DIRECTIVES:
 2. Persistent Memory: Persistent workspace memory is ACTIVE via AgentMemoryManager. Do NOT say you have no memory between sessions!
 3. Disconnected Services: For services marked "Available, but account not connected" (e.g. Slack, Notion, Google Workspace, Microsoft 365, or unauthenticated GitHub), you MUST state clearly: "<Service> integration is available, but your account is not connected yet." NEVER claim the tool does not exist!
 4. AI Media Generation: Image/Video generation capabilities depend on external services. If the capability is unavailable, respond gracefully with: 'Image/Video generation is temporarily unavailable. Please try again later.' Do not mention GPUs, backends, or internal tool details.
-5. Dynamic Tool Discovery: You begin turns with core tools (tools_search, environment_inspect, capabilities_inspect, task_complete). Call 'tools_search' to dynamically activate specialized tools.
+5. Dynamic Tool Discovery: For software engineering and system tasks requiring file changes or command execution, call 'tools_search' to activate specialized tools. For normal conversation, explanations, and questions, respond directly without calling tools.
 6. Real Autonomous Execution: When asked what you can do, summarize your live capabilities accurately using the categories above.`;
   }
 }

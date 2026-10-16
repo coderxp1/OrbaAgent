@@ -291,4 +291,370 @@ describe("AgentOrchestrator State Machine & Autonomous Execution", () => {
     expect(discoveredEvents.length).toBe(1);
     expect(discoveredEvents[0].discoveredTools).toContain("execute_git");
   });
+
+  describe("Conversation-First Policy & Shell Prevention Regression Suite", () => {
+    it("1. Greetings and general questions complete with zero tool calls and zero shell execution", async () => {
+      const mockGateway = new ModelGateway();
+      let turns = 0;
+      let toolsPassedToModel: unknown[] | undefined;
+
+      vi.spyOn(mockGateway, "streamChat").mockImplementation(async function* (req) {
+        turns++;
+        toolsPassedToModel = req.tools;
+        yield {
+          type: "text_delta",
+          traceId: req.trace.traceId,
+          textDelta:
+            "Hello! I am doing well, thank you. How can I help you with your project today?",
+        };
+      });
+
+      const orchestrator = new AgentOrchestrator({ gateway: mockGateway, maxIterations: 5 });
+      const request: ChatCompletionRequest = {
+        modelId: "auto",
+        messages: [{ role: "user", content: "Hey Orba, how are you?" }],
+        stream: true,
+        trace: {
+          traceId: "test_greeting",
+          tenantId: "tenant_conv",
+          userId: "user_conv",
+          conversationId: "conv_greet",
+          agentRunId: "run_greet",
+        },
+      };
+
+      const events: NormalizedEvent[] = [];
+      for await (const event of orchestrator.executeAgentLoop(request)) {
+        events.push(event);
+      }
+
+      // Must complete in exactly 1 turn
+      expect(turns).toBe(1);
+
+      // Model must have been provided 0 tools in its definition list
+      expect(toolsPassedToModel).toBeDefined();
+      expect(toolsPassedToModel?.length).toBe(0);
+
+      // Absolute zero tool calls and zero shell commands
+      const toolCalls = events.filter((e) => e.type === "tool_call_start");
+      const shellCommands = events.filter((e) => e.type === "terminal_command_start");
+      expect(toolCalls.length).toBe(0);
+      expect(shellCommands.length).toBe(0);
+    });
+
+    it("2. Technical explanations and idea feedback do not trigger shell execution", async () => {
+      const mockGateway = new ModelGateway();
+      let turns = 0;
+      let toolsPassed: unknown[] | undefined;
+
+      vi.spyOn(mockGateway, "streamChat").mockImplementation(async function* (req) {
+        turns++;
+        toolsPassed = req.tools;
+        yield {
+          type: "text_delta",
+          traceId: req.trace.traceId,
+          textDelta:
+            "AI agents perceive their environment through inputs, reason using an LLM, and take actions using tools.",
+        };
+      });
+
+      const orchestrator = new AgentOrchestrator({ gateway: mockGateway, maxIterations: 5 });
+      const request: ChatCompletionRequest = {
+        modelId: "auto",
+        messages: [{ role: "user", content: "Explain how AI agents work." }],
+        stream: true,
+        trace: {
+          traceId: "test_explanation",
+          tenantId: "tenant_conv",
+          userId: "user_conv",
+          conversationId: "conv_expl",
+          agentRunId: "run_expl",
+        },
+      };
+
+      const events: NormalizedEvent[] = [];
+      for await (const event of orchestrator.executeAgentLoop(request)) {
+        events.push(event);
+      }
+
+      expect(turns).toBe(1);
+      expect(toolsPassed?.length).toBe(0);
+      expect(events.filter((e) => e.type === "terminal_command_start").length).toBe(0);
+      expect(events.filter((e) => e.type === "tool_call_start").length).toBe(0);
+    });
+
+    it("3. Image requests activate image generation without shell execution", async () => {
+      const mockGateway = new ModelGateway();
+      let turns = 0;
+      const toolsInTurn: string[][] = [];
+
+      vi.spyOn(mockGateway, "streamChat").mockImplementation(async function* (req) {
+        turns++;
+        toolsInTurn.push((req.tools || []).map((t: any) => t.name));
+
+        if (turns === 1) {
+          yield {
+            type: "tool_call_start",
+            traceId: req.trace.traceId,
+            toolCall: {
+              id: "call_image_gen",
+              name: "media_image_generate",
+              arguments: {
+                prompt: "a black obsidian sphere on a slate pedestal",
+                width: 512,
+                height: 512,
+              },
+            },
+          };
+        } else {
+          yield {
+            type: "text_delta",
+            traceId: req.trace.traceId,
+            textDelta:
+              "Here is your generated image: https://orbaagent.dev/api/artifacts/default-tenant/img_123/image.png",
+          };
+        }
+      });
+
+      const orchestrator = new AgentOrchestrator({ gateway: mockGateway, maxIterations: 5 });
+      const request: ChatCompletionRequest = {
+        modelId: "auto",
+        messages: [{ role: "user", content: "Generate an image of a black obsidian sphere." }],
+        stream: true,
+        trace: {
+          traceId: "test_image_req",
+          tenantId: "tenant_media",
+          userId: "user_media",
+          conversationId: "conv_img",
+          agentRunId: "run_img",
+        },
+      };
+
+      const events: NormalizedEvent[] = [];
+      for await (const event of orchestrator.executeAgentLoop(request)) {
+        events.push(event);
+      }
+
+      // Turn 1 had ONLY media_image_generate (no execute_shell, no tools_search, no task_plan)
+      expect(toolsInTurn[0]).toContain("media_image_generate");
+      expect(toolsInTurn[0]).not.toContain("execute_shell");
+      expect(toolsInTurn[0]).not.toContain("tools_search");
+      expect(toolsInTurn[0]).not.toContain("task_plan");
+
+      // Exactly media_image_generate executed, zero shell commands
+      const toolStarts = events.filter((e) => e.type === "tool_call_start");
+      expect(toolStarts.length).toBe(1);
+      expect(toolStarts[0].toolCall?.name).toBe("media_image_generate");
+      expect(events.filter((e) => e.type === "terminal_command_start").length).toBe(0);
+    });
+
+    it("4. Video requests activate video generation without shell execution", async () => {
+      const mockGateway = new ModelGateway();
+      let turns = 0;
+      const toolsInTurn: string[][] = [];
+
+      vi.spyOn(mockGateway, "streamChat").mockImplementation(async function* (req) {
+        turns++;
+        toolsInTurn.push((req.tools || []).map((t: any) => t.name));
+
+        if (turns === 1) {
+          yield {
+            type: "tool_call_start",
+            traceId: req.trace.traceId,
+            toolCall: {
+              id: "call_video_gen",
+              name: "media_video_generate",
+              arguments: {
+                prompt: "ocean wave at sunset",
+                duration_seconds: 2,
+                width: 480,
+                height: 480,
+              },
+            },
+          };
+        } else {
+          yield {
+            type: "text_delta",
+            traceId: req.trace.traceId,
+            textDelta:
+              "Here is your generated video: https://orbaagent.dev/api/artifacts/default-tenant/vid_456/video.mp4",
+          };
+        }
+      });
+
+      const orchestrator = new AgentOrchestrator({ gateway: mockGateway, maxIterations: 5 });
+      const request: ChatCompletionRequest = {
+        modelId: "auto",
+        messages: [
+          { role: "user", content: "Create a two-second video of an ocean wave at sunset." },
+        ],
+        stream: true,
+        trace: {
+          traceId: "test_video_req",
+          tenantId: "tenant_media",
+          userId: "user_media",
+          conversationId: "conv_vid",
+          agentRunId: "run_vid",
+        },
+      };
+
+      const events: NormalizedEvent[] = [];
+      for await (const event of orchestrator.executeAgentLoop(request)) {
+        events.push(event);
+      }
+
+      // Turn 1 had ONLY media_video_generate
+      expect(toolsInTurn[0]).toContain("media_video_generate");
+      expect(toolsInTurn[0]).not.toContain("execute_shell");
+      expect(toolsInTurn[0]).not.toContain("tools_search");
+
+      const toolStarts = events.filter((e) => e.type === "tool_call_start");
+      expect(toolStarts.length).toBe(1);
+      expect(toolStarts[0].toolCall?.name).toBe("media_video_generate");
+      expect(events.filter((e) => e.type === "terminal_command_start").length).toBe(0);
+    });
+
+    it("5. Actual coding, installation, testing, and infrastructure tasks can still use shell tools", async () => {
+      const mockGateway = new ModelGateway();
+      let turns = 0;
+
+      vi.spyOn(mockGateway, "streamChat").mockImplementation(async function* (req) {
+        turns++;
+        if (turns === 1) {
+          yield {
+            type: "tool_call_start",
+            traceId: req.trace.traceId,
+            toolCall: {
+              id: "call_test_run",
+              name: "execute_shell",
+              arguments: { command: "echo test runner ok" },
+            },
+          };
+        } else {
+          yield {
+            type: "text_delta",
+            traceId: req.trace.traceId,
+            textDelta: "All tests executed successfully.",
+          };
+        }
+      });
+
+      const orchestrator = new AgentOrchestrator({ gateway: mockGateway, maxIterations: 5 });
+      const request: ChatCompletionRequest = {
+        modelId: "auto",
+        messages: [{ role: "user", content: "Run the test suite." }],
+        stream: true,
+        trace: {
+          traceId: "test_sys_op",
+          tenantId: "tenant_eng",
+          userId: "user_eng",
+          conversationId: "conv_test_suite",
+          agentRunId: "run_test_suite",
+        },
+      };
+
+      const events: NormalizedEvent[] = [];
+      for await (const event of orchestrator.executeAgentLoop(request)) {
+        events.push(event);
+      }
+
+      expect(turns).toBe(2);
+      const shellEvents = events.filter((e) => e.type === "terminal_command_start");
+      expect(shellEvents.length).toBe(1);
+      expect((shellEvents[0] as any).command).toBe("echo test runner ok");
+    });
+
+    it("6. Ambiguous requests do not cause speculative execution", async () => {
+      const mockGateway = new ModelGateway();
+      let turns = 0;
+      let toolsPassed: unknown[] | undefined;
+
+      vi.spyOn(mockGateway, "streamChat").mockImplementation(async function* (req) {
+        turns++;
+        toolsPassed = req.tools;
+        yield {
+          type: "text_delta",
+          traceId: req.trace.traceId,
+          textDelta: "Could you please clarify what you would like me to do?",
+        };
+      });
+
+      const orchestrator = new AgentOrchestrator({ gateway: mockGateway, maxIterations: 5 });
+      const request: ChatCompletionRequest = {
+        modelId: "auto",
+        messages: [{ role: "user", content: "do it" }],
+        stream: true,
+        trace: {
+          traceId: "test_ambiguous",
+          tenantId: "tenant_test",
+          userId: "user_test",
+          conversationId: "conv_ambig",
+          agentRunId: "run_ambig",
+        },
+      };
+
+      const events: NormalizedEvent[] = [];
+      for await (const event of orchestrator.executeAgentLoop(request)) {
+        events.push(event);
+      }
+
+      expect(turns).toBe(1);
+      expect(toolsPassed?.length).toBe(0);
+      expect(events.filter((e) => e.type === "terminal_command_start").length).toBe(0);
+      expect(events.filter((e) => e.type === "tool_call_start").length).toBe(0);
+    });
+
+    it("7. Media failures do not trigger package installation or unrelated shell commands", async () => {
+      const mockGateway = new ModelGateway();
+      let turns = 0;
+
+      vi.spyOn(mockGateway, "streamChat").mockImplementation(async function* (req) {
+        turns++;
+        if (turns === 1) {
+          yield {
+            type: "tool_call_start",
+            traceId: req.trace.traceId,
+            toolCall: {
+              id: "call_img_fail",
+              name: "media_image_generate",
+              arguments: { prompt: "black obsidian sphere" },
+            },
+          };
+        } else {
+          // Model sees failure response and directly reports it to the user without calling shell
+          yield {
+            type: "text_delta",
+            traceId: req.trace.traceId,
+            textDelta: "Image generation is temporarily unavailable. Please try again later.",
+          };
+        }
+      });
+
+      const orchestrator = new AgentOrchestrator({ gateway: mockGateway, maxIterations: 5 });
+      const request: ChatCompletionRequest = {
+        modelId: "auto",
+        messages: [{ role: "user", content: "Generate an image of a black obsidian sphere." }],
+        stream: true,
+        trace: {
+          traceId: "test_media_fail",
+          tenantId: "tenant_test",
+          userId: "user_test",
+          conversationId: "conv_media_fail",
+          agentRunId: "run_media_fail",
+        },
+      };
+
+      const events: NormalizedEvent[] = [];
+      for await (const event of orchestrator.executeAgentLoop(request)) {
+        events.push(event);
+      }
+
+      // Completed in 2 turns (turn 1 tool call, turn 2 error reporting)
+      expect(turns).toBe(2);
+      expect(events.filter((e) => e.type === "terminal_command_start").length).toBe(0);
+      const toolStarts = events.filter((e) => e.type === "tool_call_start");
+      expect(toolStarts.length).toBe(1);
+      expect(toolStarts[0].toolCall?.name).toBe("media_image_generate");
+    });
+  });
 });

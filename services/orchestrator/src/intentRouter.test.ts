@@ -109,48 +109,86 @@ describe("Natural-Language Intent Routing", () => {
       }
     });
 
-    it("leaves media tools inactive for general coding or engineering requests", () => {
+    it("routes conversational requests, greetings, and technical explanations to 'conversation' with zero tools", () => {
       const registry = new ToolRegistry();
-      registry.resetActiveToolsToCore();
 
-      const generalPrompts = [
-        "Fix the unit tests in services/orchestrator/src/orchestrator.test.ts",
-        "Refactor the authentication middleware to use JWT tokens",
-        "Run git status and show me what changed",
-        "Install the new dependency with pnpm add",
+      const conversationalPrompts = [
+        "Hey Orba, how are you?",
+        "What do you think about this idea?",
+        "Explain how AI agents work.",
+        "Can you sketch out a plan for database migrations?",
+        "Draw an architecture diagram for the microservices",
+        "Can you sketch a solution to the race condition in auth middleware?",
+        "Tell me about transformer attention mechanisms",
+        "Hello!",
       ];
 
-      for (const prompt of generalPrompts) {
+      for (const prompt of conversationalPrompts) {
         registry.resetActiveToolsToCore();
         const result = routeUserIntent([{ role: "user", content: prompt }], registry);
-        expect(result.intent).toBe("general_coding");
+        expect(result.intent).toBe("conversation");
+        expect(result.confidence).toBeGreaterThanOrEqual(0.9);
         expect(result.toolsToActivate).toHaveLength(0);
-        expect(registry.getActiveToolNames()).not.toContain("media_image_generate");
-        expect(registry.getActiveToolNames()).not.toContain("media_video_generate");
+        expect(result.systemGuidance).toContain("Conversational Request");
       }
     });
 
-    it("does not accidentally activate media tools for coding requests mentioning media terms", () => {
+    it("routes explicit software engineering and project requests to 'software_engineering'", () => {
       const registry = new ToolRegistry();
 
       const softwarePrompts = [
+        "Build me a landing page.",
+        "Create a SaaS dashboard.",
+        "Implement a CRM feature in my repository.",
+        "Fix the unit tests in services/orchestrator/src/orchestrator.test.ts",
+        "Refactor the authentication middleware to use JWT tokens",
         "Create a video player component in React with playback controls",
         "Build an image upload endpoint in Express with multipart parsing",
         "Create an image carousel using CSS flexbox and transitions",
         "Build a video streaming service backend in Node.js",
-        "Can you sketch out a plan for database migrations?",
-        "Draw an architecture diagram for the microservices",
-        "Can you sketch a solution to the race condition in auth middleware?",
       ];
 
       for (const prompt of softwarePrompts) {
         registry.resetActiveToolsToCore();
         const result = routeUserIntent([{ role: "user", content: prompt }], registry);
-        expect(result.intent).toBe("general_coding");
+        expect(result.intent).toBe("software_engineering");
+        expect(result.toolsToActivate).toContain("task_plan");
         expect(result.toolsToActivate).not.toContain("media_image_generate");
         expect(result.toolsToActivate).not.toContain("media_video_generate");
         expect(registry.getActiveToolNames()).not.toContain("media_image_generate");
         expect(registry.getActiveToolNames()).not.toContain("media_video_generate");
+      }
+    });
+
+    it("routes explicit system, terminal, and test execution operations to 'system_operation'", () => {
+      const registry = new ToolRegistry();
+
+      const systemPrompts = [
+        "Install this package.",
+        "Debug the server.",
+        "Run the test suite.",
+        "Run git status and show me what changed",
+        "Install the new dependency with pnpm add",
+        "Execute vitest in services/orchestrator",
+      ];
+
+      for (const prompt of systemPrompts) {
+        registry.resetActiveToolsToCore();
+        const result = routeUserIntent([{ role: "user", content: prompt }], registry);
+        expect(result.intent).toBe("system_operation");
+        expect(result.toolsToActivate).toContain("execute_shell");
+        expect(registry.getActiveToolNames()).toContain("execute_shell");
+      }
+    });
+
+    it("routes ambiguous and underspecified requests to 'ambiguous' without speculating", () => {
+      const ambiguousPrompts = ["do it", "run it", "test", "fix it", "execute"];
+
+      for (const prompt of ambiguousPrompts) {
+        const result = routeUserIntent([{ role: "user", content: prompt }]);
+        expect(result.intent).toBe("ambiguous");
+        expect(result.toolsToActivate).toHaveLength(0);
+        expect(result.systemGuidance).toContain("Ambiguous Request");
       }
     });
 
