@@ -6,6 +6,8 @@ import { cookies } from "next/headers";
 // Shared orchestrator instance inside server runtime
 const orchestrator = new AgentOrchestrator();
 
+export const maxDuration = 300;
+
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as ChatCompletionRequest;
@@ -72,6 +74,13 @@ export async function POST(request: Request) {
     const stream = new ReadableStream({
       async start(controller) {
         const encoder = new TextEncoder();
+        // Send keepalive comment lines every 3 seconds to prevent proxy / browser timeout on long generations
+        const heartbeat = setInterval(() => {
+          try {
+            controller.enqueue(encoder.encode(": keepalive\n\n"));
+          } catch {}
+        }, 3000);
+
         try {
           for await (const event of orchestrator.executeAgentLoop(fullRequest)) {
             const payload = `data: ${JSON.stringify(event)}\n\n`;
@@ -87,6 +96,7 @@ export async function POST(request: Request) {
           })}\n\n`;
           controller.enqueue(encoder.encode(errPayload));
         } finally {
+          clearInterval(heartbeat);
           controller.close();
         }
       },

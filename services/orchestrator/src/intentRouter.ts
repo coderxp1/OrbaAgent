@@ -385,7 +385,7 @@ Use 'artifact_list' to discover available workspace artifacts and display them w
       systemGuidance: `[Intent Router: Detected Media Capability Inquiry]
 The user is asking about your image or video generation capabilities.
 Derive your response truthfully and conversationally from the LIVE RUNTIME CAPABILITY MANIFEST above.
-If the capability is AVAILABLE, explain clearly that you can generate high-quality AI images (via FLUX.1) and AI videos (via Wan2.1), and invite the user to describe what they would like you to generate (e.g., "Generate an image of a black obsidian sphere" or "Create a two-second video of an ocean wave").
+If the capability is AVAILABLE, explain clearly that you can generate high-quality AI images and AI videos, and invite the user to describe what they would like you to generate (e.g., "Generate an image of a black obsidian sphere" or "Create a two-second video of an ocean wave").
 Do NOT execute any tools or task plans for this capability inquiry.`,
     };
   }
@@ -439,8 +439,7 @@ Do NOT say 'Generating now' before executing the tool call. Call 'media_video_ge
 - duration_seconds: ${duration}
 - width: ${dims.width}
 - height: ${dims.height}
-- fps: 16
-- model: "wan2.1-t2v-1.3b"`,
+- fps: 16`,
     };
   }
 
@@ -485,8 +484,7 @@ Execute 'media_image_generate' with:
 - prompt: Detailed visual prompt describing scene, lighting, style, and subject
 - width: ${dims.width}
 - height: ${dims.height}
-- steps: 4
-- model: "black-forest-labs/FLUX.1-schnell"`,
+- steps: 4`,
     };
   }
 

@@ -372,25 +372,23 @@ OrbaAgent is a professional conversational AI assistant first.
         };
 
         if (call.name === "media_video_generate") {
-          const args = (call.arguments || {}) as Record<string, unknown>;
           yield {
             type: "agent_activity",
             traceId: trace.traceId,
             activity: {
-              step: "Generating video on GPU worker (Wan2.1-T2V-1.3B)",
+              step: "Creating your video…",
               status: "in_progress",
-              details: `Dispatching video diffusion job to GPU 1 (${args.duration_seconds || 2}s, ${args.width || 480}x${args.height || 480}, 16 fps)...`,
+              details: "Rendering cinematic motion frames…",
             },
           };
         } else if (call.name === "media_image_generate") {
-          const args = (call.arguments || {}) as Record<string, unknown>;
           yield {
             type: "agent_activity",
             traceId: trace.traceId,
             activity: {
-              step: "Generating image on GPU worker (FLUX.1-schnell)",
+              step: "Creating your image…",
               status: "in_progress",
-              details: `Dispatching diffusion job to GPU 1 (${args.width || 512}x${args.height || 512}, 4 steps)...`,
+              details: "Rendering high-resolution artwork…",
             },
           };
         } else {
@@ -553,13 +551,23 @@ OrbaAgent is a professional conversational AI assistant first.
           toolResult: result,
         };
 
+        let completionStep = `Completed ${call.name}`;
+        let completionDetails = result.output ? result.output.slice(0, 200) : result.error;
+        if (call.name === "media_video_generate") {
+          completionStep = result.success ? "Your video is ready" : "Video generation failed";
+          completionDetails = result.success ? "Ready for playback" : result.error || "Generation could not be completed";
+        } else if (call.name === "media_image_generate") {
+          completionStep = result.success ? "Your image is ready" : "Image generation failed";
+          completionDetails = result.success ? "Ready for viewing" : result.error || "Generation could not be completed";
+        }
+
         yield {
           type: "agent_activity",
           traceId: trace.traceId,
           activity: {
-            step: `Completed ${call.name}`,
+            step: completionStep,
             status: result.success ? "completed" : "failed",
-            details: result.output ? result.output.slice(0, 200) : result.error,
+            details: completionDetails,
           },
         };
 

@@ -406,36 +406,36 @@ export class CapabilityManager {
         name: "AI Image Generation",
         category: "ai_media",
         status: this.imageGenerationAvailable ? "AVAILABLE" : "UNAVAILABLE",
-        provider: "gpu_worker",
-        description: "Diffusion-based text-to-image and image-to-image generation on dedicated GPU",
+        provider: "native",
+        description: "High-resolution AI image generation from text descriptions",
         tools: ["media_image_generate"],
         notes: this.imageGenerationAvailable
-          ? "Real generation backend reported ready (FLUX.1 diffusion on GPU 1)"
-          : "Image generation is currently unavailable. GPU media worker is offline or unconfigured.",
+          ? "Real generation backend reported ready"
+          : "Image generation is currently unavailable or unconfigured.",
       },
       {
         id: "video_generation",
         name: "AI Video Generation",
         category: "ai_media",
         status: this.videoGenerationAvailable ? "AVAILABLE" : "UNAVAILABLE",
-        provider: "gpu_worker",
-        description: "Generative text-to-video diffusion on dedicated GPU",
+        provider: "native",
+        description: "Cinematic AI video generation from text descriptions",
         tools: ["media_video_generate"],
         notes: this.videoGenerationAvailable
-          ? "Real generation backend reported ready (Wan2.1 video diffusion on GPU 1)"
-          : "Video generation is currently unavailable. GPU media worker is offline or unconfigured.",
+          ? "Real generation backend reported ready"
+          : "Video generation is currently unavailable or unconfigured.",
       },
       {
         id: "media_processing",
         name: "Media Processing",
         category: "ai_media",
         status: this.mediaWorkerAvailable ? "AVAILABLE" : "UNAVAILABLE",
-        provider: "gpu_worker",
+        provider: "native",
         description: "Image resize, conversion, compositing, video encoding, and frame extraction",
         tools: ["media_process"],
         notes: this.mediaWorkerAvailable
-          ? "Media processing active on GPU 1"
-          : "GPU media worker on GPU 1 is currently unavailable or initializing",
+          ? "Media processing is active"
+          : "Media processing is currently unavailable or initializing",
       },
     ];
 
@@ -529,7 +529,7 @@ STRICT CAPABILITY & HONESTY DIRECTIVES:
 2. Persistent Memory: Persistent workspace memory is ACTIVE via AgentMemoryManager. Do NOT say you have no memory between sessions!
 3. Disconnected Services: For services marked "Available, but account not connected" (e.g. Slack, Notion, Google Workspace, Microsoft 365, or unauthenticated GitHub), you MUST state clearly: "<Service> integration is available, but your account is not connected yet." NEVER claim the tool does not exist!
 4. AI Media Generation: When asked whether you can generate images or videos (e.g. "Can you generate images?", "Can you generate videos?", "Are you able to create videos?"), derive your response directly from the LIVE RUNTIME CAPABILITY MANIFEST above:
-   - If marked AVAILABLE, answer TRUTHFULLY, HELPFULLY, and CONVERSATIONALLY that you can generate high-quality AI images (via FLUX.1) and AI videos (via Wan2.1). Summarize what you can create and invite the user to describe what they would like you to generate (e.g., 'Generate an image of...'). Do NOT automatically execute a generation tool for capability questions!
+   - If marked AVAILABLE, answer TRUTHFULLY, HELPFULLY, and CONVERSATIONALLY that you can generate high-quality AI images and cinematic AI videos. Summarize what you can create and invite the user to describe what they would like you to generate (e.g., 'Generate an image of...' or 'Generate a video of...'). Do NOT automatically execute a generation tool for capability questions!
    - If marked UNAVAILABLE, explain truthfully that image or video generation is currently offline or unconfigured. Do not mention internal passwords or secrets.
 5. Dynamic Tool Discovery: For software engineering and system tasks requiring file changes or command execution, call 'tools_search' to activate specialized tools. For normal conversation, explanations, and questions, respond directly without calling tools.
 6. Real Autonomous Execution: When asked what you can do, summarize your live capabilities accurately using the categories above.

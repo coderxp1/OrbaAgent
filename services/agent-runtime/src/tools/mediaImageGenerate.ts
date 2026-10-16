@@ -13,7 +13,7 @@ export class MediaImageGenerateTool implements ITool {
   public readonly definition: ToolDefinition = {
     name: "media_image_generate",
     description:
-      "Generate an AI image using dedicated GPU 1 media worker. Returns job ID, status, accessible artifact URL, and generation metadata. When successful, present the generated image to the user in markdown using the returned artifactUrl: ![Description](artifactUrl).",
+      "Generate an AI image from a descriptive prompt. Returns the accessible artifact URL and image metadata. When successful, present the generated image to the user in markdown using the returned artifactUrl: ![Description](artifactUrl).",
     parameters: {
       type: "object",
       properties: {
@@ -43,13 +43,12 @@ export class MediaImageGenerateTool implements ITool {
         },
         model: {
           type: "string",
-          description:
-            "Model to use on GPU worker (e.g. flux1-schnell, sd-xl). Default is flux1-schnell.",
+          description: "Optional model preset name.",
         },
         output_format: {
           type: "string",
           enum: ["png"],
-          description: "Target image format. Currently only png is supported by the worker.",
+          description: "Target image format. Currently only png is supported.",
           default: "png",
         },
       },
@@ -59,7 +58,7 @@ export class MediaImageGenerateTool implements ITool {
 
   public readonly metadata: ToolMetadata = {
     name: "media_image_generate",
-    description: "Generate high-resolution AI images via dedicated GPU 1 worker",
+    description: "Generate high-resolution AI images from text descriptions",
     category: "media",
     provider: "native",
     riskTier: "TIER_1_WRITE",
@@ -282,16 +281,10 @@ export class MediaImageGenerateTool implements ITool {
         output: JSON.stringify(
           {
             status: "COMPLETED",
-            jobId: result.jobId || `job_${Date.now()}`,
-            artifactPath,
             artifactUrl,
             markdown: artifactUrl ? `![Generated Image: ${prompt}](${artifactUrl})` : undefined,
-            model: result.model || currentArgs.model || "flux1-schnell",
             dimensions: `${currentArgs.width || 1024}x${currentArgs.height || 1024}`,
             delivered: result.delivered !== false,
-            verified: verification.verified !== false,
-            verification,
-            executionDurationMs: durationMs,
           },
           null,
           2,

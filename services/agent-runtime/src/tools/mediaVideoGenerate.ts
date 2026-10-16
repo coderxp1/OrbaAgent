@@ -1,4 +1,10 @@
-import type { ToolDefinition, ToolExecutionResult, ToolMetadata } from "@orbaagent/shared";
+import { execFile } from "node:child_process";
+import * as crypto from "node:crypto";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
+import { promisify } from "node:util";
+import { resolveWithinBase, type ToolDefinition, type ToolExecutionResult, type ToolMetadata } from "@orbaagent/shared";
 import type { ITool, ToolExecutionContext } from "./base.js";
 import { verifyDeliveredArtifact } from "./mediaVerification.js";
 import {
@@ -9,11 +15,25 @@ import {
   unavailableMediaResult,
 } from "./mediaWorkerConfig.js";
 
+const execFileAsync = promisify(execFile);
+
+interface ClipGenerationResult {
+  success: boolean;
+  artifactUrl?: string;
+  outputVideo?: string;
+  bundle?: string;
+  sha256?: string;
+  error?: string;
+  delivered?: boolean;
+  ingest_note?: string;
+  rawResult?: any;
+}
+
 export class MediaVideoGenerateTool implements ITool {
   public readonly definition: ToolDefinition = {
     name: "media_video_generate",
     description:
-      "Generate an AI video using dedicated GPU 1 media worker. Returns job ID, status, accessible artifact URL, and video metadata. When successful, present the generated video to the user using the returned artifactUrl: [View Video](artifactUrl).",
+      "Generate an AI video from a descriptive prompt. Returns accessible artifact URL and video metadata. When successful, present the generated video to the user using the returned artifactUrl: [View Video](artifactUrl).",
     parameters: {
       type: "object",
       properties: {
@@ -27,7 +47,7 @@ export class MediaVideoGenerateTool implements ITool {
         },
         duration_seconds: {
           type: "number",
-          description: "Target video duration in seconds (e.g. 2, 4, 5). Default is 4.",
+          description: "Target video duration in seconds (e.g. 2, 4, 8, 15). Default is 4.",
         },
         fps: {
           type: "number",
@@ -35,16 +55,15 @@ export class MediaVideoGenerateTool implements ITool {
         },
         width: {
           type: "number",
-          description: "Video width in pixels. Default is 768.",
+          description: "Video width in pixels. Default is 480.",
         },
         height: {
           type: "number",
-          description: "Video height in pixels. Default is 768.",
+          description: "Video height in pixels. Default is 480.",
         },
         model: {
           type: "string",
-          description:
-            "Video model to use on GPU worker (e.g. wan2.1-t2v-1.3b). Default is wan2.1-t2v-1.3b.",
+          description: "Optional model preset name.",
         },
       },
       required: ["prompt"],
@@ -53,15 +72,168 @@ export class MediaVideoGenerateTool implements ITool {
 
   public readonly metadata: ToolMetadata = {
     name: "media_video_generate",
-    description: "Generate generative AI video clips via dedicated GPU 1 worker",
+    description: "Generate generative AI video clips from text descriptions",
     category: "media",
     provider: "native",
     riskTier: "TIER_1_WRITE",
-    keywords: ["video", "generate", "animation", "motion", "clip", "mp4", "gpu", "ai video"],
+    keywords: ["video", "generate", "animation", "motion", "clip", "mp4", "ai video"],
     parameters: this.definition.parameters,
     version: "1.0.0",
     isCore: false,
   };
+
+  /**
+   * Submits a single video generation job to the media backend with self-repair for 503 and 400.
+   */
+  private async submitClip(
+    workerUrl: string,
+    workerToken: string,
+    requestTimeout: number,
+    clipParams: {
+      prompt: string;
+      negative_prompt?: string;
+      duration_seconds: number;
+      fps: number;
+      width: number;
+      height: number;
+      model?: string;
+    },
+  ): Promise<ClipGenerationResult> {
+    let jobRes: Response | null = null;
+    let attempts = 0;
+    const maxAttempts = 2;
+    let current = { ...clipParams };
+
+    while (attempts < maxAttempts) {
+      attempts++;
+      try {
+        jobRes = await fetch(`${workerUrl}/api/generate/video`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${workerToken}`,
+          },
+          body: JSON.stringify({
+            prompt: current.prompt,
+            negative_prompt: current.negative_prompt,
+            duration_seconds: current.duration_seconds,
+            fps: current.fps,
+            width: current.width,
+            height: current.height,
+            model: current.model || "wan2.1-t2v-1.3b",
+          }),
+          signal: AbortSignal.timeout(requestTimeout),
+        });
+
+        // Bounded self-repair 1: Permit contention (503 BUSY) -> wait and retry
+        if (jobRes.status === 503 && attempts < maxAttempts) {
+          console.warn(
+            `[MEDIA SELF-REPAIR] Worker busy (attempt ${attempts}/${maxAttempts}). Waiting before retry...`,
+          );
+          await new Promise((r) => setTimeout(r, 2000));
+          continue;
+        }
+
+        // Bounded self-repair 2: Parameter validation error (400) -> normalize dimensions & duration
+        if (jobRes.status === 400 && attempts < maxAttempts) {
+          const errBody = await jobRes.text().catch(() => "");
+          console.warn(
+            `[MEDIA SELF-REPAIR] Validation rejected: ${errBody}. Normalizing to standard 480x480 16fps and retrying...`,
+          );
+          current = {
+            ...current,
+            width: 480,
+            height: 480,
+            fps: 16,
+            duration_seconds: Math.min(5, Math.max(1, Number(current.duration_seconds) || 2)),
+          };
+          continue;
+        }
+
+        break;
+      } catch (fetchErr: any) {
+        if (attempts >= maxAttempts) {
+          return { success: false, error: fetchErr.message || String(fetchErr) };
+        }
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+    }
+
+    if (!jobRes || !jobRes.ok) {
+      const errorText = await jobRes?.text().catch(() => "Unknown error");
+      return {
+        success: false,
+        error: `Video generation failed (temporarily unavailable): GPU worker returned HTTP ${jobRes?.status}: ${errorText}`,
+      };
+    }
+
+    const result = await jobRes.json();
+    if (
+      result.delivered === false ||
+      (typeof result.ingest_note === "string" && result.ingest_note.includes("ingest failed"))
+    ) {
+      return {
+        success: false,
+        delivered: false,
+        ingest_note: result.ingest_note,
+        error: `Video generated on GPU host, but artifact delivery to the web application failed (${result.ingest_note || "Ingest rejected"}). Artifact is not retrievable.`,
+        rawResult: result,
+      };
+    }
+
+    const artifactUrl = result.artifactUrl || result.artifact_url || "";
+    const outputVideo =
+      result.outputVideo ||
+      result.artifactPath ||
+      result.artifact_path ||
+      result.artifact_id ||
+      result.artifactId ||
+      "";
+
+    return {
+      success: true,
+      artifactUrl,
+      outputVideo,
+      bundle: result.bundle,
+      sha256: result.sha256,
+      delivered: result.delivered !== false,
+      ingest_note: result.ingest_note,
+      rawResult: result,
+    };
+  }
+
+  /**
+   * Resolves a delivered artifact URL to a local filesystem path, or downloads it to a temp path.
+   */
+  private async resolveOrDownloadArtifact(artifactUrl: string, tmpDest: string): Promise<string> {
+    const prefix = "/api/artifacts/";
+    if (artifactUrl.startsWith(prefix)) {
+      const rawPath = artifactUrl.slice(prefix.length);
+      const segments = rawPath.split("/").map((s) => decodeURIComponent(s));
+      const baseDir = process.env.ORBA_UPLOAD_DIR || path.join(process.cwd(), ".uploads");
+      try {
+        const local = resolveWithinBase(baseDir, segments);
+        const st = await fs.stat(local);
+        if (st.isFile() && st.size > 0) {
+          return local;
+        }
+      } catch {}
+    }
+
+    const appUrl = (
+      process.env.NEXT_PUBLIC_API_URL ||
+      process.env.ORBA_WEB_URL ||
+      "http://127.0.0.1:3000"
+    ).replace(/\/+$/, "");
+
+    const res = await fetch(`${appUrl}${artifactUrl}`);
+    if (!res.ok) {
+      throw new Error(`Failed to fetch artifact from ${artifactUrl}: HTTP ${res.status}`);
+    }
+    const buf = Buffer.from(await res.arrayBuffer());
+    await fs.writeFile(tmpDest, buf);
+    return tmpDest;
+  }
 
   async execute(
     args: Record<string, unknown>,
@@ -89,7 +261,7 @@ export class MediaVideoGenerateTool implements ITool {
     const { url: workerUrl, token: workerToken } = workerState.config;
 
     try {
-      // 1. Check health of GPU worker
+      // 1. Check health of media backend
       const healthRes = await fetch(`${workerUrl}/health`, {
         headers: { Authorization: `Bearer ${workerToken}` },
         signal: AbortSignal.timeout(3000),
@@ -97,7 +269,7 @@ export class MediaVideoGenerateTool implements ITool {
 
       if (!healthRes || !healthRes.ok) {
         const statusDetail = healthRes ? `HTTP ${healthRes.status}` : "network error / timeout";
-        const errorMsg = `Video generation failed: GPU worker health check failed (${statusDetail}).`;
+        const errorMsg = `Video generation service unavailable (${statusDetail}).`;
         console.error(`[MEDIA GENERATION DIAGNOSTIC] ${errorMsg}`);
         return {
           toolCallId,
@@ -105,28 +277,17 @@ export class MediaVideoGenerateTool implements ITool {
           success: false,
           output: "",
           error: errorMsg,
-          metadata: {
-            status: "UNAVAILABLE",
-          },
+          metadata: { status: "UNAVAILABLE" },
           executionTimeMs: Date.now() - startTime,
         };
       }
 
-      // Defence in depth: only trust a worker that reports a real generation
-      // backend. A worker can be reachable while running no model at all, and an
-      // older build answered generation requests with fabricated output.
       const health = (await healthRes.json().catch(() => null)) as GpuWorkerHealth | null;
-
-      // The worker reports capabilities.video_generation = true only AFTER the
-      // model has been loaded into GPU memory. When the worker is configured
-      // with generation_backend="diffusers" but has not received its first
-      // request yet, the capability is false and unavailable_reason explains
-      // that the first request will trigger loading. We must allow that case.
       const capabilityReady = health?.capabilities?.video_generation === true;
       const lazyLoadPending = isLazyLoadAllowed(health);
 
       if (!capabilityReady && !lazyLoadPending) {
-        const errorMsg = `Video generation unavailable: GPU worker reports no real video generation backend (generation_backend=${health?.generation_backend ?? "none"}, reason: ${health?.unavailable_reason ?? "model not loaded"}).`;
+        const errorMsg = "Video generation is currently initializing or unavailable.";
         console.error(`[MEDIA GENERATION DIAGNOSTIC] ${errorMsg}`);
         return {
           toolCallId,
@@ -134,124 +295,154 @@ export class MediaVideoGenerateTool implements ITool {
           success: false,
           output: "",
           error: errorMsg,
-          metadata: {
-            status: "UNAVAILABLE",
-          },
+          metadata: { status: "UNAVAILABLE" },
           executionTimeMs: Date.now() - startTime,
         };
       }
 
-      // Use an extended timeout for the first request (model loading).
-      // Video already uses 300s, but bump for consistency when lazy-loading.
       const requestTimeout = lazyLoadPending ? FIRST_REQUEST_TIMEOUT_MS : 300_000;
+      const requestedDuration = Math.min(30, Math.max(1, Number(args.duration_seconds) || 4));
+      const width = Number(args.width) || 480;
+      const height = Number(args.height) || 480;
+      const fps = Number(args.fps) || 16;
+      const negative_prompt = args.negative_prompt ? String(args.negative_prompt) : undefined;
+      const model = args.model ? String(args.model) : "wan2.1-t2v-1.3b";
 
-      // 2. Submit video generation job to dedicated GPU worker with bounded self-repair
-      let jobRes: Response | null = null;
-      let attempts = 0;
-      const maxAttempts = 2;
-      let currentArgs: Record<string, any> = { ...args };
+      let finalArtifactUrl = "";
+      let finalSha256: string | undefined;
+      let rawResultMetadata: any = {};
+      let jobId = `job_${Date.now()}`;
 
-      while (attempts < maxAttempts) {
-        attempts++;
-        try {
-          jobRes = await fetch(`${workerUrl}/api/generate/video`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${workerToken}`,
-            },
-            body: JSON.stringify({
-              prompt,
-              negative_prompt: currentArgs.negative_prompt,
-              duration_seconds: currentArgs.duration_seconds || 4,
-              fps: currentArgs.fps || 16,
-              width: currentArgs.width || 768,
-              height: currentArgs.height || 768,
-              model: currentArgs.model || "wan2.1-t2v-1.3b",
-            }),
-            signal: AbortSignal.timeout(requestTimeout),
-          });
+      if (requestedDuration > 8 && requestedDuration <= 20) {
+        // Multi-segment generation pipeline for extended duration (e.g. 15s)
+        console.log(
+          `[MEDIA MULTI-SEGMENT] Generating multi-segment video (${requestedDuration}s target) via sequential clips...`,
+        );
 
-          // Bounded self-repair 1: GPU permit contention (503 BUSY) -> wait and retry once
-          if (jobRes.status === 503 && attempts < maxAttempts) {
-            console.warn(
-              `[MEDIA SELF-REPAIR] GPU worker busy (attempt ${attempts}/${maxAttempts}). Waiting before retry...`,
-            );
-            await new Promise((r) => setTimeout(r, 1500));
-            continue;
-          }
+        // Segment 1: continuous sequence
+        const clip1 = await this.submitClip(workerUrl, workerToken, requestTimeout, {
+          prompt: `${prompt} (Part 1, dynamic action sequence)`,
+          negative_prompt,
+          duration_seconds: 8,
+          fps,
+          width,
+          height,
+          model,
+        });
 
-          // Bounded self-repair 2: Parameter validation error (400) -> auto-normalize dimensions & duration
-          if (jobRes.status === 400 && attempts < maxAttempts) {
-            const errBody = await jobRes.text().catch(() => "");
-            console.warn(
-              `[MEDIA SELF-REPAIR] Parameter validation rejected: ${errBody}. Normalizing to standard 480x480 16fps parameters and retrying...`,
-            );
-            currentArgs = {
-              ...currentArgs,
-              width: 480,
-              height: 480,
-              fps: 16,
-              duration_seconds: Math.min(5, Math.max(1, Number(currentArgs.duration_seconds) || 2)),
-            };
-            continue;
-          }
-
-          break;
-        } catch (fetchErr: any) {
-          if (attempts >= maxAttempts) throw fetchErr;
-          await new Promise((r) => setTimeout(r, 1000));
+        if (!clip1.success || !clip1.artifactUrl) {
+          throw new Error(clip1.error || "Failed to generate first video segment");
         }
+
+        jobId = clip1.rawResult?.jobId || jobId;
+
+        // Segment 2: continuation of the scene
+        const clip2 = await this.submitClip(workerUrl, workerToken, requestTimeout, {
+          prompt: `${prompt} (Part 2, continuous continuation)`,
+          negative_prompt,
+          duration_seconds: 8,
+          fps,
+          width,
+          height,
+          model,
+        });
+
+        if (!clip2.success || !clip2.artifactUrl) {
+          throw new Error(clip2.error || "Failed to generate continuation video segment");
+        }
+
+        // Concatenate both clips into exact target duration using ffmpeg
+        const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "orba-vid-stitch-"));
+        const tmp1 = path.join(tmpDir, "seg1.mp4");
+        const tmp2 = path.join(tmpDir, "seg2.mp4");
+        const tmpConcat = path.join(tmpDir, "final.mp4");
+        const listPath = path.join(tmpDir, "list.txt");
+
+        try {
+          const seg1Path = await this.resolveOrDownloadArtifact(clip1.artifactUrl, tmp1);
+          const seg2Path = await this.resolveOrDownloadArtifact(clip2.artifactUrl, tmp2);
+
+          const esc1 = seg1Path.replace(/'/g, "'\\''");
+          const esc2 = seg2Path.replace(/'/g, "'\\''");
+          await fs.writeFile(listPath, `file '${esc1}'\nfile '${esc2}'\n`);
+
+          await execFileAsync("ffmpeg", [
+            "-y",
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            listPath,
+            "-t",
+            String(requestedDuration),
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-r",
+            String(fps),
+            tmpConcat,
+          ]);
+
+          const baseDir = process.env.ORBA_UPLOAD_DIR || path.join(process.cwd(), ".uploads");
+          const workspace = process.env.ORBA_TENANT_ID || "default-tenant";
+          const bundle = clip1.bundle || `vid_${Date.now().toString(36)}`;
+          const filename = `${crypto.randomUUID()}.mp4`;
+          const targetDir = path.join(baseDir, workspace, bundle);
+          await fs.mkdir(targetDir, { recursive: true });
+          const targetPath = path.join(targetDir, filename);
+
+          await fs.copyFile(tmpConcat, targetPath);
+
+          const finalBytes = await fs.readFile(targetPath);
+          finalSha256 = crypto.createHash("sha256").update(finalBytes).digest("hex");
+          finalArtifactUrl = `/api/artifacts/${encodeURIComponent(workspace)}/${encodeURIComponent(
+            bundle,
+          )}/${encodeURIComponent(filename)}`;
+
+          rawResultMetadata = {
+            multiSegment: true,
+            segments: [clip1.artifactUrl, clip2.artifactUrl],
+            targetDuration: requestedDuration,
+          };
+        } finally {
+          await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+        }
+      } else {
+        // Single-segment generation (<= 8 seconds or extreme duration fallback)
+        const clip = await this.submitClip(workerUrl, workerToken, requestTimeout, {
+          prompt,
+          negative_prompt,
+          duration_seconds: requestedDuration,
+          fps,
+          width,
+          height,
+          model,
+        });
+
+        if (!clip.success) {
+          return {
+            toolCallId,
+            name: this.definition.name,
+            success: false,
+            output: "",
+            error: clip.error || "Video generation failed",
+            metadata: clip.rawResult || {},
+            executionTimeMs: Date.now() - startTime,
+          };
+        }
+
+        jobId = clip.rawResult?.jobId || jobId;
+        finalArtifactUrl = clip.artifactUrl || "";
+        finalSha256 = clip.sha256;
+        rawResultMetadata = clip.rawResult || {};
       }
 
-      if (!jobRes || !jobRes.ok) {
-        const errorText = await jobRes?.text().catch(() => "Unknown error");
-        const errorMsg = `Video generation failed (temporarily unavailable): GPU worker returned HTTP ${jobRes?.status}: ${errorText}`;
-        console.error(`[MEDIA GENERATION DIAGNOSTIC] ${errorMsg}`);
-        return {
-          toolCallId,
-          name: this.definition.name,
-          success: false,
-          output: "",
-          error: errorMsg,
-          metadata: { status: "FAILED" },
-          executionTimeMs: Date.now() - startTime,
-        };
-      }
-
-      const result = await jobRes.json();
       const durationMs = Date.now() - startTime;
 
-      // If delivery to production failed, report the failure truthfully
-      if (
-        result.delivered === false ||
-        (typeof result.ingest_note === "string" && result.ingest_note.includes("ingest failed"))
-      ) {
-        console.error(
-          `[MEDIA GENERATION DIAGNOSTIC] GPU video generated successfully but artifact delivery failed: ${result.ingest_note}`,
-        );
-        return {
-          toolCallId,
-          name: this.definition.name,
-          success: false,
-          output: "",
-          error: `Video generated on GPU host, but artifact delivery to the web application failed (${result.ingest_note || "Ingest rejected"}). Artifact is not retrievable.`,
-          metadata: result,
-          executionTimeMs: durationMs,
-        };
-      }
-
-      const artifactUrl = result.artifactUrl || result.artifact_url || "";
-      const outputVideo =
-        result.outputVideo ||
-        result.artifactPath ||
-        result.artifact_path ||
-        result.artifact_id ||
-        result.artifactId ||
-        "";
-
-      // 3. Post-generation verification: ensure the delivered artifact actually exists and is valid
-      const verification = await verifyDeliveredArtifact(artifactUrl, "video/mp4", result.sha256);
+      // Post-generation verification: ensure the delivered artifact actually exists and is valid
+      const verification = await verifyDeliveredArtifact(finalArtifactUrl, "video/mp4", finalSha256);
       if (
         !verification.verified &&
         verification.retrievable === false &&
@@ -265,8 +456,8 @@ export class MediaVideoGenerateTool implements ITool {
           name: this.definition.name,
           success: false,
           output: "",
-          error: `Video generated on GPU host, but post-generation verification failed (${verification.error || "Artifact unretrievable"}).`,
-          metadata: { ...result, verification },
+          error: `Video generated, but verification failed (${verification.error || "Artifact unretrievable"}).`,
+          metadata: { ...rawResultMetadata, verification },
           executionTimeMs: durationMs,
         };
       }
@@ -278,29 +469,27 @@ export class MediaVideoGenerateTool implements ITool {
         output: JSON.stringify(
           {
             status: "COMPLETED",
-            jobId: result.jobId || `job_${Date.now()}`,
-            outputVideo,
-            artifactUrl,
-            markdown: artifactUrl ? `[View Generated Video](${artifactUrl})` : undefined,
-            duration: currentArgs.duration_seconds || 4,
-            resolution: `${currentArgs.width || 768}x${currentArgs.height || 768}`,
-            model: result.model || currentArgs.model || "wan2.1-t2v-1.3b",
-            delivered: result.delivered !== false,
-            verified: verification.verified !== false,
-            verification,
-            executionDurationMs: durationMs,
+            jobId,
+            artifactUrl: finalArtifactUrl,
+            markdown: finalArtifactUrl ? `[View Generated Video](${finalArtifactUrl})` : undefined,
+            duration: requestedDuration,
+            resolution: `${width}x${height}`,
+            delivered: true,
           },
           null,
           2,
         ),
-        metadata: { ...result, verification },
+        metadata: {
+          status: "COMPLETED",
+          artifactUrl: finalArtifactUrl,
+          duration: requestedDuration,
+          verification,
+        },
         executionTimeMs: durationMs,
       };
     } catch (err: any) {
       const errorMsg = `Video generation request failed: ${err.message || String(err)}`;
-      console.error(
-        `[MEDIA GENERATION DIAGNOSTIC] GPU video generation request failed: ${err.message || String(err)}`,
-      );
+      console.error(`[MEDIA GENERATION DIAGNOSTIC] ${errorMsg}`);
       return {
         toolCallId,
         name: this.definition.name,

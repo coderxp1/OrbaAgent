@@ -739,11 +739,11 @@ function MediaToolItem({ call, result, textContent }: MediaToolItemProps) {
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
               <span className="font-semibold text-xs text-violet-200">
-                {isVideo ? "Generating video…" : "Generating image…"}
+                {isVideo ? "Creating your video…" : "Creating your image…"}
               </span>
-              <span className="inline-flex items-center gap-1 rounded-full bg-violet-950/80 px-2 py-0.5 text-[10px] font-mono font-medium text-violet-300 border border-violet-700/60">
+              <span className="inline-flex items-center gap-1 rounded-full bg-violet-950/80 px-2 py-0.5 text-[10px] font-medium text-violet-300 border border-violet-700/60">
                 <Loader2 className="h-2.5 w-2.5 animate-spin" />
-                GPU 1 active
+                Processing
               </span>
             </div>
             <p className="mt-1 truncate text-xs text-zinc-300 italic">
@@ -766,7 +766,7 @@ function MediaToolItem({ call, result, textContent }: MediaToolItemProps) {
               {isVideo ? "Video generation failed" : "Image generation failed"}
             </span>
             <p className="mt-1 text-red-300/90 font-mono text-[11px] leading-relaxed">
-              {result.error || "The media worker encountered an error executing this request."}
+              {result.error || "An error occurred executing this request."}
             </p>
           </div>
         </div>
@@ -781,7 +781,6 @@ function MediaToolItem({ call, result, textContent }: MediaToolItemProps) {
   } catch {}
 
   const artifactUrl = data?.artifactUrl;
-  const executionMs = data?.executionDurationMs || result.executionTimeMs;
   const contentHasArtifact = Boolean(artifactUrl && textContent.includes(artifactUrl));
 
   return (
@@ -797,7 +796,7 @@ function MediaToolItem({ call, result, textContent }: MediaToolItemProps) {
                   <span>Generated Video</span>
                 </span>
                 <span className="inline-flex items-center gap-1 rounded bg-zinc-800/90 px-2 py-0.5 text-[10px] font-mono text-zinc-300 border border-zinc-700">
-                  {data?.model || "Wan2.1-T2V"}
+                  {data?.duration ? `${data.duration}s` : "Video"}
                 </span>
               </div>
               <video
@@ -869,32 +868,6 @@ function MediaToolItem({ call, result, textContent }: MediaToolItemProps) {
           )}
         </div>
       )}
-
-      {/* Developer / Diagnostic Trace — Collapsed by default */}
-      <details className="group/diag text-xs text-zinc-500 font-mono">
-        <summary className="cursor-pointer select-none py-1 text-[11px] text-zinc-500 hover:text-zinc-400 flex items-center gap-2 list-none">
-          <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-zinc-900 border border-zinc-800 text-zinc-400 group-open/diag:text-violet-400">
-            DEBUG TRACE
-          </span>
-          <span>{call.name}</span>
-          <span className="text-zinc-600">•</span>
-          <span>{data?.model || "GPU 1"}</span>
-          {executionMs && (
-            <>
-              <span className="text-zinc-600">•</span>
-              <span>{(executionMs / 1000).toFixed(1)}s</span>
-            </>
-          )}
-        </summary>
-        <div className="mt-1.5 p-3 rounded-xl bg-zinc-950/80 border border-zinc-800/80 text-[11px] text-zinc-400 space-y-1">
-          {data?.jobId && <div><span className="text-zinc-500">Job ID:</span> {data.jobId}</div>}
-          {data?.dimensions && <div><span className="text-zinc-500">Dimensions:</span> {data.dimensions}</div>}
-          {artifactUrl && <div className="truncate"><span className="text-zinc-500">Artifact:</span> {artifactUrl}</div>}
-          {data?.verified !== undefined && (
-            <div><span className="text-zinc-500">Integrity:</span> {data.verified ? "Verified SHA-256" : "Unverified"}</div>
-          )}
-        </div>
-      </details>
     </div>
   );
 }
