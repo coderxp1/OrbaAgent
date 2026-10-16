@@ -37,15 +37,30 @@ function safeJoin(base: string, relParts: string[]): string {
  * Workspace identity for artifacts, matching the upload route's model
  * (`ORBA_TENANT_ID || "default-tenant"`).
  */
-function currentWorkspace(): string {
-  return process.env.ORBA_TENANT_ID || "default-tenant";
+function currentWorkspace(context?: ToolExecutionContext): string {
+  return context?.tenantId || process.env.ORBA_TENANT_ID || "default-tenant";
+}
+
+function getMimeType(filename: string): string {
+  const lower = filename.toLowerCase();
+  if (lower.endsWith(".png")) return "image/png";
+  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+  if (lower.endsWith(".gif")) return "image/gif";
+  if (lower.endsWith(".webp")) return "image/webp";
+  if (lower.endsWith(".mp4")) return "video/mp4";
+  if (lower.endsWith(".mov")) return "video/quicktime";
+  if (lower.endsWith(".webm")) return "video/webm";
+  if (lower.endsWith(".txt")) return "text/plain";
+  if (lower.endsWith(".md")) return "text/markdown";
+  if (lower.endsWith(".json")) return "application/json";
+  return "application/octet-stream";
 }
 
 export class ArtifactListTool implements ITool {
   public readonly definition: ToolDefinition = {
     name: "artifact_list",
     description:
-      "List uploaded artifacts available for this chat turn (from the user's attachments).",
+      "List artifacts available in the tenant workspace and chat attachments (images, videos, uploads).",
     parameters: {
       type: "object",
       properties: {},
@@ -54,13 +69,13 @@ export class ArtifactListTool implements ITool {
 
   public readonly metadata: ToolMetadata = {
     name: "artifact_list",
-    description: "List attached artifacts (IDs, names, sizes, types, relative paths)",
+    description: "List workspace and attached artifacts (IDs, names, sizes, types, URLs)",
     category: "documents",
     provider: "native",
     riskTier: "TIER_0_READ",
-    keywords: ["artifacts", "attachments", "list"],
+    keywords: ["artifacts", "attachments", "list", "media", "images", "videos"],
     parameters: this.definition.parameters,
-    version: "1.0.0",
+    version: "1.1.0",
     isCore: false,
   };
 
@@ -70,19 +85,80 @@ export class ArtifactListTool implements ITool {
   ): Promise<ToolExecutionResult> {
     const start = Date.now();
     const toolCallId = `tc_artifacts_list_${start}`;
-    const list = (context.attachments || []).map((a) => ({
-      artifactId: a.artifactId,
-      name: a.name || "",
-      type: a.type || "",
-      size: a.size ?? 0,
-      relPath: a.relPath || "",
-    }));
+    const tenantId = currentWorkspace(context);
+    const baseDir = process.env.ORBA_UPLOAD_DIR || path.join(process.cwd(), ".uploads");
+
+    const items: Array<{
+      artifactId: string;
+      name: string;
+      type: string;
+      size: number;
+      relPath: string;
+      url?: string;
+      source: "attachment" | "workspace";
+    }> = [];
+
+    const seenKeys = new Set<string>();
+
+    // 1. Transient turn attachments from context
+    for (const a of context.attachments || []) {
+      const relPath = a.relPath || "";
+      items.push({
+        artifactId: a.artifactId,
+        name: a.name || "",
+        type: a.type || "",
+        size: a.size ?? 0,
+        relPath,
+        source: "attachment",
+      });
+      seenKeys.add(a.artifactId);
+    }
+
+    // 2. Discover persisted workspace artifacts (generated images, videos, bundles)
+    try {
+      const tenantDir = safeJoin(baseDir, [tenantId]);
+      const entries = await fs.readdir(tenantDir, { withFileTypes: true });
+
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        const bundle = entry.name;
+        const bundleDir = safeJoin(tenantDir, [bundle]);
+        const files = await fs.readdir(bundleDir, { withFileTypes: true });
+
+        for (const file of files) {
+          if (!file.isFile()) continue;
+          const filename = file.name;
+          const filePath = safeJoin(bundleDir, [filename]);
+          const stat = await fs.stat(filePath);
+
+          const artifactId = Buffer.from(
+            JSON.stringify({ w: tenantId, b: bundle, p: filename }),
+          ).toString("base64url");
+
+          if (!seenKeys.has(artifactId)) {
+            items.push({
+              artifactId,
+              name: filename,
+              type: getMimeType(filename),
+              size: stat.size,
+              relPath: `${bundle}/${filename}`,
+              url: `/api/artifacts/${tenantId}/${bundle}/${filename}`,
+              source: "workspace",
+            });
+            seenKeys.add(artifactId);
+          }
+        }
+      }
+    } catch {
+      // If upload directory does not exist yet or is unreadable, proceed with attachments
+    }
+
     return {
       toolCallId,
       name: this.definition.name,
       success: true,
-      output: JSON.stringify({ count: list.length, items: list }, null, 2),
-      metadata: { count: list.length, items: list },
+      output: JSON.stringify({ count: items.length, items }, null, 2),
+      metadata: { count: items.length, items },
       executionTimeMs: Date.now() - start,
     };
   }
@@ -92,7 +168,7 @@ export class ArtifactReadTool implements ITool {
   public readonly definition: ToolDefinition = {
     name: "artifact_read",
     description:
-      "Read an artifact by its artifactId. Returns bounded text for text-like files, or metadata for binary files.",
+      "Read an artifact by its artifactId. Returns bounded text for text-like files, or metadata and URL for binary/media files.",
     parameters: {
       type: "object",
       properties: {
@@ -109,13 +185,13 @@ export class ArtifactReadTool implements ITool {
 
   public readonly metadata: ToolMetadata = {
     name: "artifact_read",
-    description: "Read or inspect an uploaded artifact",
+    description: "Read or inspect an artifact",
     category: "documents",
     provider: "native",
     riskTier: "TIER_0_READ",
-    keywords: ["artifact", "read", "attachment", "content", "metadata"],
+    keywords: ["artifact", "read", "attachment", "content", "metadata", "media"],
     parameters: this.definition.parameters,
-    version: "1.0.0",
+    version: "1.1.0",
     isCore: false,
   };
 
@@ -129,23 +205,11 @@ export class ArtifactReadTool implements ITool {
     const maxBytes = Math.min(Number(args.maxBytes || 200_000), 2_000_000);
 
     try {
-      // Whitelist: artifact must be in context.attachments
-      const allowed = (context.attachments || []).some((a) => a.artifactId === artifactId);
-      if (!allowed) {
-        return {
-          toolCallId,
-          name: this.definition.name,
-          success: false,
-          output: "",
-          error: "Artifact not attached to this turn",
-        };
-      }
-
       const { w, b, p } = decodeArtifactId(artifactId);
+      const tenantId = currentWorkspace(context);
 
-      // Cross-workspace guard: the decoded workspace must match this runtime's
-      // configured workspace, so a crafted artifactId cannot read another tenant's file.
-      if (w !== currentWorkspace()) {
+      // Cross-workspace guard: decoded workspace must match caller's tenant
+      if (w !== tenantId) {
         return {
           toolCallId,
           name: this.definition.name,
@@ -196,13 +260,14 @@ export class ArtifactReadTool implements ITool {
         lower.endsWith(".css");
 
       if (!isText) {
-        // Return metadata only for non-text
+        // Return structured metadata and retrieval URL for media / binary files
         const meta = {
           filename,
           size: stat.size,
-          relPath: p,
+          relPath: `${b}/${p}`,
           workspace: w,
           bundle: b,
+          url: `/api/artifacts/${w}/${b}/${p}`,
           kind:
             lower.endsWith(".png") ||
             lower.endsWith(".jpg") ||
@@ -210,7 +275,7 @@ export class ArtifactReadTool implements ITool {
             lower.endsWith(".gif") ||
             lower.endsWith(".webp")
               ? "image"
-              : lower.endsWith(".mp4") || lower.endsWith(".mov")
+              : lower.endsWith(".mp4") || lower.endsWith(".mov") || lower.endsWith(".webm")
                 ? "video"
                 : "binary",
         };
@@ -235,7 +300,12 @@ export class ArtifactReadTool implements ITool {
         name: this.definition.name,
         success: true,
         output: text,
-        metadata: { filename, size: stat.size, relPath: p, truncated: stat.size > toRead },
+        metadata: {
+          filename,
+          size: stat.size,
+          relPath: `${b}/${p}`,
+          truncated: stat.size > toRead,
+        },
         executionTimeMs: Date.now() - start,
       };
     } catch (err: unknown) {

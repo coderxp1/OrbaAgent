@@ -129,5 +129,51 @@ describe("Natural-Language Intent Routing", () => {
         expect(registry.getActiveToolNames()).not.toContain("media_video_generate");
       }
     });
+
+    it("does not accidentally activate media tools for coding requests mentioning media terms", () => {
+      const registry = new ToolRegistry();
+
+      const softwarePrompts = [
+        "Create a video player component in React with playback controls",
+        "Build an image upload endpoint in Express with multipart parsing",
+        "Create an image carousel using CSS flexbox and transitions",
+        "Build a video streaming service backend in Node.js",
+        "Can you sketch out a plan for database migrations?",
+        "Draw an architecture diagram for the microservices",
+        "Can you sketch a solution to the race condition in auth middleware?",
+      ];
+
+      for (const prompt of softwarePrompts) {
+        registry.resetActiveToolsToCore();
+        const result = routeUserIntent([{ role: "user", content: prompt }], registry);
+        expect(result.intent).toBe("general_coding");
+        expect(result.toolsToActivate).not.toContain("media_image_generate");
+        expect(result.toolsToActivate).not.toContain("media_video_generate");
+        expect(registry.getActiveToolNames()).not.toContain("media_image_generate");
+        expect(registry.getActiveToolNames()).not.toContain("media_video_generate");
+      }
+    });
+
+    it("routes artifact listing and review queries to artifact_management with artifact tools active", () => {
+      const registry = new ToolRegistry();
+
+      const artifactPrompts = [
+        "Show me all generated media artifacts",
+        "List artifacts in my workspace",
+        "What videos did you generate earlier?",
+        "Inspect the generated images and files",
+      ];
+
+      for (const prompt of artifactPrompts) {
+        registry.resetActiveToolsToCore();
+        const result = routeUserIntent([{ role: "user", content: prompt }], registry);
+        expect(result.intent).toBe("artifact_management");
+        expect(result.toolsToActivate).toContain("artifact_list");
+        expect(result.toolsToActivate).toContain("artifact_read");
+        expect(registry.getActiveToolNames()).toContain("artifact_list");
+        expect(registry.getActiveToolNames()).toContain("artifact_read");
+        expect(result.systemGuidance).toContain("artifact_list");
+      }
+    });
   });
 });
