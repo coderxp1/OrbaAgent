@@ -102,15 +102,15 @@ export class MediaImageGenerateTool implements ITool {
       }).catch(() => null);
 
       if (!healthRes || !healthRes.ok) {
-        console.error(
-          `[MEDIA GENERATION DIAGNOSTIC] GPU media worker health check failed. Response: ${healthRes ? healthRes.status : "network error"}`,
-        );
+        const statusDetail = healthRes ? `HTTP ${healthRes.status}` : "network error / timeout";
+        const errorMsg = `Image generation failed: GPU worker health check failed (${statusDetail}).`;
+        console.error(`[MEDIA GENERATION DIAGNOSTIC] ${errorMsg}`);
         return {
           toolCallId,
           name: this.definition.name,
           success: false,
           output: "",
-          error: "Image generation is temporarily unavailable. Please try again later.",
+          error: errorMsg,
           metadata: {
             status: "UNAVAILABLE",
           },
@@ -132,15 +132,14 @@ export class MediaImageGenerateTool implements ITool {
       const lazyLoadPending = isLazyLoadAllowed(health);
 
       if (!capabilityReady && !lazyLoadPending) {
-        console.error(
-          `[MEDIA GENERATION DIAGNOSTIC] MEDIA_GENERATION_UNAVAILABLE: the GPU worker is reachable but reports no real image generation backend (generation_backend=${health?.generation_backend ?? "none"}).`,
-        );
+        const errorMsg = `Image generation unavailable: GPU worker reports no real image generation backend (generation_backend=${health?.generation_backend ?? "none"}, reason: ${health?.unavailable_reason ?? "model not loaded"}).`;
+        console.error(`[MEDIA GENERATION DIAGNOSTIC] ${errorMsg}`);
         return {
           toolCallId,
           name: this.definition.name,
           success: false,
           output: "",
-          error: "Image generation is temporarily unavailable. Please try again later.",
+          error: errorMsg,
           metadata: {
             status: "UNAVAILABLE",
           },
@@ -212,15 +211,15 @@ export class MediaImageGenerateTool implements ITool {
 
       if (!jobRes || !jobRes.ok) {
         const errorText = await jobRes?.text().catch(() => "Unknown error");
-        console.error(
-          `[MEDIA GENERATION DIAGNOSTIC] GPU image generation failed with status ${jobRes?.status}: ${errorText}`,
-        );
+        const errorMsg = `Image generation failed (temporarily unavailable): GPU worker returned HTTP ${jobRes?.status}: ${errorText}`;
+        console.error(`[MEDIA GENERATION DIAGNOSTIC] ${errorMsg}`);
         return {
           toolCallId,
           name: this.definition.name,
           success: false,
           output: "",
-          error: "Image generation is temporarily unavailable. Please try again later.",
+          error: errorMsg,
+          metadata: { status: "FAILED" },
           executionTimeMs: Date.now() - startTime,
         };
       }
@@ -301,6 +300,7 @@ export class MediaImageGenerateTool implements ITool {
         executionTimeMs: durationMs,
       };
     } catch (err: any) {
+      const errorMsg = `Image generation request failed: ${err.message || String(err)}`;
       console.error(
         `[MEDIA GENERATION DIAGNOSTIC] GPU generation request failed: ${err.message || String(err)}`,
       );
@@ -309,7 +309,10 @@ export class MediaImageGenerateTool implements ITool {
         name: this.definition.name,
         success: false,
         output: "",
-        error: "Image generation is temporarily unavailable. Please try again later.",
+        error: errorMsg,
+        metadata: {
+          errorDetail: err.message || String(err),
+        },
         executionTimeMs: Date.now() - startTime,
       };
     }

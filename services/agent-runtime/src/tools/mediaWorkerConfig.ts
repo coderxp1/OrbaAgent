@@ -88,7 +88,7 @@ export function getMediaWorkerConfig(): MediaWorkerConfigState {
       config: null,
       code: MEDIA_GENERATION_UNAVAILABLE,
       reason:
-        "The real GPU generation backend has not been deployed. Media generation is disabled; set MEDIA_WORKER_ENABLED=true only after a real diffusion/video backend is running.",
+        "The real GPU generation backend has not been deployed. Media generation is unavailable; set MEDIA_WORKER_ENABLED=true only after a real diffusion/video backend is running.",
     };
   }
 
@@ -124,28 +124,27 @@ export function unavailableMediaResult(
   toolCallId: string,
   toolName: string,
   startTime: number,
+  customReason?: string,
 ): ToolExecutionResult {
   const { reason, code } = getMediaWorkerConfig();
+  const isVideo = toolName.includes("video");
   const detail =
-    reason ??
-    "The real GPU generation backend has not been deployed. Media generation is unavailable.";
+    customReason ||
+    reason ||
+    `${isVideo ? "Video" : "Image"} generation is unavailable (GPU media worker is offline or unconfigured).`;
 
   // Log detailed diagnostics to server logs only, without secrets
   console.error(
     `[MEDIA GENERATION DIAGNOSTIC] ${toolName} failed: ${MEDIA_GENERATION_UNAVAILABLE} - ${detail} (Code: ${code})`,
   );
 
-  // Determine media type based on tool name for sanitized response
-  const isVideo = toolName.includes("video");
-  const sanitizedMessage = `${isVideo ? "Video" : "Image"} generation is temporarily unavailable. Please try again later.`;
-
   return {
     toolCallId,
     name: toolName,
     success: false,
     output: "",
-    error: sanitizedMessage,
-    metadata: { status: "UNAVAILABLE" }, // Mask internal status code
+    error: detail,
+    metadata: { status: "UNAVAILABLE", code },
     executionTimeMs: Date.now() - startTime,
   };
 }

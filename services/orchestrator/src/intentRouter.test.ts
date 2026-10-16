@@ -133,6 +133,32 @@ describe("Natural-Language Intent Routing", () => {
       }
     });
 
+    it("routes media capability questions ('Can you generate images?', 'Can you generate videos?') to conversation without triggering generation tools", () => {
+      const registry = new ToolRegistry();
+
+      const capabilityPrompts = [
+        "Can you generate images?",
+        "Can you generate videos?",
+        "Can you create images?",
+        "Can you make videos?",
+        "Are you able to generate images?",
+        "Are you able to create videos?",
+        "Do you support image generation?",
+        "Do you support video generation?",
+      ];
+
+      for (const prompt of capabilityPrompts) {
+        registry.resetActiveToolsToCore();
+        const result = routeUserIntent([{ role: "user", content: prompt }], registry);
+        expect(result.intent).toBe("conversation");
+        expect(result.confidence).toBeGreaterThanOrEqual(0.9);
+        expect(result.toolsToActivate).toHaveLength(0);
+        expect(result.systemGuidance).toContain("Media Capability Inquiry");
+        expect(registry.getActiveToolNames()).not.toContain("media_image_generate");
+        expect(registry.getActiveToolNames()).not.toContain("media_video_generate");
+      }
+    });
+
     it("routes explicit software engineering and project requests to 'software_engineering'", () => {
       const registry = new ToolRegistry();
 

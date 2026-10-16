@@ -148,9 +148,36 @@ Use 'artifact_list' to discover available workspace artifacts and display them w
       lower,
     );
 
+  // 2b. Media Capability Inquiry (e.g. "Can you generate images?", "Can you generate videos?", "Are you able to create videos?")
+  // Questions inquiring about capability must be answered conversationally with the live capability manifest
+  // and must NEVER automatically trigger a generation job or shell workflow.
+  const isMediaCapabilityQuery =
+    /\b(?:can\s+you|are\s+you\s+able\s+to|do\s+you\s+support|is\s+it\s+possible\s+to|how\s+do\s+you|what\s+kind\s+of)\s+(?:generate|create|make|produce|render|do)\s+(?:any\s+)?(?:images?|pictures?|photos?|videos?|animations?|media)\b/i.test(
+      lower,
+    ) ||
+    /\b(?:can\s+you|do\s+you)\s+(?:do|support)\s+(?:image|video|media)\s+generation\b/i.test(
+      lower,
+    ) ||
+    /^(?:can\s+you\s+(?:generate|create|make)\s+(?:images?|videos?|pictures?|media)\??)$/i.test(
+      lower.trim(),
+    );
+
+  if (isMediaCapabilityQuery) {
+    return {
+      intent: "conversation",
+      confidence: 0.95,
+      toolsToActivate: [],
+      systemGuidance: `[Intent Router: Detected Media Capability Inquiry]
+The user is asking about your image or video generation capabilities.
+Derive your response truthfully and conversationally from the LIVE RUNTIME CAPABILITY MANIFEST above.
+If the capability is AVAILABLE, explain clearly that you can generate high-quality AI images (via FLUX.1) and AI videos (via Wan2.1), and invite the user to describe what they would like you to generate (e.g., "Generate an image of a black obsidian sphere" or "Create a two-second video of an ocean wave").
+Do NOT execute any tools or task plans for this capability inquiry.`,
+    };
+  }
+
   // Video generation intent patterns
   const videoPatterns = [
-    /\b(?:create|generate|make|render|produce)\s+(?:an?\s+)?(?:[\w-]+\s+)?video\b/,
+    /\b(?:create|generate|make|render|produce)\s+(?:an?\s+)?(?:[\w-]+\s+)?videos?\b/,
     /\bvideo\s+of\b/,
     /\banimate\b/,
     /\banimation\s+of\b/,
@@ -162,6 +189,7 @@ Use 'artifact_list' to discover available workspace artifacts and display them w
   ];
 
   const isVideoIntent =
+    !isMediaCapabilityQuery &&
     !isSoftwareVideoTask &&
     !isPlanningOrDiagramTask &&
     videoPatterns.some((pattern) => pattern.test(lower));
@@ -200,8 +228,8 @@ Execute 'media_video_generate' with:
 
   // Image generation intent patterns
   const imagePatterns = [
-    /\b(?:create|generate|make|render|produce)\s+(?:an?\s+)?(?:[\w-]+\s+)?(?:image|picture|photo|illustration|artwork|painting|graphic)\b/,
-    /\b(?:draw|paint|sketch|illustrate)\s+(?:me\s+)?(?:an?\s+)?(?:[\w-]+\s+)?(?:image|picture|photo|illustration|artwork|painting|portrait|scene|landscape|character|creature|animal|cat|dog|sphere|avatar|object|background|wallpaper)\b/,
+    /\b(?:create|generate|make|render|produce)\s+(?:an?\s+)?(?:[\w-]+\s+)?(?:images?|pictures?|photos?|illustrations?|artworks?|paintings?|graphics?)\b/,
+    /\b(?:draw|paint|sketch|illustrate)\s+(?:me\s+)?(?:an?\s+)?(?:[\w-]+\s+)?(?:images?|pictures?|photos?|illustrations?|artworks?|paintings?|portraits?|scenes?|landscapes?|characters?|creatures?|animals?|cats?|dogs?|spheres?|avatars?|objects?|backgrounds?|wallpapers?)\b/,
     /\b(?:draw|paint|sketch|illustrate)\s+(?:me\s+)?(?:an?\s+)?(?:a|an|the)\s+(?!(?:out|up|plan|diagram|architecture|flowchart|schema|class|interface|function|code|test|table|api|migration|solution|system)\b)[\w\s]{2,40}\b/,
     /\b(?:image|picture|photo|illustration|artwork|drawing|painting)\s+of\b/,
     /\btext[- ]to[- ]image\b/,
@@ -211,6 +239,7 @@ Execute 'media_video_generate' with:
   ];
 
   const isImageIntent =
+    !isMediaCapabilityQuery &&
     !isSoftwareImageTask &&
     !isPlanningOrDiagramTask &&
     imagePatterns.some((pattern) => pattern.test(lower));
