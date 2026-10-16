@@ -93,87 +93,133 @@ export function findPendingMediaProposal(messages: ChatMessage[]): {
 } | null {
   if (!messages || messages.length < 2) return null;
 
-  // Find the most recent assistant message prior to the latest user message
-  let lastAssistantIndex = -1;
-  for (let i = messages.length - 2; i >= 0; i--) {
-    if (messages[i].role === "assistant") {
-      lastAssistantIndex = i;
-      break;
+  let candidatePrompt = "";
+  let isVideo = false;
+  let duration: number | undefined;
+  let width = 480;
+  let height = 480;
+  let foundAnyMediaContext = false;
+
+  const maxLookback = Math.max(0, messages.length - 8);
+
+  for (let i = messages.length - 2; i >= maxLookback; i--) {
+    const msg = messages[i];
+    const text =
+      typeof msg.content === "string"
+        ? msg.content
+        : Array.isArray(msg.content)
+          ? msg.content.map((c) => (c.type === "text" ? c.text : "")).join(" ")
+          : "";
+
+    if (!text.trim()) continue;
+
+    if (
+      /\b(?:video|wan2\.1|t2v|fps|seconds?|animation|clip|motion|tracking shot|camera movement|cinematic scene|cinematic prompt|soaring|flying car|hovercar|chase)\b/i.test(
+        text,
+      )
+    ) {
+      isVideo = true;
+      foundAnyMediaContext = true;
+    } else if (
+      /\b(?:image|photo|flux|t2i|picture|artwork|portrait|obsidian sphere)\b/i.test(text)
+    ) {
+      foundAnyMediaContext = true;
     }
-  }
-  if (lastAssistantIndex === -1) return null;
 
-  const assistantMsg = messages[lastAssistantIndex];
-  const asstText =
-    typeof assistantMsg.content === "string"
-      ? assistantMsg.content
-      : Array.isArray(assistantMsg.content)
-        ? assistantMsg.content.map((c) => (c.type === "text" ? c.text : "")).join(" ")
-        : "";
-
-  if (!asstText) return null;
-
-  // Check if the assistant message proposed a prompt or generation task
-  const hasProposalCue =
-    /generation-ready prompt|suggested prompt|ready prompt|prompt is ready|can generate (?:ai )?(?:video|image)|prompt:|template:|use a template/i.test(
-      asstText,
-    ) ||
-    /(?:^|\n)>\s*\*\*/.test(asstText) ||
-    /(?:^|\n)>\s*[A-Z]/.test(asstText) ||
-    /\b(?:wan2\.1|flux(?:\.1)?)\b/i.test(asstText);
-
-  if (!hasProposalCue) return null;
-
-  // Check if it's video or image
-  const isVideo =
-    /\b(?:wan2\.1|video|t2v|fps|seconds?|motion|tracking|camera|cinematic scene)\b/i.test(asstText);
-
-  // 1. Try to extract from a blockquote: > ...
-  let extractedPrompt = "";
-  const blockquoteMatches = asstText.match(/(?:^|\n)>\s*(.*?)(?=\n\n|\n(?=[^>])|$)/gs);
-  if (blockquoteMatches && blockquoteMatches.length > 0) {
-    extractedPrompt = blockquoteMatches
-      .map((b) => b.replace(/(?:^|\n)>\s*/g, " ").trim())
-      .join(" ")
-      .replace(/^\*\*[^*]+\*\*\s*/, "") // Remove bold header like **Cinematic thriller scene, nighttime.**
-      .trim();
-  }
-
-  // 2. If blockquote wasn't found or was too short, check for quoted prompt: "..." or “...”
-  if (!extractedPrompt || extractedPrompt.length < 15) {
-    const quotedMatches = asstText.match(/["“]([^"”]{20,})["”]/);
-    if (quotedMatches?.[1]) {
-      extractedPrompt = quotedMatches[1].trim();
+    if (!duration) {
+      duration = extractVideoDurationSeconds(text);
     }
-  }
 
-  // 3. Fallback: look at the user request immediately prior to that assistant turn
-  if (!extractedPrompt || extractedPrompt.length < 15) {
-    for (let i = lastAssistantIndex - 1; i >= 0; i--) {
-      if (messages[i].role === "user") {
-        const prevUserText =
-          typeof messages[i].content === "string" ? (messages[i].content as string) : "";
-        if (prevUserText.trim().length > 10) {
-          extractedPrompt = prevUserText.trim();
-          break;
+    const dims = extractDimensions(text);
+    if (dims) {
+      width = dims.width;
+      height = dims.height;
+    } else if (/\b16:9\b/i.test(text)) {
+      width = 832;
+      height = 480;
+    } else if (/\b9:16\b/i.test(text)) {
+      width = 480;
+      height = 832;
+    }
+
+    if (msg.role === "assistant" && !candidatePrompt) {
+      // 1. Blockquote
+      const blockquoteMatches = text.match(/(?:^|\n)>\s*(.*?)(?=\n\n|\n(?=[^>])|$)/gs);
+      if (blockquoteMatches && blockquoteMatches.length > 0) {
+        candidatePrompt = blockquoteMatches
+          .map((b) => b.replace(/(?:^|\n)>\s*/g, " ").trim())
+          .join(" ")
+          .replace(/^\*\*[^*]+\*\*\s*/, "")
+          .trim();
+      }
+
+      // 2. Quoted text
+      if (!candidatePrompt || candidatePrompt.length < 15) {
+        const quotedMatches = text.match(/["“]([^"”]{20,})["”]/);
+        if (quotedMatches?.[1]) {
+          candidatePrompt = quotedMatches[1].trim();
         }
+      }
+
+      // 3. Direct prompt in assistant response (length > 30, visual descriptors, not pure menu)
+      if (
+        (!candidatePrompt || candidatePrompt.length < 15) &&
+        text.length > 30 &&
+        /\b(?:soaring|running|chase|skyscrapers|lighting|cinematic|anamorphic|photoreal|reflective|volumetric|camera|shot|hyperrealistic|obsidian|cyberpunk)\b/i.test(
+          text,
+        ) &&
+        !/^(?:how can i help|what do you want me to do next|how long should)/i.test(text.trim())
+      ) {
+        candidatePrompt = text
+          .replace(/^(?:here(?:'s| is) (?:a |the )?(?:suggested |cinematic )?prompt:?\s*)/i, "")
+          .trim();
+      }
+    }
+
+    if (msg.role === "user" && !candidatePrompt && text.trim().length > 25) {
+      if (
+        /\b(?:prompt for|generate|scene of|image of|video of)\s+(.+)/i.test(text) ||
+        /\b(?:soaring|running|chase|skyscrapers|neon|reflective|obsidian|cyberpunk)\b/i.test(text)
+      ) {
+        candidatePrompt = text
+          .replace(
+            /^can you (?:please )?(?:suggest|give me|write) (?:a |an )?(?:cinematic )?(?:video |image )?prompt for\s+/i,
+            "",
+          )
+          .trim();
       }
     }
   }
 
-  if (!extractedPrompt) return null;
+  // Also check the latest user message for duration or dimensions
+  const latestUser = messages[messages.length - 1];
+  if (latestUser && latestUser.role === "user") {
+    const latestText = typeof latestUser.content === "string" ? latestUser.content : "";
+    const userDur = extractVideoDurationSeconds(latestText);
+    if (userDur) duration = userDur;
+    const userDims = extractDimensions(latestText);
+    if (userDims) {
+      width = userDims.width;
+      height = userDims.height;
+    } else if (/\b16:9\b/i.test(latestText)) {
+      width = 832;
+      height = 480;
+    } else if (/\b9:16\b/i.test(latestText)) {
+      width = 480;
+      height = 832;
+    }
+    if (/\bvideo\b/i.test(latestText)) isVideo = true;
+    if (/\bimage\b/i.test(latestText)) isVideo = false;
+  }
 
-  const duration = extractVideoDurationSeconds(extractedPrompt) || (isVideo ? 2 : undefined);
-  const dims =
-    extractDimensions(extractedPrompt) ||
-    (isVideo ? { width: 480, height: 480 } : { width: 512, height: 512 });
+  if (!candidatePrompt || !foundAnyMediaContext) return null;
 
   return {
     type: isVideo ? "video" : "image",
-    prompt: extractedPrompt,
-    duration,
-    width: dims.width,
-    height: dims.height,
+    prompt: candidatePrompt,
+    duration: isVideo ? duration || 2 : undefined,
+    width,
+    height,
   };
 }
 
@@ -208,10 +254,10 @@ export function routeUserIntent(
   // 0. Multi-Turn Follow-Up / Task Confirmation Check (e.g. "go", "yes", "use that prompt", "ok, use that suggested promtp")
   // If the user confirms a pending media generation task, resume and execute with the proposed prompt
   const isConfirmation =
-    /^(?:ok|okay|yes|sure|go|proceed|do it|generate it|make it|render it|create it|start it|run it|use that(?:\s+suggested)?\s+prom?p?t?|use this(?:\s+suggested)?\s+prom?p?t?|sounds good|looks good)(?:[,\s.!?-]+(?:go|proceed|generate(?:\s+it)?|do\s+it|use\s+that(?:\s+suggested)?\s+prom?p?t?|please|ahead))*$/i.test(
+    /^(?:ok|okay|yes|sure|go|proceed|do it|generate it|make it|render it|create it|start it|run it|use that(?:\s+suggested)?\s+prom?p?t?|use this(?:\s+suggested)?\s+prom?p?t?|sounds good|looks good|option\s+\d+|use\s+option\s+\d+)(?:[,\s.!?-]+(?:go|proceed|generate(?:\s+it)?|do\s+it|use\s+that(?:\s+suggested)?\s+prom?p?t?|please|ahead|\d+s|16:9|9:16|1:1))*$/i.test(
       lower,
     ) ||
-    /\b(?:use\s+that(?:\s+suggested)?\s+prom?p?t?|use\s+this(?:\s+suggested)?\s+prom?p?t?|yes\s*,?\s*(?:please\s*,?\s*)?(?:generate|create|make|do\s+it|go)|ok\s*,?\s*(?:go|generate|create|make\s+it|use\s+that)|go\s+ahead(?:\s+and\s+generate)?)\b/i.test(
+    /\b(?:use\s+that(?:\s+suggested)?\s+prom?p?t?|use\s+this(?:\s+suggested)?\s+prom?p?t?|yes\s*,?\s*(?:please\s*,?\s*)?(?:generate|create|make|do\s+it|go)|ok\s*,?\s*(?:go|generate|create|make\s+it|use\s+that)|go\s+ahead(?:\s+and\s+generate)?|option\s+\d+.*go|go.*option\s+\d+)\b/i.test(
       lower,
     );
 

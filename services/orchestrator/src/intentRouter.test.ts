@@ -320,6 +320,50 @@ describe("Natural-Language Intent Routing", () => {
       expect(result.systemGuidance).toContain("media_image_generate");
     });
 
+    it("resumes pending media generation across a multi-turn clarification sequence when user says 'yes, go'", () => {
+      const registry = new ToolRegistry();
+      registry.resetActiveToolsToCore();
+
+      const conversation: ChatMessage[] = [
+        {
+          role: "user",
+          content:
+            "Can you suggest a cinematic prompt for a cyberpunk hovercar soaring between glowing neon skyscrapers in the rain?",
+        },
+        {
+          role: "assistant",
+          content:
+            "Cyberpunk hovercar chase, soaring between towering neon-lit skyscrapers at night in heavy rain — low-angle tracking shot that tilts up as the car rockets past, blue/magenta holographic billboards reflecting on wet chrome, volumetric fog and god rays cutting through steam vents, raindrops streaking across the lens, bright rim light outlining the vehicle, animated city traffic far below, sense of speed with motion blur and parallax, cinematic high-contrast lighting, ultra-detailed, photoreal, 35mm anamorphic, shallow depth of field, film grain, 4K.",
+        },
+        {
+          role: "user",
+          content: "Option 2, go",
+        },
+        {
+          role: "assistant",
+          content:
+            "How long should the video be (4s, 6s, or 8s), and what aspect ratio do you want (16:9, 9:16, or 1:1)?\n\nIf you don’t care, I’ll do **6s, 16:9**.",
+        },
+        {
+          role: "user",
+          content: "yes, go",
+        },
+      ];
+
+      const result = routeUserIntent(conversation, registry);
+
+      expect(result.intent).toBe("media_video");
+      expect(result.toolsToActivate).toContain("media_video_generate");
+      expect(registry.getActiveToolNames()).toContain("media_video_generate");
+      expect(result.extractedParameters?.prompt).toContain(
+        "Cyberpunk hovercar chase, soaring between towering neon-lit skyscrapers",
+      );
+      expect(result.extractedParameters?.duration_seconds).toBeGreaterThanOrEqual(2);
+      expect(result.extractedParameters?.width).toBe(832);
+      expect(result.extractedParameters?.height).toBe(480);
+      expect(result.systemGuidance).toContain("media_video_generate");
+    });
+
     it("does NOT launch media generation on an unrelated 'ok' or 'yes' when no pending proposal exists", () => {
       const registry = new ToolRegistry();
       registry.resetActiveToolsToCore();
