@@ -23,6 +23,7 @@ import {
   RotateCcw,
   Search,
   Sparkles,
+  Square,
   Table,
   Trash2,
   Wand2,
@@ -762,9 +763,10 @@ export default function WorkspacePage() {
                         <button
                           onClick={cancelGeneration}
                           type="button"
-                          className="px-3 py-1 rounded-full bg-red-950/60 border border-red-800/40 text-red-300 text-xs font-medium hover:bg-red-900/60 transition-colors"
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-zinc-800 hover:bg-zinc-750 border border-zinc-700 text-xs font-medium text-white transition-all shadow-sm"
                         >
-                          Stop
+                          <Square className="w-2.5 h-2.5 fill-white" />
+                          <span>Stop</span>
                         </button>
                       ) : (
                         <button
@@ -773,10 +775,10 @@ export default function WorkspacePage() {
                             (!inputPrompt.trim() && attachedFiles.length === 0) || isGenerating
                           }
                           type="button"
-                          className={`w-7 h-7 rounded-full flex items-center justify-center transition-all ${
+                          className={`w-8 h-8 rounded-full flex items-center justify-center transition-all shadow-sm ${
                             (inputPrompt.trim() || attachedFiles.length > 0) && !isGenerating
                               ? "bg-white text-black hover:bg-zinc-200"
-                              : "bg-[#2a2a2a] text-zinc-600 cursor-not-allowed"
+                              : "bg-[#27272a] text-zinc-600 cursor-not-allowed"
                           }`}
                         >
                           <ArrowUp className="w-4 h-4 stroke-[2.5]" />
@@ -981,7 +983,7 @@ export default function WorkspacePage() {
               </div>
             </div>
           ) : (
-            <div className="max-w-3xl mx-auto flex flex-col gap-4 pb-28">
+            <div className="max-w-3xl mx-auto flex flex-col gap-6 pb-32 w-full">
               {messages.map((msg: ChatMessage) => (
                 <MessageItem
                   key={msg.id || Math.random().toString()}
@@ -1057,7 +1059,7 @@ export default function WorkspacePage() {
         {messages.length > 0 && (
           <div className="p-4 bg-gradient-to-t from-[#131313] via-[#131313] to-transparent">
             <div className="max-w-3xl mx-auto">
-              <div className="w-full rounded-2xl bg-[#1e1e1e] border border-[#2e2e2e] shadow-xl overflow-hidden">
+              <div className="w-full rounded-3xl bg-[#18181b]/95 border border-zinc-800/80 shadow-2xl backdrop-blur-xl overflow-hidden focus-within:border-zinc-700 focus-within:ring-1 focus-within:ring-zinc-700/50 transition-all">
                 <div className="p-3.5 flex flex-col gap-2">
                   {/* Attached Files Badges */}
                   {attachedFiles.length > 0 && (
@@ -1141,9 +1143,10 @@ export default function WorkspacePage() {
                         <button
                           onClick={cancelGeneration}
                           type="button"
-                          className="px-3 py-1 rounded-full bg-red-950/60 border border-red-800/40 text-red-300 text-xs font-medium hover:bg-red-900/60 transition-colors"
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-zinc-800 hover:bg-zinc-750 border border-zinc-700 text-xs font-medium text-white transition-all shadow-sm"
                         >
-                          Stop
+                          <Square className="w-2.5 h-2.5 fill-white" />
+                          <span>Stop</span>
                         </button>
                       ) : (
                         <button
@@ -1152,10 +1155,10 @@ export default function WorkspacePage() {
                             (!inputPrompt.trim() && attachedFiles.length === 0) || isGenerating
                           }
                           type="button"
-                          className={`w-7 h-7 rounded-full flex items-center justify-center transition-all ${
+                          className={`w-8 h-8 rounded-full flex items-center justify-center transition-all shadow-sm ${
                             (inputPrompt.trim() || attachedFiles.length > 0) && !isGenerating
                               ? "bg-white text-black hover:bg-zinc-200"
-                              : "bg-[#2a2a2a] text-zinc-600 cursor-not-allowed"
+                              : "bg-[#27272a] text-zinc-600 cursor-not-allowed"
                           }`}
                         >
                           <ArrowUp className="w-4 h-4 stroke-[2.5]" />
