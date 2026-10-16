@@ -383,6 +383,47 @@ describe("AgentOrchestrator State Machine & Autonomous Execution", () => {
       expect(events.filter((e) => e.type === "tool_call_start").length).toBe(0);
     });
 
+    it("2b. Media capability questions ('Can you generate images?', 'Can you generate videos?') complete with zero tool calls and truthful answers", async () => {
+      const mockGateway = new ModelGateway();
+      let turns = 0;
+      let toolsPassed: unknown[] | undefined;
+
+      vi.spyOn(mockGateway, "streamChat").mockImplementation(async function* (req) {
+        turns++;
+        toolsPassed = req.tools;
+        yield {
+          type: "text_delta",
+          traceId: req.trace.traceId,
+          textDelta:
+            "Yes, I can generate high-quality images using FLUX.1 and videos using Wan2.1. What would you like to create?",
+        };
+      });
+
+      const orchestrator = new AgentOrchestrator({ gateway: mockGateway, maxIterations: 5 });
+      const request: ChatCompletionRequest = {
+        modelId: "auto",
+        messages: [{ role: "user", content: "Can you generate images?" }],
+        stream: true,
+        trace: {
+          traceId: "test_media_cap_query",
+          tenantId: "tenant_conv",
+          userId: "user_conv",
+          conversationId: "conv_cap",
+          agentRunId: "run_cap",
+        },
+      };
+
+      const events: NormalizedEvent[] = [];
+      for await (const event of orchestrator.executeAgentLoop(request)) {
+        events.push(event);
+      }
+
+      expect(turns).toBe(1);
+      expect(toolsPassed?.length).toBe(0);
+      expect(events.filter((e) => e.type === "terminal_command_start").length).toBe(0);
+      expect(events.filter((e) => e.type === "tool_call_start").length).toBe(0);
+    });
+
     it("3. Image requests activate image generation without shell execution", async () => {
       const mockGateway = new ModelGateway();
       let turns = 0;

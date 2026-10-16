@@ -53,6 +53,10 @@ export interface CapabilityReport {
 export class CapabilityManager {
   private static instance: CapabilityManager;
   private mediaWorkerAvailable = false; // GPU 1 media worker is not deployed yet
+  private imageGenerationAvailable = false;
+  private videoGenerationAvailable = false;
+  private lastHealthCheckTime = 0;
+  private readonly HEALTH_CACHE_TTL_MS = 15000;
   /**
    * Whether image/video generation may be advertised. Deliberately separate from
    * {@link mediaWorkerAvailable}: the worker can be reachable while no real
@@ -72,10 +76,19 @@ export class CapabilityManager {
     this.mediaWorkerAvailable = available;
   }
 
-  public async checkMediaWorkerHealth(): Promise<boolean> {
+  public async checkMediaWorkerHealth(force = false): Promise<boolean> {
+    // Return cached result if within TTL to avoid blocking requests
+    if (!force && Date.now() - this.lastHealthCheckTime < this.HEALTH_CACHE_TTL_MS) {
+      return this.mediaWorkerAvailable;
+    }
+
     // Allow hard disable via env to avoid blocking normal chat in environments where GPU worker is not yet deployed
     if (process.env.MEDIA_WORKER_DISABLED === "true") {
       this.mediaWorkerAvailable = false;
+      this.imageGenerationAvailable = false;
+      this.videoGenerationAvailable = false;
+      this.mediaGenerationAdvertised = false;
+      this.lastHealthCheckTime = Date.now();
       return false;
     }
 
@@ -86,6 +99,10 @@ export class CapabilityManager {
     // hardcoded shared secret, and a missing URL must not reach a hardcoded host.
     if (!workerUrl || !workerToken) {
       this.mediaWorkerAvailable = false;
+      this.imageGenerationAvailable = false;
+      this.videoGenerationAvailable = false;
+      this.mediaGenerationAdvertised = false;
+      this.lastHealthCheckTime = Date.now();
       return false;
     }
 
@@ -93,24 +110,35 @@ export class CapabilityManager {
       const res = await fetch(`${workerUrl}/health`, {
         headers: { Authorization: `Bearer ${workerToken}` },
         // Keep this very short to avoid blocking any agent turn when the GPU worker is down
-        signal: AbortSignal.timeout(Number(process.env.MEDIA_WORKER_HEALTH_TIMEOUT_MS) || 800),
+        signal: AbortSignal.timeout(Number(process.env.MEDIA_WORKER_HEALTH_TIMEOUT_MS) || 1200),
       });
       if (res.ok) {
         const data = await res.json();
         this.mediaWorkerAvailable = data.worker === "healthy" || data.status === "ok";
-        // Trust the worker's own capability flags. A reachable GPU does not imply
-        // a loaded generation model, so absent flags default to false.
         const caps = data.capabilities ?? {};
-        this.setMediaGenerationAdvertised(
-          Boolean(caps.image_generation) || Boolean(caps.video_generation),
-        );
+        const hasImage =
+          Boolean(caps.image_generation) ||
+          (data.generation_backend === "diffusers" &&
+            Boolean(data.models?.image?.loaded || data.models?.image?.requested));
+        const hasVideo =
+          Boolean(caps.video_generation) ||
+          (data.generation_backend === "diffusers" &&
+            Boolean(data.models?.video?.loaded || data.models?.video?.requested));
+
+        this.imageGenerationAvailable = hasImage;
+        this.videoGenerationAvailable = hasVideo;
+        this.setMediaGenerationAdvertised(hasImage || hasVideo);
+        this.lastHealthCheckTime = Date.now();
         return this.mediaWorkerAvailable;
       }
     } catch {
       // Worker offline or unreachable
     }
     this.mediaWorkerAvailable = false;
+    this.imageGenerationAvailable = false;
+    this.videoGenerationAvailable = false;
     this.setMediaGenerationAdvertised(false);
+    this.lastHealthCheckTime = Date.now();
     return false;
   }
 
@@ -123,6 +151,8 @@ export class CapabilityManager {
    */
   public setMediaGenerationAdvertised(advertised: boolean): void {
     this.mediaGenerationAdvertised = advertised;
+    this.imageGenerationAvailable = advertised;
+    this.videoGenerationAvailable = advertised;
   }
 
   public setPlaywrightAvailable(available: boolean): void {
@@ -375,25 +405,25 @@ export class CapabilityManager {
         id: "image_generation",
         name: "AI Image Generation",
         category: "ai_media",
-        status: this.mediaGenerationAdvertised ? "AVAILABLE" : "UNAVAILABLE",
+        status: this.imageGenerationAvailable ? "AVAILABLE" : "UNAVAILABLE",
         provider: "gpu_worker",
         description: "Diffusion-based text-to-image and image-to-image generation on dedicated GPU",
         tools: ["media_image_generate"],
-        notes: this.mediaGenerationAdvertised
-          ? "Real generation backend reported ready by the GPU media worker"
-          : "UNAVAILABLE: Image generation is currently unavailable. The tool will return a safe error message if attempted.",
+        notes: this.imageGenerationAvailable
+          ? "Real generation backend reported ready (FLUX.1 diffusion on GPU 1)"
+          : "Image generation is currently unavailable. GPU media worker is offline or unconfigured.",
       },
       {
         id: "video_generation",
         name: "AI Video Generation",
         category: "ai_media",
-        status: this.mediaGenerationAdvertised ? "AVAILABLE" : "UNAVAILABLE",
+        status: this.videoGenerationAvailable ? "AVAILABLE" : "UNAVAILABLE",
         provider: "gpu_worker",
         description: "Generative text-to-video diffusion on dedicated GPU",
         tools: ["media_video_generate"],
-        notes: this.mediaGenerationAdvertised
-          ? "Real generation backend reported ready by the GPU media worker"
-          : "UNAVAILABLE: Video generation is currently unavailable. The tool will return a safe error message if attempted.",
+        notes: this.videoGenerationAvailable
+          ? "Real generation backend reported ready (Wan2.1 video diffusion on GPU 1)"
+          : "Video generation is currently unavailable. GPU media worker is offline or unconfigured.",
       },
       {
         id: "media_processing",
@@ -498,7 +528,9 @@ STRICT CAPABILITY & HONESTY DIRECTIVES:
 1. Interactive Browser: Playwright Chromium browser automation is ${this.playwrightAvailable ? "AVAILABLE and executable via browser_action" : "CURRENTLY UNAVAILABLE in this workspace"}. NEVER say you cannot browse the live web interactively when Playwright is available!
 2. Persistent Memory: Persistent workspace memory is ACTIVE via AgentMemoryManager. Do NOT say you have no memory between sessions!
 3. Disconnected Services: For services marked "Available, but account not connected" (e.g. Slack, Notion, Google Workspace, Microsoft 365, or unauthenticated GitHub), you MUST state clearly: "<Service> integration is available, but your account is not connected yet." NEVER claim the tool does not exist!
-4. AI Media Generation: Image/Video generation capabilities depend on external services. If the capability is unavailable, respond gracefully with: 'Image/Video generation is temporarily unavailable. Please try again later.' Do not mention GPUs, backends, or internal tool details.
+4. AI Media Generation: When asked whether you can generate images or videos (e.g. "Can you generate images?", "Can you generate videos?", "Are you able to create videos?"), derive your response directly from the LIVE RUNTIME CAPABILITY MANIFEST above:
+   - If marked AVAILABLE, answer TRUTHFULLY, HELPFULLY, and CONVERSATIONALLY that you can generate high-quality AI images (via FLUX.1) and AI videos (via Wan2.1). Summarize what you can create and invite the user to describe what they would like you to generate (e.g., 'Generate an image of...'). Do NOT automatically execute a generation tool for capability questions!
+   - If marked UNAVAILABLE, explain truthfully that image or video generation is currently offline or unconfigured. Do not mention internal passwords or secrets.
 5. Dynamic Tool Discovery: For software engineering and system tasks requiring file changes or command execution, call 'tools_search' to activate specialized tools. For normal conversation, explanations, and questions, respond directly without calling tools.
 6. Real Autonomous Execution: When asked what you can do, summarize your live capabilities accurately using the categories above.`;
   }

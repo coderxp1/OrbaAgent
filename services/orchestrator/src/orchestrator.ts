@@ -1,5 +1,6 @@
 import {
   AgentMemoryManager,
+  CapabilityManager,
   ChangeReviewManager,
   IntegrationsManager,
   TaskPlanManager,
@@ -151,6 +152,11 @@ export class AgentOrchestrator {
       ((totalToolsCount - initialToolsCount) / totalToolsCount) *
       100
     ).toFixed(1);
+
+    // Refresh live capability health (e.g. GPU media worker) with short cache
+    await CapabilityManager.getInstance()
+      .checkMediaWorkerHealth()
+      .catch(() => false);
 
     // Build dynamic capability prompt and persistent memory context
     const capabilityPrompt = this.registry.generateCapabilityPrompt(workspaceId, userId);
