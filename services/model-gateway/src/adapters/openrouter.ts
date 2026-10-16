@@ -124,7 +124,7 @@ export class OpenRouterAdapter implements IModelProviderAdapter {
                 : undefined,
             stream: true,
             temperature: request.temperature ?? 0.7,
-            max_tokens: request.maxTokens,
+            max_tokens: request.maxTokens ?? 4096,
           }),
         });
 

@@ -322,7 +322,7 @@ export const MODEL_CATALOG: Record<string, ModelDefinition> = {
     id: "gpt-5.2-pro",
     displayName: "Langdock Pro Reasoning Engine (GPT-5.2 Pro)",
     provider: "langdock",
-    enabled: true,
+    enabled: false, // Not supported on /v1/chat/completions endpoint (completions only)
     priority: { general: 6, coding: 5, reasoning: 2, fast: 6 },
     capabilities: {
       text: true,
@@ -406,7 +406,7 @@ export const MODEL_CATALOG: Record<string, ModelDefinition> = {
     id: "o3",
     displayName: "Langdock Reasoning Engine (o3)",
     provider: "langdock",
-    enabled: true,
+    enabled: false, // Not available in current Langdock chat pool
     priority: { general: 7, coding: 8, reasoning: 1, fast: 7 },
     capabilities: {
       text: true,
@@ -427,7 +427,7 @@ export const MODEL_CATALOG: Record<string, ModelDefinition> = {
     id: "o4-mini",
     displayName: "Langdock Fast Reasoning Engine (o4-mini)",
     provider: "langdock",
-    enabled: true,
+    enabled: false, // Not available in current Langdock chat pool
     priority: { general: 8, coding: 7, reasoning: 8, fast: 8 },
     capabilities: {
       text: true,

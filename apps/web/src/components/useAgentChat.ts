@@ -126,6 +126,21 @@ export function useAgentChat() {
               }
 
               if (dataUrl) {
+                if (
+                  dataUrl.startsWith("data:application/octet-stream") ||
+                  !dataUrl.startsWith("data:image/")
+                ) {
+                  const ext = (att.name || "").split(".").pop()?.toLowerCase();
+                  const cleanMime =
+                    ext === "png"
+                      ? "image/png"
+                      : ext === "webp"
+                        ? "image/webp"
+                        : ext === "gif"
+                          ? "image/gif"
+                          : "image/jpeg";
+                  dataUrl = dataUrl.replace(/^data:[^;]*/, `data:${cleanMime}`);
+                }
                 parts.push({ type: "image_url", image_url: { url: dataUrl } });
               }
             }

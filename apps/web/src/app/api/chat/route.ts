@@ -86,18 +86,18 @@ export async function POST(request: Request) {
               const filePath = path.join(baseDir, decoded.w, decoded.b, decoded.p);
               const fileBuf = await fs.readFile(filePath);
               const lowerP = decoded.p.toLowerCase();
-              const mime =
-                att.type ||
-                (lowerP.endsWith(".png")
+              const cleanMime = att.type?.startsWith("image/")
+                ? att.type
+                : lowerP.endsWith(".png")
                   ? "image/png"
                   : lowerP.endsWith(".webp")
                     ? "image/webp"
                     : lowerP.endsWith(".gif")
                       ? "image/gif"
-                      : "image/jpeg");
+                      : "image/jpeg";
               imageParts.push({
                 type: "image_url",
-                image_url: { url: `data:${mime};base64,${fileBuf.toString("base64")}` },
+                image_url: { url: `data:${cleanMime};base64,${fileBuf.toString("base64")}` },
               });
             } catch (err) {
               console.warn("[CHAT API] Failed to hydrate server image attachment:", err);
