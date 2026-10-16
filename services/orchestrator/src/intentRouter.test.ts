@@ -283,7 +283,9 @@ describe("Natural-Language Intent Routing", () => {
       expect(result.confidence).toBeGreaterThanOrEqual(0.95);
       expect(result.toolsToActivate).toContain("media_video_generate");
       expect(registry.getActiveToolNames()).toContain("media_video_generate");
-      expect(result.extractedParameters?.prompt).toContain("A terrified adult woman runs through a narrow, dark city alley");
+      expect(result.extractedParameters?.prompt).toContain(
+        "A terrified adult woman runs through a narrow, dark city alley",
+      );
       expect(result.systemGuidance).toContain("Resumed Pending Media Generation");
       expect(result.systemGuidance).toContain("media_video_generate");
     });

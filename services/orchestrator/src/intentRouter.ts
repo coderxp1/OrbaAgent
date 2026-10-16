@@ -142,7 +142,7 @@ export function findPendingMediaProposal(messages: ChatMessage[]): {
   // 2. If blockquote wasn't found or was too short, check for quoted prompt: "..." or “...”
   if (!extractedPrompt || extractedPrompt.length < 15) {
     const quotedMatches = asstText.match(/["“]([^"”]{20,})["”]/);
-    if (quotedMatches && quotedMatches[1]) {
+    if (quotedMatches?.[1]) {
       extractedPrompt = quotedMatches[1].trim();
     }
   }
@@ -152,9 +152,7 @@ export function findPendingMediaProposal(messages: ChatMessage[]): {
     for (let i = lastAssistantIndex - 1; i >= 0; i--) {
       if (messages[i].role === "user") {
         const prevUserText =
-          typeof messages[i].content === "string"
-            ? (messages[i].content as string)
-            : "";
+          typeof messages[i].content === "string" ? (messages[i].content as string) : "";
         if (prevUserText.trim().length > 10) {
           extractedPrompt = prevUserText.trim();
           break;
@@ -166,7 +164,9 @@ export function findPendingMediaProposal(messages: ChatMessage[]): {
   if (!extractedPrompt) return null;
 
   const duration = extractVideoDurationSeconds(extractedPrompt) || (isVideo ? 2 : undefined);
-  const dims = extractDimensions(extractedPrompt) || (isVideo ? { width: 480, height: 480 } : { width: 512, height: 512 });
+  const dims =
+    extractDimensions(extractedPrompt) ||
+    (isVideo ? { width: 480, height: 480 } : { width: 512, height: 512 });
 
   return {
     type: isVideo ? "video" : "image",
