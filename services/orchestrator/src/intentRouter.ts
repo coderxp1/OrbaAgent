@@ -436,9 +436,9 @@ Do NOT execute any tools or task plans for this capability inquiry.`,
       },
       systemGuidance: `[Intent Router: Detected ${isCommercial ? "Commercial Video" : "Video"} Generation Request]
 The user wants to generate ${isCommercial ? "a commercial video" : "an AI video"}. Tool 'media_video_generate' has been activated.
-${isCommercial ? 'Respond naturally with: "I will transfer this request to the video generation agent to create your commercial video using the uploaded logo."' : ""}
 ${explicitDuration ? `The user explicitly requested a duration of ${explicitDuration} seconds.` : `The user did NOT specify a duration; use the standard default of ${duration} seconds. Do NOT claim the user requested this duration.`}
-${isCommercial ? "If a company logo or image is attached, inspect it and compose a high-end commercial tailored to the brand with sleek product staging, vibrant brand color accents, and dynamic motion." : ""}
+${isCommercial ? "Compose a high-end commercial tailored to the brand with sleek product staging, cinematic lighting, vibrant color accents, and dynamic motion. Do NOT hallucinate or attempt to diffuse textual letters into the video prompt; brand logos are composited directly." : ""}
+Execute 'media_video_generate' immediately as the primary action. Do NOT emit preliminary conversational filler or transfer notices. Do NOT run artifact_list.
 Call 'media_video_generate' directly with:
 - prompt: Detailed description of scene motion and elements based on user request
 - duration_seconds: ${duration}

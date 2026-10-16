@@ -428,17 +428,27 @@ export class MediaVideoGenerateTool implements ITool {
         const logoAtt = context.attachments.find(
           (a) =>
             a.type?.startsWith("image/") ||
-            /\.(png|jpe?g|webp|gif)$/i.test(a.name || "") ||
+            /\.(png|jpe?g|webp|gif|svg)$/i.test(a.name || "") ||
             /logo/i.test(a.name || ""),
         );
         if (logoAtt) {
-          if (logoAtt.artifactId) {
+          const rawUrl = (logoAtt as any).url;
+          if (rawUrl && typeof rawUrl === "string" && rawUrl.startsWith("/api/artifacts/")) {
+            logoArtifactUrl = rawUrl;
+          } else if (logoAtt.artifactId) {
             try {
               const decoded = JSON.parse(
                 Buffer.from(logoAtt.artifactId, "base64url").toString("utf-8"),
               );
               logoArtifactUrl = `/api/artifacts/${encodeURIComponent(decoded.w)}/${encodeURIComponent(decoded.b)}/${encodeURIComponent(decoded.p)}`;
-            } catch {}
+            } catch {
+              if (
+                typeof logoAtt.artifactId === "string" &&
+                logoAtt.artifactId.startsWith("/api/artifacts/")
+              ) {
+                logoArtifactUrl = logoAtt.artifactId;
+              }
+            }
           }
         }
       }

@@ -271,8 +271,8 @@ export function MessageItem({
           );
         })}
 
-        {/* Legitimate Terminal Session (Only for actual shell / git / coding operations) */}
-        {terminalToolCalls.length > 0 && (
+        {/* Legitimate Terminal Session (Only for actual shell / git / coding operations - hidden during media generation) */}
+        {terminalToolCalls.length > 0 && mediaToolCalls.length === 0 && (
           <TerminalSession
             toolCalls={terminalToolCalls}
             toolResults={message.toolResults}
@@ -291,80 +291,117 @@ export function MessageItem({
           />
         )}
 
-        {/* Message Content with rich Markdown formatting */}
-        {message.content ? (
-          <div className="leading-relaxed text-zinc-200">
-            {typeof message.content === "string" ? (
-              <FormattedContent
-                content={message.content}
-                onCopy={handleCopy}
-                copiedCode={copiedCode}
-              />
-            ) : (
-              message.content.map((p, idx) =>
-                p.type === "text" ? (
+        {/* Message Content with rich Markdown formatting (hidden while media is generating or if it is redundant boilerplate) */}
+        {(() => {
+          const hasGeneratingMedia = mediaToolCalls.some((c) => {
+            const res = message.toolResults?.find((r) => r.toolCallId === c.id);
+            return !res;
+          });
+          const isRedundantMediaText = (text: string) => {
+            const lower = text.toLowerCase();
+            return (
+              lower.includes("transfer this request to the video generation agent") ||
+              lower.includes("creating your commercial video") ||
+              lower.includes("[view video]")
+            );
+          };
+
+          if (hasGeneratingMedia) {
+            return null;
+          }
+
+          if (
+            mediaToolCalls.length > 0 &&
+            typeof message.content === "string" &&
+            isRedundantMediaText(message.content)
+          ) {
+            return null;
+          }
+
+          if (message.content) {
+            return (
+              <div className="leading-relaxed text-zinc-200">
+                {typeof message.content === "string" ? (
                   <FormattedContent
-                    key={idx}
-                    content={p.text}
+                    content={message.content}
                     onCopy={handleCopy}
                     copiedCode={copiedCode}
                   />
-                ) : isSafeImageUrl(p.image_url.url) ? (
-                  <img
-                    key={idx}
-                    src={p.image_url.url}
-                    alt="attachment"
-                    className="max-w-full rounded-2xl mt-2 border border-zinc-800 shadow-md"
-                  />
-                ) : null,
-              )
-            )}
-          </div>
-        ) : (
-          !message.thinking &&
-          (!message.toolCalls || message.toolCalls.length === 0) && (
-            <span className="inline-block animate-pulse text-zinc-500 text-xs italic">
-              Thinking...
-            </span>
-          )
-        )}
+                ) : (
+                  message.content.map((p, idx) =>
+                    p.type === "text" ? (
+                      <FormattedContent
+                        key={idx}
+                        content={p.text}
+                        onCopy={handleCopy}
+                        copiedCode={copiedCode}
+                      />
+                    ) : isSafeImageUrl(p.image_url.url) ? (
+                      <img
+                        key={idx}
+                        src={p.image_url.url}
+                        alt="attachment"
+                        className="max-w-full rounded-2xl mt-2 border border-zinc-800 shadow-md"
+                      />
+                    ) : null,
+                  )
+                )}
+              </div>
+            );
+          }
 
-        {/* Message Action Bar — appears on hover / focus */}
-        {(message.content || message.thinking) && (
-          <div className="flex items-center gap-1.5 pt-1 opacity-0 group-hover/msg:opacity-100 group-focus-within/msg:opacity-100 transition-opacity duration-150">
-            <ActionIconButton
-              onClick={handleCopyMessage}
-              title={messageCopied ? "Copied!" : "Copy message"}
-              active={messageCopied}
-              activeClass="border-emerald-500/40 bg-emerald-950/30 text-emerald-400"
-            >
-              {messageCopied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-            </ActionIconButton>
+          if (!message.thinking && (!message.toolCalls || message.toolCalls.length === 0)) {
+            return (
+              <span className="inline-block animate-pulse text-zinc-500 text-xs italic">
+                Thinking...
+              </span>
+            );
+          }
 
-            {onReply && (
-              <ActionIconButton onClick={handleReply} title="Quote & reply">
-                <CornerUpLeft className="h-3.5 w-3.5" />
+          return null;
+        })()}
+
+        {/* Message Action Bar — appears on hover / focus (hidden during generation) */}
+        {!mediaToolCalls.some((c) => !message.toolResults?.find((r) => r.toolCallId === c.id)) &&
+          (message.content || message.thinking) && (
+            <div className="flex items-center gap-1.5 pt-1 opacity-0 group-hover/msg:opacity-100 group-focus-within/msg:opacity-100 transition-opacity duration-150">
+              <ActionIconButton
+                onClick={handleCopyMessage}
+                title={messageCopied ? "Copied!" : "Copy message"}
+                active={messageCopied}
+                activeClass="border-emerald-500/40 bg-emerald-950/30 text-emerald-400"
+              >
+                {messageCopied ? (
+                  <Check className="h-3.5 w-3.5" />
+                ) : (
+                  <Copy className="h-3.5 w-3.5" />
+                )}
               </ActionIconButton>
-            )}
 
-            <ActionIconButton
-              onClick={() => setFeedback(feedback === "up" ? null : "up")}
-              title="Good response"
-              active={feedback === "up"}
-              activeClass="border-emerald-500/40 bg-emerald-950/30 text-emerald-400"
-            >
-              <ThumbsUp className="h-3.5 w-3.5" />
-            </ActionIconButton>
-            <ActionIconButton
-              onClick={() => setFeedback(feedback === "down" ? null : "down")}
-              title="Bad response"
-              active={feedback === "down"}
-              activeClass="border-red-500/40 bg-red-950/30 text-red-400"
-            >
-              <ThumbsDown className="h-3.5 w-3.5" />
-            </ActionIconButton>
-          </div>
-        )}
+              {onReply && (
+                <ActionIconButton onClick={handleReply} title="Quote & reply">
+                  <CornerUpLeft className="h-3.5 w-3.5" />
+                </ActionIconButton>
+              )}
+
+              <ActionIconButton
+                onClick={() => setFeedback(feedback === "up" ? null : "up")}
+                title="Good response"
+                active={feedback === "up"}
+                activeClass="border-emerald-500/40 bg-emerald-950/30 text-emerald-400"
+              >
+                <ThumbsUp className="h-3.5 w-3.5" />
+              </ActionIconButton>
+              <ActionIconButton
+                onClick={() => setFeedback(feedback === "down" ? null : "down")}
+                title="Bad response"
+                active={feedback === "down"}
+                activeClass="border-red-500/40 bg-red-950/30 text-red-400"
+              >
+                <ThumbsDown className="h-3.5 w-3.5" />
+              </ActionIconButton>
+            </div>
+          )}
       </div>
     </div>
   );
@@ -1077,15 +1114,6 @@ function MediaToolItem({ call, result, textContent, onReply }: MediaToolItemProp
                 <span>Generating video. This may take a few minutes...</span>
               </div>
             </div>
-          </div>
-
-          {/* Working on it indicator (matching input_file_0.png & input_file_1.png) */}
-          <div className="flex items-center gap-2 text-xs text-zinc-400 px-1">
-            <div className="flex items-center gap-1">
-              <span className="h-1.5 w-1.5 rounded-full bg-zinc-400 animate-pulse" />
-              <span className="h-1.5 w-1.5 rounded-full bg-zinc-400 animate-pulse [animation-delay:200ms]" />
-            </div>
-            <span>Working on it..</span>
           </div>
         </div>
       );
