@@ -371,15 +371,39 @@ OrbaAgent is a professional conversational AI assistant first.
           },
         };
 
-        yield {
-          type: "agent_activity",
-          traceId: trace.traceId,
-          activity: {
-            step: `Executing ${call.name}`,
-            status: "in_progress",
-            details: JSON.stringify(call.arguments),
-          },
-        };
+        if (call.name === "media_video_generate") {
+          const args = (call.arguments || {}) as Record<string, unknown>;
+          yield {
+            type: "agent_activity",
+            traceId: trace.traceId,
+            activity: {
+              step: "Generating video on GPU worker (Wan2.1-T2V-1.3B)",
+              status: "in_progress",
+              details: `Dispatching video diffusion job to GPU 1 (${args.duration_seconds || 2}s, ${args.width || 480}x${args.height || 480}, 16 fps)...`,
+            },
+          };
+        } else if (call.name === "media_image_generate") {
+          const args = (call.arguments || {}) as Record<string, unknown>;
+          yield {
+            type: "agent_activity",
+            traceId: trace.traceId,
+            activity: {
+              step: "Generating image on GPU worker (FLUX.1-schnell)",
+              status: "in_progress",
+              details: `Dispatching diffusion job to GPU 1 (${args.width || 512}x${args.height || 512}, 4 steps)...`,
+            },
+          };
+        } else {
+          yield {
+            type: "agent_activity",
+            traceId: trace.traceId,
+            activity: {
+              step: `Executing ${call.name}`,
+              status: "in_progress",
+              details: JSON.stringify(call.arguments),
+            },
+          };
+        }
 
         // If shell execution, stream dedicated terminal session events
         if (call.name === "execute_shell") {

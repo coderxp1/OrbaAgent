@@ -81,6 +81,103 @@ export function extractDimensions(text: string): { width: number; height: number
 }
 
 /**
+ * Scans previous conversation turns to detect if the assistant proposed a pending
+ * media prompt or plan that the user is now confirming.
+ */
+export function findPendingMediaProposal(messages: ChatMessage[]): {
+  type: "video" | "image";
+  prompt: string;
+  duration?: number;
+  width?: number;
+  height?: number;
+} | null {
+  if (!messages || messages.length < 2) return null;
+
+  // Find the most recent assistant message prior to the latest user message
+  let lastAssistantIndex = -1;
+  for (let i = messages.length - 2; i >= 0; i--) {
+    if (messages[i].role === "assistant") {
+      lastAssistantIndex = i;
+      break;
+    }
+  }
+  if (lastAssistantIndex === -1) return null;
+
+  const assistantMsg = messages[lastAssistantIndex];
+  const asstText =
+    typeof assistantMsg.content === "string"
+      ? assistantMsg.content
+      : Array.isArray(assistantMsg.content)
+        ? assistantMsg.content.map((c) => (c.type === "text" ? c.text : "")).join(" ")
+        : "";
+
+  if (!asstText) return null;
+
+  // Check if the assistant message proposed a prompt or generation task
+  const hasProposalCue =
+    /generation-ready prompt|suggested prompt|ready prompt|prompt is ready|can generate (?:ai )?(?:video|image)|prompt:|template:|use a template/i.test(
+      asstText,
+    ) ||
+    /(?:^|\n)>\s*\*\*/.test(asstText) ||
+    /(?:^|\n)>\s*[A-Z]/.test(asstText) ||
+    /\b(?:wan2\.1|flux(?:\.1)?)\b/i.test(asstText);
+
+  if (!hasProposalCue) return null;
+
+  // Check if it's video or image
+  const isVideo =
+    /\b(?:wan2\.1|video|t2v|fps|seconds?|motion|tracking|camera|cinematic scene)\b/i.test(asstText);
+
+  // 1. Try to extract from a blockquote: > ...
+  let extractedPrompt = "";
+  const blockquoteMatches = asstText.match(/(?:^|\n)>\s*(.*?)(?=\n\n|\n(?=[^>])|$)/gs);
+  if (blockquoteMatches && blockquoteMatches.length > 0) {
+    extractedPrompt = blockquoteMatches
+      .map((b) => b.replace(/(?:^|\n)>\s*/g, " ").trim())
+      .join(" ")
+      .replace(/^\*\*[^*]+\*\*\s*/, "") // Remove bold header like **Cinematic thriller scene, nighttime.**
+      .trim();
+  }
+
+  // 2. If blockquote wasn't found or was too short, check for quoted prompt: "..." or “...”
+  if (!extractedPrompt || extractedPrompt.length < 15) {
+    const quotedMatches = asstText.match(/["“]([^"”]{20,})["”]/);
+    if (quotedMatches && quotedMatches[1]) {
+      extractedPrompt = quotedMatches[1].trim();
+    }
+  }
+
+  // 3. Fallback: look at the user request immediately prior to that assistant turn
+  if (!extractedPrompt || extractedPrompt.length < 15) {
+    for (let i = lastAssistantIndex - 1; i >= 0; i--) {
+      if (messages[i].role === "user") {
+        const prevUserText =
+          typeof messages[i].content === "string"
+            ? (messages[i].content as string)
+            : "";
+        if (prevUserText.trim().length > 10) {
+          extractedPrompt = prevUserText.trim();
+          break;
+        }
+      }
+    }
+  }
+
+  if (!extractedPrompt) return null;
+
+  const duration = extractVideoDurationSeconds(extractedPrompt) || (isVideo ? 2 : undefined);
+  const dims = extractDimensions(extractedPrompt) || (isVideo ? { width: 480, height: 480 } : { width: 512, height: 512 });
+
+  return {
+    type: isVideo ? "video" : "image",
+    prompt: extractedPrompt,
+    duration,
+    width: dims.width,
+    height: dims.height,
+  };
+}
+
+/**
  * Analyzes conversation messages to detect user intent and automatically
  * activates matching non-core tools from the capability registry.
  */
@@ -106,7 +203,49 @@ export function routeUserIntent(
     };
   }
 
-  const lower = content.toLowerCase();
+  const lower = content.toLowerCase().trim();
+
+  // 0. Multi-Turn Follow-Up / Task Confirmation Check (e.g. "go", "yes", "use that prompt", "ok, use that suggested promtp")
+  // If the user confirms a pending media generation task, resume and execute with the proposed prompt
+  const isConfirmation =
+    /^(?:ok|okay|yes|sure|go|proceed|do it|generate it|make it|render it|create it|start it|run it|use that(?:\s+suggested)?\s+prom?p?t?|use this(?:\s+suggested)?\s+prom?p?t?|sounds good|looks good)(?:[,\s.!?-]+(?:go|proceed|generate(?:\s+it)?|do\s+it|use\s+that(?:\s+suggested)?\s+prom?p?t?|please|ahead))*$/i.test(
+      lower,
+    ) ||
+    /\b(?:use\s+that(?:\s+suggested)?\s+prom?p?t?|use\s+this(?:\s+suggested)?\s+prom?p?t?|yes\s*,?\s*(?:please\s*,?\s*)?(?:generate|create|make|do\s+it|go)|ok\s*,?\s*(?:go|generate|create|make\s+it|use\s+that)|go\s+ahead(?:\s+and\s+generate)?)\b/i.test(
+      lower,
+    );
+
+  if (isConfirmation) {
+    const pendingMedia = findPendingMediaProposal(messages);
+    if (pendingMedia) {
+      const isVideo = pendingMedia.type === "video";
+      const toolToActivate = isVideo ? "media_video_generate" : "media_image_generate";
+      if (registry) {
+        registry.activateTools([toolToActivate]);
+      }
+
+      return {
+        intent: isVideo ? "media_video" : "media_image",
+        confidence: 0.98,
+        toolsToActivate: [toolToActivate],
+        extractedParameters: {
+          prompt: pendingMedia.prompt,
+          duration_seconds: pendingMedia.duration,
+          width: pendingMedia.width,
+          height: pendingMedia.height,
+          fps: 16,
+          model: isVideo ? "wan2.1-t2v-1.3b" : "black-forest-labs/FLUX.1-schnell",
+        },
+        systemGuidance: `[Intent Router: Resumed Pending Media Generation]
+The user approved the pending ${pendingMedia.type} generation task ("${content}").
+Tool '${toolToActivate}' is ACTIVE and ready to execute.
+EXECUTE '${toolToActivate}' IMMEDIATELY with:
+- prompt: ${JSON.stringify(pendingMedia.prompt)}
+${isVideo ? `- duration_seconds: ${pendingMedia.duration || 2}\n- width: ${pendingMedia.width || 480}\n- height: ${pendingMedia.height || 480}\n- fps: 16` : `- width: ${pendingMedia.width || 512}\n- height: ${pendingMedia.height || 512}\n- steps: 4`}
+DO NOT ask for further confirmation or explain how to run it. Call '${toolToActivate}' directly now.`,
+      };
+    }
+  }
 
   // 1. Artifact Review & Inspection Intent (e.g. "list generated media", "what artifacts have been generated?")
   const isArtifactQuery =
@@ -159,7 +298,7 @@ Use 'artifact_list' to discover available workspace artifacts and display them w
       lower,
     ) ||
     /^(?:can\s+you\s+(?:generate|create|make)\s+(?:images?|videos?|pictures?|media)\??)$/i.test(
-      lower.trim(),
+      lower,
     );
 
   if (isMediaCapabilityQuery) {
@@ -175,9 +314,10 @@ Do NOT execute any tools or task plans for this capability inquiry.`,
     };
   }
 
-  // Video generation intent patterns
+  // Video generation intent patterns (explicit video requests or rich cinematic scene descriptions with camera motion)
   const videoPatterns = [
     /\b(?:create|generate|make|render|produce)\s+(?:an?\s+)?(?:[\w-]+\s+)?videos?\b/,
+    /\b(?:create|generate|make|render|produce)\s+(?:an?\s+)?(?:[\w-]+\s+)?(?:cinematic\s+scene|action\s+scene|motion\s+scene|dramatic\s+scene|thriller\s+scene|chase\s+scene)\b/,
     /\bvideo\s+of\b/,
     /\banimate\b/,
     /\banimation\s+of\b/,
@@ -186,6 +326,7 @@ Do NOT execute any tools or task plans for this capability inquiry.`,
     /\btext[- ]to[- ]video\b/,
     /\bt2v\b/,
     /\bwan2\.1\b/,
+    /\b(?:camera\s+movement|camera\s+motion|tracking\s+camera|tracking\s+shot|dolly\s+shot|dolly\s+zoom|panning\s+shot|pan\s+across|camera\s+move|cinematic\s+shot)\b/,
   ];
 
   const isVideoIntent =
@@ -216,7 +357,8 @@ Do NOT execute any tools or task plans for this capability inquiry.`,
       },
       systemGuidance: `[Intent Router: Detected Video Generation Request]
 The user wants to generate an AI video. Tool 'media_video_generate' has been activated.
-Execute 'media_video_generate' with:
+For clear scene descriptions, execute 'media_video_generate' directly without asking for clarification.
+Do NOT say 'Generating now' before executing the tool call. Call 'media_video_generate' directly with:
 - prompt: Detailed description of scene motion and elements based on user request
 - duration_seconds: ${duration}
 - width: ${dims.width}
@@ -228,7 +370,7 @@ Execute 'media_video_generate' with:
 
   // Image generation intent patterns
   const imagePatterns = [
-    /\b(?:create|generate|make|render|produce)\s+(?:an?\s+)?(?:[\w-]+\s+)?(?:images?|pictures?|photos?|illustrations?|artworks?|paintings?|graphics?)\b/,
+    /\b(?:create|generate|make|render|produce)\s+(?:an?\s+)?(?:[\w-]+\s+)?(?:images?|pictures?|photos?|illustrations?|artworks?|paintings?|graphics?|scenes?|visuals?|wallpapers?|portraits?|landscapes?)\b/,
     /\b(?:draw|paint|sketch|illustrate)\s+(?:me\s+)?(?:an?\s+)?(?:[\w-]+\s+)?(?:images?|pictures?|photos?|illustrations?|artworks?|paintings?|portraits?|scenes?|landscapes?|characters?|creatures?|animals?|cats?|dogs?|spheres?|avatars?|objects?|backgrounds?|wallpapers?)\b/,
     /\b(?:draw|paint|sketch|illustrate)\s+(?:me\s+)?(?:an?\s+)?(?:a|an|the)\s+(?!(?:out|up|plan|diagram|architecture|flowchart|schema|class|interface|function|code|test|table|api|migration|solution|system)\b)[\w\s]{2,40}\b/,
     /\b(?:image|picture|photo|illustration|artwork|drawing|painting)\s+of\b/,
