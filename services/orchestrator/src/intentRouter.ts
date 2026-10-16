@@ -2,7 +2,7 @@ import type { ToolRegistry } from "@orbaagent/agent-runtime";
 import type { ChatMessage } from "@orbaagent/shared";
 
 export interface IntentRoutingResult {
-  intent: "media_image" | "media_video" | "general_coding" | "unknown";
+  intent: "media_image" | "media_video" | "artifact_management" | "general_coding" | "unknown";
   confidence: number;
   toolsToActivate: string[];
   extractedParameters?: Record<string, unknown>;
@@ -97,6 +97,46 @@ export function routeUserIntent(
 
   const lower = content.toLowerCase();
 
+  // 1. Artifact Review & Inspection Intent (e.g. "list generated media", "what artifacts have been generated?")
+  const isArtifactQuery =
+    /\b(?:list|show|view|inspect|display|check|get|find)\s+(?:all\s+|me\s+|the\s+)*(?:generated\s+)?(?:artifacts|media|files|images|videos|uploads|attachments)\b/i.test(
+      lower,
+    ) ||
+    /\bwhat\s+(?:artifacts|media|images|videos|files)\s+(?:did\s+you\s+generate|have\s+been\s+generated|were\s+generated|are\s+available|do\s+we\s+have)\b/i.test(
+      lower,
+    ) ||
+    /\b(?:list|show)\s+(?:all\s+)?artifacts\b/i.test(lower);
+
+  if (isArtifactQuery) {
+    const toolsToActivate = ["artifact_list", "artifact_read"];
+    if (registry) {
+      registry.activateTools(toolsToActivate);
+    }
+    return {
+      intent: "artifact_management",
+      confidence: 0.95,
+      toolsToActivate,
+      systemGuidance: `[Intent Router: Detected Artifact Management Request]
+The user wants to list or inspect generated media or uploaded artifacts. Tools 'artifact_list' and 'artifact_read' are active.
+Use 'artifact_list' to discover available workspace artifacts and display them with their URLs.`,
+    };
+  }
+
+  // 2. Software Engineering Exclusions: Requests discussing media as code/components
+  const isSoftwareVideoTask =
+    /\bvideo\s+(?:player|element|tag|component|view|stream|streaming|uploader?|feed|controller|card|modal|dialog|container|pipeline|service|backend|api|endpoint|route)\b/i.test(
+      lower,
+    );
+  const isSoftwareImageTask =
+    /\bimage\s+(?:component|carousel|gallery|grid|feed|uploader?|uploading|picker|cropper|compression|optimizer|converter|resizer|pipeline|service|backend|api|endpoint|route|tag|element)\b/i.test(
+      lower,
+    );
+  const isPlanningOrDiagramTask =
+    /\b(?:sketch|draw)\s+(?:out|up)\b/i.test(lower) ||
+    /\b(?:draw|sketch|illustrate)\s+(?:me\s+)?(?:an?\s+)?(?:architecture|diagram|flowchart|schema|system|pipeline|wireframe|mockup|solution|plan|roadmap|steps?)\b/i.test(
+      lower,
+    );
+
   // Video generation intent patterns
   const videoPatterns = [
     /\b(?:create|generate|make|render|produce)\s+(?:an?\s+)?(?:[\w-]+\s+)?video\b/,
@@ -110,7 +150,10 @@ export function routeUserIntent(
     /\bwan2\.1\b/,
   ];
 
-  const isVideoIntent = videoPatterns.some((pattern) => pattern.test(lower));
+  const isVideoIntent =
+    !isSoftwareVideoTask &&
+    !isPlanningOrDiagramTask &&
+    videoPatterns.some((pattern) => pattern.test(lower));
 
   if (isVideoIntent) {
     const duration = extractVideoDurationSeconds(content) || 2;
@@ -147,7 +190,8 @@ Execute 'media_video_generate' with:
   // Image generation intent patterns
   const imagePatterns = [
     /\b(?:create|generate|make|render|produce)\s+(?:an?\s+)?(?:[\w-]+\s+)?(?:image|picture|photo|illustration|artwork|painting|graphic)\b/,
-    /\b(?:draw|paint|sketch|illustrate)\s+(?:an?\s+)?/,
+    /\b(?:draw|paint|sketch|illustrate)\s+(?:me\s+)?(?:an?\s+)?(?:[\w-]+\s+)?(?:image|picture|photo|illustration|artwork|painting|portrait|scene|landscape|character|creature|animal|cat|dog|sphere|avatar|object|background|wallpaper)\b/,
+    /\b(?:draw|paint|sketch|illustrate)\s+(?:me\s+)?(?:an?\s+)?(?:a|an|the)\s+(?!(?:out|up|plan|diagram|architecture|flowchart|schema|class|interface|function|code|test|table|api|migration|solution|system)\b)[\w\s]{2,40}\b/,
     /\b(?:image|picture|photo|illustration|artwork|drawing|painting)\s+of\b/,
     /\btext[- ]to[- ]image\b/,
     /\bt2i\b/,
@@ -155,7 +199,10 @@ Execute 'media_video_generate' with:
     /\bdiffusion\s+render\b/,
   ];
 
-  const isImageIntent = imagePatterns.some((pattern) => pattern.test(lower));
+  const isImageIntent =
+    !isSoftwareImageTask &&
+    !isPlanningOrDiagramTask &&
+    imagePatterns.some((pattern) => pattern.test(lower));
 
   if (isImageIntent) {
     const dims = extractDimensions(content) || { width: 512, height: 512 };
