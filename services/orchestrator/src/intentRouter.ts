@@ -1,8 +1,19 @@
 import type { ToolRegistry } from "@orbaagent/agent-runtime";
 import type { ChatMessage } from "@orbaagent/shared";
 
+export type UserIntent =
+  | "conversation"
+  | "media_image"
+  | "media_video"
+  | "artifact_management"
+  | "software_engineering"
+  | "system_operation"
+  | "ambiguous"
+  | "general_coding"
+  | "unknown";
+
 export interface IntentRoutingResult {
-  intent: "media_image" | "media_video" | "artifact_management" | "general_coding" | "unknown";
+  intent: UserIntent;
   confidence: number;
   toolsToActivate: string[];
   extractedParameters?: Record<string, unknown>;
@@ -124,11 +135,11 @@ Use 'artifact_list' to discover available workspace artifacts and display them w
 
   // 2. Software Engineering Exclusions: Requests discussing media as code/components
   const isSoftwareVideoTask =
-    /\bvideo\s+(?:player|element|tag|component|view|stream|streaming|uploader?|feed|controller|card|modal|dialog|container|pipeline|service|backend|api|endpoint|route)\b/i.test(
+    /\bvideo\s+(?:player|element|tag|component|view|stream|streaming|upload(?:er|ing)?|feed|controller|card|modal|dialog|container|pipeline|service|backend|api|endpoint|route)\b/i.test(
       lower,
     );
   const isSoftwareImageTask =
-    /\bimage\s+(?:component|carousel|gallery|grid|feed|uploader?|uploading|picker|cropper|compression|optimizer|converter|resizer|pipeline|service|backend|api|endpoint|route|tag|element)\b/i.test(
+    /\bimage\s+(?:upload(?:er|ing)?|component|carousel|gallery|grid|feed|picker|cropper|compression|optimizer|converter|resizer|pipeline|service|backend|api|endpoint|route|tag|element)\b/i.test(
       lower,
     );
   const isPlanningOrDiagramTask =
@@ -232,9 +243,105 @@ Execute 'media_image_generate' with:
     };
   }
 
+  // 3. Ambiguous or Under-specified Requests (e.g. "do it", "run it", "test", "fix it", "execute")
+  // Must be checked before system operations / software engineering / conversation to prevent false execution
+  const isAmbiguous =
+    /^(?:do\s+it|run\s+it|fix\s+it|execute\s+it|try\s+it|go|start|test|run|fix|execute)$/i.test(
+      lower.trim(),
+    );
+
+  if (isAmbiguous) {
+    return {
+      intent: "ambiguous",
+      confidence: 0.9,
+      toolsToActivate: [],
+      systemGuidance: `[Intent Router: Detected Ambiguous Request]
+The user's request is ambiguous or underspecified. Do NOT speculate or execute any tools, terminal commands, or installations.
+Politely ask the user for clarification on what specific task or operation they want to perform.`,
+    };
+  }
+
+  // 4. System Operations Intent (e.g. "install this package", "install and verify dependencies", "debug the server", "run the test suite")
+  const isSystemOperation =
+    /\b(?:install|add|remove|uninstall)\b.*\b(?:package|dependency|dependencies|library|module|packages)s?\b/i.test(
+      lower,
+    ) ||
+    /\b(?:npm|pnpm|yarn|pip|cargo|apt|brew)\s+(?:install|add|i|remove|uninstall|update|run|test|build)\b/i.test(
+      lower,
+    ) ||
+    /\b(?:debug|restart|stop|start|kill|check)\s+(?:the\s+|this\s+)?(?:server|backend|service|process|daemon|container|docker)\b/i.test(
+      lower,
+    ) ||
+    /\b(?:run|execute)\s+(?:the\s+|this\s+)?(?:test\s+suite|unit\s+tests?|integration\s+tests?|e2e\s+tests?|tests?)\b/i.test(
+      lower,
+    ) ||
+    /\b(?:run|execute)\s+(?:vitest|jest|pytest|playwright|biome|eslint|tsc)\b/i.test(lower) ||
+    /\b(?:run|execute)\s+(?:git\s+status|git\s+diff|git\s+log|shell|command|terminal|resilient\s+command)\b/i.test(
+      lower,
+    ) ||
+    /\b(?:in\s+the\s+terminal|via\s+shell|using\s+terminal|using\s+shell)\b/i.test(lower);
+
+  if (isSystemOperation) {
+    const toolsToActivate = ["execute_shell", "test_runner", "package_manager"];
+    if (registry) {
+      registry.activateTools(toolsToActivate);
+    }
+    return {
+      intent: "system_operation",
+      confidence: 0.95,
+      toolsToActivate,
+      systemGuidance: `[Intent Router: Detected System Operation Request]
+The user is explicitly requesting a system, terminal, or test operation.
+Use the appropriate execution tools ('execute_shell', 'test_runner', 'package_manager') to complete and verify the operation.`,
+    };
+  }
+
+  // 5. Software Engineering & Project Development Intent (e.g. "build me a landing page", "create a SaaS dashboard", "implement a CRM feature")
+  const isSoftwareEngineering =
+    ((isSoftwareVideoTask || isSoftwareImageTask) &&
+      /\b(?:build|create|implement|develop|code|write|program|add|scaffold|design)\b/i.test(
+        lower,
+      )) ||
+    /\b(?:build|create|implement|develop|code|program|scaffold|write)\b.*\b(?:landing\s+page|saas|dashboard|crm|feature|api|component|app|application|service|backend|frontend|website|database\s+schema|migration|middleware|function|class|module|endpoint|route|hook|ui|interface|form|modal|view|controller|carousel|gallery|player)\b/i.test(
+      lower,
+    ) ||
+    /\b(?:fix|repair|patch|resolve)\b.*\b(?:bug|issue|error|test\s+failure|lint\s+error|type\s+error|failing\s+tests?|unit\s+tests?|race\s+condition|tests?)\b/i.test(
+      lower,
+    ) ||
+    /\b(?:refactor|rewrite|optimize|update)\b.*\b(?:code|component|function|file|middleware|endpoint|service|repository|implementation)\b/i.test(
+      lower,
+    ) ||
+    /\b(?:check|inspect|view|show|get)\s+(?:git\s+status|git\s+diff|git\s+log|git\s+branch)\b/i.test(
+      lower,
+    ) ||
+    /\bgit\s+(?:status|diff|log|branch|checkout)\b/i.test(lower) ||
+    /\bin\s+(?:my|the|this)\s+(?:repository|repo|codebase|workspace|project)\b/i.test(lower) ||
+    /\badd\s+(?:a\s+)?(?:new\s+)?feature\s+to\b/i.test(lower);
+
+  if (isSoftwareEngineering) {
+    const toolsToActivate = ["tools_search", "task_plan", "task_step", "task_complete"];
+    if (registry) {
+      registry.activateTools(toolsToActivate);
+    }
+    return {
+      intent: "software_engineering",
+      confidence: 0.9,
+      toolsToActivate,
+      systemGuidance: `[Intent Router: Detected Software Engineering Project]
+The user is requesting a software development or coding project.
+Use the autonomous coding loop: plan with 'task_plan', search and activate required tools with 'tools_search', implement changes, verify with tests/linting, and complete with 'task_complete'.`,
+    };
+  }
+
+  // 6. Normal Conversation (Default)
+  // Covers greetings, conceptual explanations, architectural discussions, ideas, chitchat, and general Q&A
   return {
-    intent: "general_coding",
-    confidence: 0.8,
+    intent: "conversation",
+    confidence: 0.95,
     toolsToActivate: [],
+    systemGuidance: `[Intent Router: Detected Conversational Request]
+The user is having a normal conversation, greeting you, seeking an explanation, or exploring ideas.
+Respond naturally, helpfully, and directly in conversational text using your language model capabilities.
+Do NOT invoke tools, do NOT plan tasks, do NOT execute shell commands, and do NOT search for tools.`,
   };
 }

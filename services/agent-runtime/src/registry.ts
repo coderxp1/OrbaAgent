@@ -130,6 +130,19 @@ export class ToolRegistry implements IToolSearchableRegistry {
     }
   }
 
+  public clearActiveTools(): void {
+    this.activeToolNames.clear();
+  }
+
+  public setActiveTools(names: string[]): void {
+    this.activeToolNames.clear();
+    for (const name of names) {
+      if (this.tools.has(name)) {
+        this.activeToolNames.add(name);
+      }
+    }
+  }
+
   public activateTools(names: string[]): void {
     for (const name of names) {
       if (this.tools.has(name)) {

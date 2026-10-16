@@ -40,20 +40,19 @@ function indicatesPendingAction(text: string): boolean {
   if (!text || text.trim().length === 0) return false;
   const lower = text.toLowerCase();
   const transitionPatterns = [
-    /now\s+let\s+me/i,
-    /let\s+me\s+now/i,
-    /next[,\s]+i(?:'ll|\s+will)/i,
-    /i(?:'ll|\s+will)\s+now/i,
-    /now\s+i(?:'ll|\s+will)/i,
+    /now\s+let\s+me\s+(?:run|check|inspect|execute|install|verify|build|test|clone|fetch|write|edit|repair|fix)/i,
+    /let\s+me\s+now\s+(?:run|check|inspect|execute|install|verify|build|test|clone|fetch|write|edit|repair|fix)/i,
+    /next[,\s]+i(?:'ll|\s+will)\s+(?:run|check|inspect|execute|install|verify|build|test|clone|fetch|write|edit|repair|fix)/i,
+    /i(?:'ll|\s+will)\s+now\s+(?:run|check|inspect|execute|install|verify|build|test|clone|fetch|write|edit|repair|fix)/i,
+    /now\s+i(?:'ll|\s+will)\s+(?:run|check|inspect|execute|install|verify|build|test|clone|fetch|write|edit|repair|fix)/i,
     /let\s+me\s+(?:run|check|inspect|execute|install|verify|build|test|clone|fetch)/i,
     /let's\s+(?:run|check|inspect|execute|install|verify|build|test|clone|fetch)/i,
-    /proceeding\s+to/i,
-    /i\s+am\s+going\s+to/i,
+    /proceeding\s+to\s+(?:run|check|inspect|execute|install|verify|build|test|clone|fetch|write|edit)/i,
     /now\s+running/i,
     /now\s+checking/i,
     /now\s+executing/i,
     /now\s+testing/i,
-    /next\s+step\s*:/i,
+    /next\s+step\s*:\s*(?:run|check|inspect|execute|install|verify|build|test)/i,
     /running\s+the\s+/i,
   ];
 
@@ -109,13 +108,40 @@ export class AgentOrchestrator {
       });
     }
 
-    // Initialize dynamic tool state: start with core tools on turn 0
-    this.registry.resetActiveToolsToCore();
-
-    // Natural-language intent routing: detect media or domain capabilities and activate relevant tools
+    // Natural-language intent routing: detect user intent and determine capability mode
     const intentResult = routeUserIntent(rawRequest.messages, this.registry);
-    if (intentResult.toolsToActivate.length > 0) {
-      this.registry.activateTools(intentResult.toolsToActivate);
+
+    const isConversational =
+      intentResult.intent === "conversation" || intentResult.intent === "ambiguous";
+    const isMedia = intentResult.intent === "media_image" || intentResult.intent === "media_video";
+    const isArtifact = intentResult.intent === "artifact_management";
+    const isTechnical =
+      intentResult.intent === "software_engineering" ||
+      intentResult.intent === "system_operation" ||
+      intentResult.intent === "general_coding";
+
+    // Initialize dynamic tool state based strictly on detected intent:
+    if (isConversational) {
+      // In conversation mode, no execution tools are active.
+      // Distinguishes having tools available from actually invoking them.
+      this.registry.clearActiveTools();
+    } else if (isMedia) {
+      // In media mode, only the target media tool is active.
+      // Strictly isolates media generation from coding, shell execution, or package tools.
+      this.registry.clearActiveTools();
+      if (intentResult.toolsToActivate.length > 0) {
+        this.registry.activateTools(intentResult.toolsToActivate);
+      }
+    } else if (isArtifact) {
+      // In artifact mode, only artifact discovery and inspection tools are active.
+      this.registry.clearActiveTools();
+      this.registry.activateTools(["artifact_list", "artifact_read"]);
+    } else {
+      // Software engineering / system operations: initialize core tools and any explicit tools
+      this.registry.resetActiveToolsToCore();
+      if (intentResult.toolsToActivate.length > 0) {
+        this.registry.activateTools(intentResult.toolsToActivate);
+      }
     }
 
     const activeToolDefinitions = this.registry.getActiveToolDefinitions();
@@ -132,7 +158,7 @@ export class AgentOrchestrator {
     const memoryPrompt = memoryManager.generateMemoryPrompt(workspaceId, userId);
 
     const planManager = TaskPlanManager.getInstance();
-    const existingPlan = planManager.getActivePlan(workspaceId);
+    const existingPlan = isTechnical ? planManager.getActivePlan(workspaceId) : null;
     let planContext = "";
     if (existingPlan && existingPlan.status !== "completed") {
       const pendingSteps = existingPlan.steps.filter(
@@ -145,6 +171,16 @@ export class AgentOrchestrator {
         )}\nResume execution from the next pending step. Do not repeat already completed steps.\n`;
     }
 
+    const conversationFirstBaseline = `
+## Conversation-First Baseline Policy
+OrbaAgent is a professional conversational AI assistant first.
+- Having tools available in the system does NOT mean you should invoke them.
+- For normal conversation, greetings, questions, explanations, feedback, ideas, or conceptual discussions, respond directly and naturally in well-structured conversational text using your language model capabilities.
+- NEVER invoke tools, create task plans, search tools, or run shell commands when answering directly is sufficient.
+- Ambiguous requests must NEVER trigger speculative tool execution or terminal commands. Clarify with the user instead.
+- Tools must ONLY be invoked when the user's specific request genuinely requires media generation, workspace file changes, package management, or system operations.
+`;
+
     const autonomousPolicy = `
 ## Autonomous Coding & Verification Policy
 1. When assigned a technical goal or bug repair, use 'task_plan' to decompose the goal into structured, ordered steps with dependencies and acceptance criteria.
@@ -156,7 +192,12 @@ export class AgentOrchestrator {
 `;
 
     let systemContext = memoryPrompt ? `${capabilityPrompt}\n\n${memoryPrompt}` : capabilityPrompt;
-    systemContext += autonomousPolicy + planContext;
+    systemContext += `\n\n${conversationFirstBaseline}`;
+
+    if (isTechnical) {
+      systemContext += `${autonomousPolicy}${planContext}`;
+    }
+
     if (intentResult.systemGuidance) {
       systemContext += `\n\n${intentResult.systemGuidance}`;
     }
@@ -234,10 +275,10 @@ export class AgentOrchestrator {
 
       // Case 1: No tool calls were produced in this turn
       if (pendingToolCalls.length === 0) {
-        const activePlan = planManager.getActivePlan(workspaceId);
+        const activePlan = isTechnical ? planManager.getActivePlan(workspaceId) : null;
         const planEval = activePlan ? planManager.evaluatePlanCompletion(activePlan.planId) : null;
 
-        if (planEval && !planEval.canComplete && iteration < this.maxIterations) {
+        if (isTechnical && planEval && !planEval.canComplete && iteration < this.maxIterations) {
           const nextStep = planManager.getNextExecutableStep(activePlan!.planId);
           currentMessages.push({
             role: "assistant",
@@ -267,6 +308,7 @@ export class AgentOrchestrator {
         }
 
         if (
+          isTechnical &&
           hasExecutedAnyTools &&
           indicatesPendingAction(stepText) &&
           iteration < this.maxIterations
