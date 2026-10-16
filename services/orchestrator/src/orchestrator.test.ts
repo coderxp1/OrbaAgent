@@ -555,6 +555,86 @@ describe("AgentOrchestrator State Machine & Autonomous Execution", () => {
       expect(events.filter((e) => e.type === "terminal_command_start").length).toBe(0);
     });
 
+    it("4b. Multi-turn confirmation ('ok, use that suggested promtp') activates video generation without shell execution", async () => {
+      const mockGateway = new ModelGateway();
+      let turns = 0;
+      const toolsInTurn: string[][] = [];
+
+      vi.spyOn(mockGateway, "streamChat").mockImplementation(async function* (req) {
+        turns++;
+        toolsInTurn.push((req.tools || []).map((t: any) => t.name));
+
+        if (turns === 1) {
+          yield {
+            type: "tool_call_start",
+            traceId: req.trace.traceId,
+            toolCall: {
+              id: "call_video_gen_multiturn",
+              name: "media_video_generate",
+              arguments: {
+                prompt:
+                  "A terrified adult woman runs through a narrow, dark city alley in a heavy downpour, shouting for help as a man pursues her several steps behind. Handheld tracking camera retreats in front of her.",
+                duration_seconds: 2,
+                width: 480,
+                height: 480,
+              },
+            },
+          };
+        } else {
+          yield {
+            type: "text_delta",
+            traceId: req.trace.traceId,
+            textDelta:
+              "Your video is ready: [View Video](/api/artifacts/default-tenant/vid_789/video.mp4)",
+          };
+        }
+      });
+
+      const orchestrator = new AgentOrchestrator({ gateway: mockGateway, maxIterations: 5 });
+      const request: ChatCompletionRequest = {
+        modelId: "auto",
+        messages: [
+          {
+            role: "user",
+            content:
+              "Generate a cinematic scene of a terrified woman running through a dark, rain-soaked alley at night while a man chases after her. Tense camera movement.",
+          },
+          {
+            role: "assistant",
+            content:
+              "I can generate AI video with Wan2.1. Here's a generation-ready prompt:\n\n> **Cinematic thriller scene.** A terrified adult woman runs through a narrow, dark city alley in a heavy downpour, shouting for help as a man pursues her several steps behind. Handheld tracking camera retreats in front of her.\n\nWould you like me to render this?",
+          },
+          {
+            role: "user",
+            content: "ok, use that suggested promtp",
+          },
+        ],
+        stream: true,
+        trace: {
+          traceId: "test_multiturn_video_confirm",
+          tenantId: "tenant_media",
+          userId: "user_media",
+          conversationId: "conv_vid_multi",
+          agentRunId: "run_vid_multi",
+        },
+      };
+
+      const events: NormalizedEvent[] = [];
+      for await (const event of orchestrator.executeAgentLoop(request)) {
+        events.push(event);
+      }
+
+      // Turn 1 had ONLY media_video_generate
+      expect(toolsInTurn[0]).toContain("media_video_generate");
+      expect(toolsInTurn[0]).not.toContain("execute_shell");
+      expect(toolsInTurn[0]).not.toContain("tools_search");
+
+      const toolStarts = events.filter((e) => e.type === "tool_call_start");
+      expect(toolStarts.length).toBe(1);
+      expect(toolStarts[0].toolCall?.name).toBe("media_video_generate");
+      expect(events.filter((e) => e.type === "terminal_command_start").length).toBe(0);
+    });
+
     it("5. Actual coding, installation, testing, and infrastructure tasks can still use shell tools", async () => {
       const mockGateway = new ModelGateway();
       let turns = 0;

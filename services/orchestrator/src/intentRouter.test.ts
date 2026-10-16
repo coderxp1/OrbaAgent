@@ -239,5 +239,113 @@ describe("Natural-Language Intent Routing", () => {
         expect(result.systemGuidance).toContain("artifact_list");
       }
     });
+
+    it("routes rich cinematic thriller scene without the word 'video' directly to media_video", () => {
+      const registry = new ToolRegistry();
+      registry.resetActiveToolsToCore();
+
+      const userPrompt =
+        "Generate a cinematic scene of a terrified woman running through a dark, rain-soaked alley at night while a man chases after her. She screams for help as heavy rain pours down, with dramatic lighting, realistic reflections on the wet pavement, tense camera movement, and a suspenseful thriller atmosphere.";
+
+      const result = routeUserIntent([{ role: "user", content: userPrompt }], registry);
+
+      expect(result.intent).toBe("media_video");
+      expect(result.confidence).toBeGreaterThanOrEqual(0.9);
+      expect(result.toolsToActivate).toContain("media_video_generate");
+      expect(registry.getActiveToolNames()).toContain("media_video_generate");
+      expect(result.systemGuidance).toContain("media_video_generate");
+    });
+
+    it("resumes pending video generation when user confirms with 'ok, use that suggested promtp' or 'go'", () => {
+      const registry = new ToolRegistry();
+      registry.resetActiveToolsToCore();
+
+      const conversation: ChatMessage[] = [
+        {
+          role: "user",
+          content:
+            "Generate a cinematic scene of a terrified woman running through a dark, rain-soaked alley at night while a man chases after her. She screams for help as heavy rain pours down, with dramatic lighting, realistic reflections on the wet pavement, tense camera movement, and a suspenseful thriller atmosphere.",
+        },
+        {
+          role: "assistant",
+          content:
+            "I can generate AI video with Wan2.1, but I can't start or attach a render from this chat turn. Here's a generation-ready prompt:\n\n> **Cinematic thriller scene, nighttime.** A terrified adult woman runs through a narrow, dark city alley in a heavy downpour, shouting for help as a man pursues her several steps behind. Rain lashes the scene and streams off fire escapes; puddles shimmer with broken reflections of cold blue streetlights and a flickering amber sign. Handheld tracking camera retreats in front of her, slightly unsteady, then cuts briefly to the pursuer's silhouette and back to her desperate face. Breathless, urgent movement; realistic rain and wet clothing; dramatic shadows, shallow depth of field, high-contrast cinematic lighting, suspenseful atmosphere.",
+        },
+        {
+          role: "user",
+          content: "ok, use that suggested promtp",
+        },
+      ];
+
+      const result = routeUserIntent(conversation, registry);
+
+      expect(result.intent).toBe("media_video");
+      expect(result.confidence).toBeGreaterThanOrEqual(0.95);
+      expect(result.toolsToActivate).toContain("media_video_generate");
+      expect(registry.getActiveToolNames()).toContain("media_video_generate");
+      expect(result.extractedParameters?.prompt).toContain(
+        "A terrified adult woman runs through a narrow, dark city alley",
+      );
+      expect(result.systemGuidance).toContain("Resumed Pending Media Generation");
+      expect(result.systemGuidance).toContain("media_video_generate");
+    });
+
+    it("resumes pending image generation when user confirms with 'go' or 'yes'", () => {
+      const registry = new ToolRegistry();
+      registry.resetActiveToolsToCore();
+
+      const conversation: ChatMessage[] = [
+        {
+          role: "user",
+          content: "Can you create an image of a black obsidian sphere on a marble pedestal?",
+        },
+        {
+          role: "assistant",
+          content:
+            "Yes, I can generate that with FLUX.1. Suggested prompt:\n\n> A polished black obsidian sphere reflecting studio rim lights, resting on a white Carrara marble pedestal with soft cinematic shadows.\n\nWould you like me to generate this now?",
+        },
+        {
+          role: "user",
+          content: "go",
+        },
+      ];
+
+      const result = routeUserIntent(conversation, registry);
+
+      expect(result.intent).toBe("media_image");
+      expect(result.confidence).toBeGreaterThanOrEqual(0.95);
+      expect(result.toolsToActivate).toContain("media_image_generate");
+      expect(registry.getActiveToolNames()).toContain("media_image_generate");
+      expect(result.extractedParameters?.prompt).toContain("polished black obsidian sphere");
+      expect(result.systemGuidance).toContain("media_image_generate");
+    });
+
+    it("does NOT launch media generation on an unrelated 'ok' or 'yes' when no pending proposal exists", () => {
+      const registry = new ToolRegistry();
+      registry.resetActiveToolsToCore();
+
+      const conversation: ChatMessage[] = [
+        {
+          role: "user",
+          content: "What is the capital of France?",
+        },
+        {
+          role: "assistant",
+          content: "The capital of France is Paris.",
+        },
+        {
+          role: "user",
+          content: "ok, thanks",
+        },
+      ];
+
+      const result = routeUserIntent(conversation, registry);
+
+      expect(result.intent).toBe("conversation");
+      expect(result.toolsToActivate).toHaveLength(0);
+      expect(registry.getActiveToolNames()).not.toContain("media_video_generate");
+      expect(registry.getActiveToolNames()).not.toContain("media_image_generate");
+      expect(registry.getActiveToolNames()).not.toContain("execute_shell");
+    });
   });
 });

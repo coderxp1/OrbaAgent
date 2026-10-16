@@ -857,18 +857,37 @@ export default function WorkspacePage() {
                 />
               ))}
 
-              {/* Active Agent Activity Pill */}
-              {activeActivity && (
-                <div className="flex items-center gap-2.5 px-4 py-2.5 rounded-xl bg-blue-950/40 border border-blue-800/40 text-blue-200 text-xs w-fit animate-pulse">
-                  <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-400" />
+              {/* Active Agent Activity / Generation Progress */}
+              {activeActivity ? (
+                <div
+                  className={`flex items-center gap-2.5 px-4 py-2.5 rounded-xl text-xs w-fit shadow-md transition-all ${
+                    activeActivity.step.toLowerCase().includes("video") ||
+                    activeActivity.step.toLowerCase().includes("image")
+                      ? "bg-violet-950/50 border border-violet-700/50 text-violet-200"
+                      : "bg-blue-950/40 border border-blue-800/40 text-blue-200"
+                  }`}
+                >
+                  <Loader2
+                    className={`w-3.5 h-3.5 animate-spin ${
+                      activeActivity.step.toLowerCase().includes("video") ||
+                      activeActivity.step.toLowerCase().includes("image")
+                        ? "text-violet-400"
+                        : "text-blue-400"
+                    }`}
+                  />
                   <span className="font-medium">{activeActivity.step}</span>
                   {activeActivity.details && (
-                    <span className="text-[11px] text-blue-300/80 font-mono">
-                      ({activeActivity.details.slice(0, 80)})
+                    <span className="text-[11px] opacity-80 font-mono">
+                      ({activeActivity.details.slice(0, 100)})
                     </span>
                   )}
                 </div>
-              )}
+              ) : isGenerating ? (
+                <div className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-zinc-900/80 border border-zinc-800 text-zinc-400 text-xs w-fit">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-zinc-400" />
+                  <span className="font-medium text-zinc-300">Thinking...</span>
+                </div>
+              ) : null}
             </div>
           )}
         </div>
