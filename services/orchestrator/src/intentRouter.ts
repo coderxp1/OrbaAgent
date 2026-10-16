@@ -93,6 +93,17 @@ export function findPendingMediaProposal(messages: ChatMessage[]): {
 } | null {
   if (!messages || messages.length < 2) return null;
 
+  // The latest user message must not be an explicit software/system request
+  const latestUser = messages[messages.length - 1];
+  const latestText = latestUser && typeof latestUser.content === "string" ? latestUser.content : "";
+  if (
+    /\b(?:workspace|directory|folder|repo|repository|git|terminal|shell|bash|npm|pnpm|cargo|pip|compile|build|vitest|jest|refactor|debug|codebase)\b/i.test(
+      latestText,
+    )
+  ) {
+    return null;
+  }
+
   let candidatePrompt = "";
   let isVideo = false;
   let duration: number | undefined;
@@ -112,6 +123,22 @@ export function findPendingMediaProposal(messages: ChatMessage[]): {
           : "";
 
     if (!text.trim()) continue;
+
+    // If an intervening turn is an unrelated domain (software engineering, system, or general technical explanation)
+    // and contains NO media references, the prior media context has been superseded. Stop looking further back.
+    if (
+      msg.role === "user" &&
+      !/\b(?:video|image|photo|flux|wan2|prompt|option|go|yes|ok|sure|proceed)\b/i.test(text)
+    ) {
+      break;
+    }
+    if (
+      msg.role === "assistant" &&
+      /\b(?:workspace|terminal|git|qubits?|superposition|algorithm)\b/i.test(text) &&
+      !/\b(?:video|image|photo|t2v|t2i|flux|wan2)\b/i.test(text)
+    ) {
+      break;
+    }
 
     if (
       /\b(?:video|wan2\.1|t2v|fps|seconds?|animation|clip|motion|tracking shot|camera movement|cinematic scene|cinematic prompt|soaring|flying car|hovercar|chase)\b/i.test(
@@ -192,9 +219,7 @@ export function findPendingMediaProposal(messages: ChatMessage[]): {
   }
 
   // Also check the latest user message for duration or dimensions
-  const latestUser = messages[messages.length - 1];
-  if (latestUser && latestUser.role === "user") {
-    const latestText = typeof latestUser.content === "string" ? latestUser.content : "";
+  if (latestUser?.role === "user") {
     const userDur = extractVideoDurationSeconds(latestText);
     if (userDur) duration = userDur;
     const userDims = extractDimensions(latestText);
@@ -261,7 +286,12 @@ export function routeUserIntent(
       lower,
     );
 
-  if (isConfirmation) {
+  const isExplicitSoftwareOrSystem =
+    /\b(?:workspace|directory|folder|repo|repository|git status|git commit|git diff|git log|terminal|shell|bash|npm|pnpm|cargo|pip|compile|build|unit test|vitest|jest|refactor|debug|fix bug|codebase)\b/i.test(
+      lower,
+    );
+
+  if (isConfirmation && !isExplicitSoftwareOrSystem) {
     const pendingMedia = findPendingMediaProposal(messages);
     if (pendingMedia) {
       const isVideo = pendingMedia.type === "video";

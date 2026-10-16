@@ -391,5 +391,42 @@ describe("Natural-Language Intent Routing", () => {
       expect(registry.getActiveToolNames()).not.toContain("media_image_generate");
       expect(registry.getActiveToolNames()).not.toContain("execute_shell");
     });
+
+    it("does NOT trigger media generation when user confirms a workspace/coding request even if earlier turns had media", () => {
+      const registry = new ToolRegistry();
+      registry.resetActiveToolsToCore();
+
+      const conversation: ChatMessage[] = [
+        {
+          role: "user",
+          content: "Can you create a prompt for a video of an eagle soaring?",
+        },
+        {
+          role: "assistant",
+          content: "Here is a prompt: A majestic golden eagle soaring high above mountain peaks.",
+        },
+        {
+          role: "user",
+          content:
+            "List the workspace directory structure and check the git commit status using the shell terminal.",
+        },
+        {
+          role: "assistant",
+          content:
+            "Please confirm which path you want me to check: current workspace root, or a specific repo?",
+        },
+        {
+          role: "user",
+          content: "current workspace root, go ahead",
+        },
+      ];
+
+      const result = routeUserIntent(conversation, registry);
+
+      expect(result.intent).not.toBe("media_video");
+      expect(result.intent).not.toBe("media_image");
+      expect(registry.getActiveToolNames()).not.toContain("media_video_generate");
+      expect(registry.getActiveToolNames()).not.toContain("media_image_generate");
+    });
   });
 });
