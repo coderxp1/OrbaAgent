@@ -75,6 +75,11 @@ export class MediaVideoGenerateTool implements ITool {
           description:
             "Optional URL or artifactId of a company logo or brand image to visibly incorporate into the commercial.",
         },
+        image_url: {
+          type: "string",
+          description:
+            "Optional URL or artifactId of an input image or photo to condition video generation on (Image-to-Video).",
+        },
       },
       required: ["prompt"],
     },
@@ -107,6 +112,7 @@ export class MediaVideoGenerateTool implements ITool {
       width: number;
       height: number;
       model?: string;
+      image_url?: string;
     },
   ): Promise<ClipGenerationResult> {
     const maxAttempts = 6;
@@ -139,7 +145,8 @@ export class MediaVideoGenerateTool implements ITool {
             fps: current.fps,
             width: current.width,
             height: current.height,
-            model: current.model || "kandinsky-6.0",
+            model: current.model || (current.image_url ? "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers" : "kandinsky-6.0"),
+            ...(current.image_url ? { image_url: current.image_url } : {}),
           }),
           signal: AbortSignal.timeout(requestTimeout),
         });
@@ -208,6 +215,30 @@ export class MediaVideoGenerateTool implements ITool {
 
     if (!jobRes || !jobRes.ok) {
       const errorText = await jobRes?.text().catch(() => "Unknown error");
+      if (jobRes?.status === 503) {
+        try {
+          const hRes = await fetch(`${workerUrl}/health`, {
+            headers: { Authorization: `Bearer ${workerToken}` },
+            signal: AbortSignal.timeout(2000),
+          });
+          if (hRes.ok) {
+            const hData = await hRes.json();
+            const activeJob = hData?.active_job;
+            if (activeJob) {
+              const progressMsg =
+                activeJob.step && activeJob.total_steps
+                  ? `step ${activeJob.step}/${activeJob.total_steps} (${Math.round(
+                      (activeJob.step / activeJob.total_steps) * 100,
+                    )}% complete)`
+                  : `stage '${activeJob.stage || "inference"}'`;
+              return {
+                success: false,
+                error: `A media generation job (${activeJob.job_id}) is currently running on the GPU worker (${progressMsg}, elapsed ${activeJob.elapsed_seconds}s). Please retry shortly.`,
+              };
+            }
+          }
+        } catch {}
+      }
       return {
         success: false,
         error: `Video generation failed (temporarily unavailable): GPU worker returned HTTP ${jobRes?.status}: ${errorText}`,
@@ -539,35 +570,41 @@ export class MediaVideoGenerateTool implements ITool {
       let rawResultMetadata: any = {};
       let jobId = `job_${Date.now()}`;
 
-      // Detect logo artifact URL from parameters or context attachments
-      let logoArtifactUrl: string | undefined = args.logo_url
-        ? String(args.logo_url)
-        : args.image_url
-          ? String(args.image_url)
-          : undefined;
-      if (!logoArtifactUrl && context?.attachments && context.attachments.length > 0) {
-        const logoAtt = context.attachments.find(
+      // Detect conditioning photo vs. brand logo from parameters or context attachments
+      let inputImageUrl: string | undefined = args.image_url ? String(args.image_url) : undefined;
+      let logoArtifactUrl: string | undefined = args.logo_url ? String(args.logo_url) : undefined;
+
+      if (!inputImageUrl && !logoArtifactUrl && context?.attachments && context.attachments.length > 0) {
+        const imageAtt = context.attachments.find(
           (a) =>
             a.type?.startsWith("image/") ||
             /\.(png|jpe?g|webp|gif|svg)$/i.test(a.name || "") ||
             /logo/i.test(a.name || ""),
         );
-        if (logoAtt) {
-          const rawUrl = (logoAtt as any).url || (logoAtt as any).previewUrl;
+        if (imageAtt) {
+          const rawUrl = (imageAtt as any).url || (imageAtt as any).previewUrl;
+          let resolvedAttUrl = "";
           if (rawUrl && typeof rawUrl === "string") {
-            logoArtifactUrl = rawUrl;
-          } else if (logoAtt.artifactId || (logoAtt as any).id) {
-            const rawId = logoAtt.artifactId || (logoAtt as any).id;
+            resolvedAttUrl = rawUrl;
+          } else if (imageAtt.artifactId || (imageAtt as any).id) {
+            const rawId = imageAtt.artifactId || (imageAtt as any).id;
             try {
               const decoded = JSON.parse(
                 Buffer.from(rawId, "base64url").toString("utf-8"),
               );
-              logoArtifactUrl = `/api/artifacts/${encodeURIComponent(decoded.w)}/${encodeURIComponent(decoded.b)}/${encodeURIComponent(decoded.p)}`;
+              resolvedAttUrl = `/api/artifacts/${encodeURIComponent(decoded.w)}/${encodeURIComponent(decoded.b)}/${encodeURIComponent(decoded.p)}`;
             } catch {
-              logoArtifactUrl = rawId;
+              resolvedAttUrl = rawId;
             }
-          } else if (logoAtt.name) {
-            logoArtifactUrl = logoAtt.name;
+          } else if (imageAtt.name) {
+            resolvedAttUrl = imageAtt.name;
+          }
+
+          const isLogo = /logo/i.test(imageAtt.name || "") || /\b(logo|brand|brandmark)\b/i.test(prompt);
+          if (isLogo) {
+            logoArtifactUrl = resolvedAttUrl;
+          } else {
+            inputImageUrl = resolvedAttUrl;
           }
         }
       }
@@ -585,7 +622,12 @@ export class MediaVideoGenerateTool implements ITool {
           fps,
           width,
           height,
-          model,
+          model: args.model
+            ? String(args.model)
+            : inputImageUrl
+              ? "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers"
+              : model,
+          image_url: inputImageUrl,
         });
 
         if (!heroClip.success || !heroClip.artifactUrl) {
@@ -651,7 +693,12 @@ export class MediaVideoGenerateTool implements ITool {
           fps,
           width,
           height,
-          model,
+          model: args.model
+            ? String(args.model)
+            : inputImageUrl
+              ? "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers"
+              : model,
+          image_url: inputImageUrl,
         });
 
         if (!clip.success) {
@@ -671,7 +718,7 @@ export class MediaVideoGenerateTool implements ITool {
         finalSha256 = clip.sha256;
         rawResultMetadata = clip.rawResult || {};
 
-        if (clip.artifactUrl) {
+        if (clip.artifactUrl && logoArtifactUrl) {
           const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "orba-vid-single-"));
           try {
             const tmpVid = path.join(tmpDir, "clip.mp4");

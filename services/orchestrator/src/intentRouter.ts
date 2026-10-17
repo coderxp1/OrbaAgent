@@ -480,20 +480,20 @@ Do NOT execute any tools or task plans for this capability inquiry.`,
       lower,
     );
     const explicitDuration = extractVideoDurationSeconds(content);
-    const duration = explicitDuration || (isCommercial ? 15 : 5);
+    const duration = explicitDuration || (isCommercial ? 15 : 3);
 
     // Resolve orientation and enforce 16-divisible dimensions
     const orientation = extractVideoOrientation(content);
     let dims = extractDimensions(content);
     if (!dims) {
       if (orientation === "vertical") {
-        dims = { width: 720, height: 1280 }; // 9:16 portrait (720%16=0, 1280%16=0)
+        dims = { width: 480, height: 848 }; // 9:16 portrait (480%16=0, 848%16=0)
       } else if (orientation === "horizontal") {
-        dims = { width: 1280, height: 720 }; // 16:9 landscape (1280%16=0, 720%16=0)
+        dims = { width: 848, height: 480 }; // 16:9 landscape (848%16=0, 480%16=0)
       } else if (orientation === "square") {
-        dims = { width: 720, height: 720 }; // 1:1 square (720%16=0)
+        dims = { width: 480, height: 480 }; // 1:1 square (480%16=0)
       } else {
-        dims = { width: 1280, height: 720 }; // Default 16:9 landscape
+        dims = { width: 848, height: 480 }; // Default 16:9 landscape
       }
     } else {
       // Enforce strict divisibility by 16 on any explicitly extracted dimensions
@@ -501,6 +501,25 @@ Do NOT execute any tools or task plans for this capability inquiry.`,
         width: Math.round(dims.width / 16) * 16,
         height: Math.round(dims.height / 16) * 16,
       };
+    }
+
+    // Detect image attachment from turn messages
+    let attachedImageUrl: string | undefined;
+    if (Array.isArray(latestMessage?.content)) {
+      const imgPart = latestMessage.content.find(
+        (c: any) => c.type === "image_url" && (c as any).image_url?.url,
+      );
+      if (imgPart && "image_url" in (imgPart as any)) attachedImageUrl = (imgPart as any).image_url.url;
+    }
+    if (!attachedImageUrl && (latestMessage as any)?.attachments?.length > 0) {
+      const att = (latestMessage as any).attachments.find(
+        (a: any) =>
+          a.type?.startsWith("image/") || /\.(png|jpe?g|webp|gif|svg)$/i.test(a.name || ""),
+      );
+      if (att) {
+        attachedImageUrl =
+          att.url || att.previewUrl || att.artifactId || (att as any).id || att.name;
+      }
     }
 
     // Detect user requested style
@@ -524,6 +543,7 @@ Do NOT execute any tools or task plans for this capability inquiry.`,
         height: dims.height,
         fps: 16,
         orientation: orientation || "horizontal",
+        ...(attachedImageUrl ? { image_url: attachedImageUrl } : {}),
       },
       systemGuidance: `[Intent Router: Detected ${isCommercial ? "Commercial Video" : "Video"} Generation Request]
 The user wants to generate ${isCommercial ? "a commercial video" : "an AI video"} ("${content}"). Tool 'media_video_generate' has been activated.
@@ -540,11 +560,13 @@ ACTION-ORIENTED EXECUTION POLICY (ZERO QUESTIONNAIRES):
   }
 - EXECUTE 'media_video_generate' IMMEDIATELY on this first turn.
 - Briefly acknowledge in the user's language (Spanish, English, German, etc.) and run the tool now.
-Call 'media_video_generate' directly with:
+${attachedImageUrl ? `- Photo Conditioning: The user provided an attached image/photo. Pass image_url: "${attachedImageUrl}" directly to 'media_video_generate'. Describe the person/subject, appearance, lighting, and realistic movement matching the photo faithfully.\n` : ""}Call 'media_video_generate' directly with:
 - prompt: ${
   isExplicitCartoon
     ? "Stylized description tailored to user request"
-    : "Photorealistic live-action visual description: natural lighting, lifelike textures, realistic anatomy, coherent cinematic motion"
+    : attachedImageUrl
+      ? "Detailed lifelike visual description faithfully reflecting the subject, clothing, and atmosphere of the uploaded photo in coherent cinematic motion"
+      : "Photorealistic live-action visual description: natural lighting, lifelike textures, realistic anatomy, coherent cinematic motion"
 }
 - negative_prompt: ${
   isExplicitCartoon
@@ -554,7 +576,7 @@ Call 'media_video_generate' directly with:
 - duration_seconds: ${duration}
 - width: ${dims.width}
 - height: ${dims.height}
-- fps: 16`,
+- fps: 16${attachedImageUrl ? `\n- image_url: "${attachedImageUrl}"` : ""}`,
     };
   }
 

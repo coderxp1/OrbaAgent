@@ -185,20 +185,6 @@ class GenerationLimiter:
 
     @contextmanager
     def slot(self, job_id: str = "", kind: str = "media"):
-        with self._lock:
-            self._cleanup_stale_locked()
-
-        acquired = self._semaphore.acquire(blocking=False)
-        if not acquired:
-            active_info = self.get_active_job()
-            detail_msg = f"a media generation job is already running (limit {self._max}); retry shortly"
-            if active_info:
-                detail_msg += (
-                    f" [Current job: {active_info['job_id']}, stage={active_info['stage']}, "
-                    f"elapsed={active_info['elapsed_seconds']}s]"
-                )
-            raise GenerationBusyError(detail_msg)
-
         now = time.time()
         actual_job_id = job_id or f"job_{uuid.uuid4().hex[:8]}"
         job = JobProgress(
@@ -210,6 +196,25 @@ class GenerationLimiter:
         )
 
         with self._lock:
+            self._cleanup_stale_locked()
+            acquired = self._semaphore.acquire(blocking=False)
+            if not acquired or self._active >= self._max:
+                active_info = None
+                if self._current_job_id and self._current_job_id in self._active_jobs:
+                    j = self._active_jobs[self._current_job_id]
+                    active_info = {
+                        "job_id": j.job_id,
+                        "stage": j.stage,
+                        "elapsed_seconds": round(now - j.started_at, 1),
+                    }
+                detail_msg = f"a media generation job is already running (limit {self._max}); retry shortly"
+                if active_info:
+                    detail_msg += (
+                        f" [Current job: {active_info['job_id']}, stage={active_info['stage']}, "
+                        f"elapsed={active_info['elapsed_seconds']}s]"
+                    )
+                raise GenerationBusyError(detail_msg)
+
             self._active += 1
             self._active_jobs[actual_job_id] = job
             self._current_job_id = actual_job_id
@@ -221,7 +226,7 @@ class GenerationLimiter:
                 self._active = max(0, self._active - 1)
                 self._active_jobs.pop(actual_job_id, None)
                 if self._current_job_id == actual_job_id:
-                    self._current_job_id = None
+                    self._current_job_id = next(iter(self._active_jobs), None)
                 try:
                     self._semaphore.release()
                 except ValueError:
