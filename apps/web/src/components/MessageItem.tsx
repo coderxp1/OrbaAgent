@@ -297,12 +297,16 @@ export function MessageItem({
             const res = message.toolResults?.find((r) => r.toolCallId === c.id);
             return !res;
           });
+          const hasMediaVideoTool = mediaToolCalls.some((c) => c.name === "media_video_generate");
           const isRedundantMediaText = (text: string) => {
             const lower = text.toLowerCase();
             return (
               lower.includes("transfer this request to the video generation agent") ||
               lower.includes("creating your commercial video") ||
-              lower.includes("[view video]")
+              lower.includes("[view video]") ||
+              lower.includes("[view generated video]") ||
+              lower.includes("view generated video") ||
+              lower.includes("here is your generated video")
             );
           };
 
@@ -326,6 +330,7 @@ export function MessageItem({
                     content={message.content}
                     onCopy={handleCopy}
                     copiedCode={copiedCode}
+                    hasMediaVideoTool={hasMediaVideoTool}
                   />
                 ) : (
                   message.content.map((p, idx) =>
@@ -335,6 +340,7 @@ export function MessageItem({
                         content={p.text}
                         onCopy={handleCopy}
                         copiedCode={copiedCode}
+                        hasMediaVideoTool={hasMediaVideoTool}
                       />
                     ) : isSafeImageUrl(p.image_url.url) ? (
                       <img
@@ -448,10 +454,12 @@ function FormattedContent({
   content,
   onCopy,
   copiedCode,
+  hasMediaVideoTool = false,
 }: {
   content: string;
   onCopy: (code: string) => void;
   copiedCode: string | null;
+  hasMediaVideoTool?: boolean;
 }) {
   // Split on fenced code blocks: ```lang ... ```
   const parts = content.split(/(```[\s\S]*?```)/g);
@@ -498,13 +506,19 @@ function FormattedContent({
         }
 
         // Render structured markdown blocks
-        return <MarkdownBlock key={itemKey} text={part} />;
+        return <MarkdownBlock key={itemKey} text={part} hasMediaVideoTool={hasMediaVideoTool} />;
       })}
     </div>
   );
 }
 
-function MarkdownBlock({ text }: { text: string }) {
+function MarkdownBlock({
+  text,
+  hasMediaVideoTool = false,
+}: {
+  text: string;
+  hasMediaVideoTool?: boolean;
+}) {
   const lines = text.split("\n");
   const elements: React.ReactNode[] = [];
   let currentList: { type: "ul" | "ol"; items: React.ReactNode[] } | null = null;
@@ -554,7 +568,7 @@ function MarkdownBlock({ text }: { text: string }) {
       flushList();
       elements.push(
         <h3 key={i} className="text-base font-semibold text-white mt-4 mb-1">
-          {renderInlineMarkdown(trimmed.slice(4))}
+          {renderInlineMarkdown(trimmed.slice(4), hasMediaVideoTool)}
         </h3>,
       );
       continue;
@@ -566,7 +580,7 @@ function MarkdownBlock({ text }: { text: string }) {
           key={i}
           className="text-lg font-semibold text-white mt-5 mb-1.5 border-b border-zinc-800/60 pb-1"
         >
-          {renderInlineMarkdown(trimmed.slice(3))}
+          {renderInlineMarkdown(trimmed.slice(3), hasMediaVideoTool)}
         </h2>,
       );
       continue;
@@ -578,7 +592,7 @@ function MarkdownBlock({ text }: { text: string }) {
           key={i}
           className="text-xl font-bold text-white mt-6 mb-2 border-b border-zinc-800/80 pb-1.5"
         >
-          {renderInlineMarkdown(trimmed.slice(2))}
+          {renderInlineMarkdown(trimmed.slice(2), hasMediaVideoTool)}
         </h1>,
       );
       continue;
@@ -596,7 +610,7 @@ function MarkdownBlock({ text }: { text: string }) {
       flushList();
       elements.push(
         <blockquote key={i} className="border-l-2 border-zinc-600 pl-3.5 my-2 text-zinc-400 italic">
-          {renderInlineMarkdown(trimmed.slice(2))}
+          {renderInlineMarkdown(trimmed.slice(2), hasMediaVideoTool)}
         </blockquote>,
       );
       continue;
@@ -609,7 +623,7 @@ function MarkdownBlock({ text }: { text: string }) {
         flushList();
         currentList = { type: "ul", items: [] };
       }
-      currentList.items.push(renderInlineMarkdown(bulletMatch[1]));
+      currentList.items.push(renderInlineMarkdown(bulletMatch[1], hasMediaVideoTool));
       continue;
     }
 
@@ -620,14 +634,14 @@ function MarkdownBlock({ text }: { text: string }) {
         flushList();
         currentList = { type: "ol", items: [] };
       }
-      currentList.items.push(renderInlineMarkdown(numMatch[1]));
+      currentList.items.push(renderInlineMarkdown(numMatch[1], hasMediaVideoTool));
       continue;
     }
 
     flushList();
     elements.push(
       <p key={i} className="my-1.5 leading-relaxed text-zinc-200">
-        {renderInlineMarkdown(line)}
+        {renderInlineMarkdown(line, hasMediaVideoTool)}
       </p>,
     );
   }
@@ -711,7 +725,7 @@ function isSafeImageUrl(rawUrl: string): boolean {
   return false;
 }
 
-function renderInlineMarkdown(text: string): React.ReactNode {
+function renderInlineMarkdown(text: string, hasMediaVideoTool: boolean = false): React.ReactNode {
   // Regex to match markdown images: ![alt](url) and links: [text](url)
   const pattern = /(!?\[[^\]]*\]\([^)]+\))/g;
   const tokens = text.split(pattern);
@@ -793,6 +807,31 @@ function renderInlineMarkdown(text: string): React.ReactNode {
           linkText.toLowerCase().includes("video"));
 
       if (isVideoArtifact) {
+        if (hasMediaVideoTool) {
+          return (
+            <span key={i} className="my-1.5 inline-flex items-center gap-2">
+              <a
+                href={href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-violet-400 hover:text-violet-300 underline font-medium inline-flex items-center gap-1.5 text-xs"
+              >
+                <Film className="h-3.5 w-3.5 text-violet-400 inline" />
+                <span>{linkText || "View Generated Video"}</span>
+                <ExternalLink className="h-3 w-3 inline" />
+              </a>
+              <a
+                href={href}
+                download
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-zinc-300 hover:text-white inline-flex items-center gap-1 text-[11px] bg-zinc-800 hover:bg-zinc-700 px-2 py-0.5 rounded border border-zinc-700 transition-colors"
+              >
+                Download <Download className="h-2.5 w-2.5" />
+              </a>
+            </span>
+          );
+        }
         const filename = href.split("/").pop() || "video.mp4";
         return (
           <span key={i} className="my-3 block max-w-xl">
@@ -1085,33 +1124,63 @@ function MediaToolItem({ call, result, textContent, onReply }: MediaToolItemProp
             <div className="flex items-center justify-between pb-3 border-b border-zinc-800/80">
               <div className="flex items-center gap-2 text-xs font-semibold text-zinc-200">
                 <ChevronUp className="w-4 h-4 text-zinc-400" />
-                <span>Generate Commercial Video</span>
+                <span>Commercial Video Production</span>
               </div>
+              <span className="text-[10px] font-mono text-zinc-400 bg-zinc-800/80 px-2 py-0.5 rounded border border-zinc-700/60">
+                In Production
+              </span>
             </div>
 
-            <div className="flex flex-col gap-3 pt-3 text-xs">
-              {/* Step 1: Transfer To Agent */}
+            <div className="flex flex-col gap-2.5 pt-3 text-xs">
+              {/* Stage 1: Brand Assets */}
               <div className="flex items-center justify-between text-zinc-300">
                 <div className="flex items-center gap-2.5">
-                  <Bot className="w-4 h-4 text-zinc-400" />
-                  <span className="font-medium">Transfer To Agent</span>
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span className="font-medium text-zinc-200">Read uploaded brand assets & brief</span>
                 </div>
-                <CheckCircle2 className="w-4 h-4 text-zinc-400" />
+                <span className="text-[10px] text-zinc-500 font-mono">Done</span>
               </div>
 
-              {/* Step 2: Gen Video */}
-              <div className="flex items-center justify-between text-zinc-200">
+              {/* Stage 2: Storyboard */}
+              <div className="flex items-center justify-between text-zinc-300">
                 <div className="flex items-center gap-2.5">
-                  <Bot className="w-4 h-4 text-zinc-400" />
-                  <span className="font-medium">Gen Video</span>
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span className="font-medium text-zinc-200">Prepare commercial storyboard & scenes</span>
                 </div>
-                <Loader2 className="w-4 h-4 text-blue-400 animate-spin" />
+                <span className="text-[10px] text-zinc-500 font-mono">Done</span>
               </div>
 
-              {/* Step 3: Clock Note */}
-              <div className="flex items-center gap-2 text-zinc-400 pt-1 text-[11px]">
-                <Clock className="w-3.5 h-3.5 text-zinc-500" />
-                <span>Generating video. This may take a few minutes...</span>
+              {/* Stage 3: Video Generation */}
+              <div className="flex items-center justify-between text-zinc-100">
+                <div className="flex items-center gap-2.5">
+                  <Loader2 className="w-4 h-4 text-blue-400 animate-spin shrink-0" />
+                  <span className="font-medium">Generate cinematic footage</span>
+                </div>
+                <span className="text-[10px] text-blue-400 font-mono">Rendering...</span>
+              </div>
+
+              {/* Stage 4: Soundtrack */}
+              <div className="flex items-center justify-between text-zinc-500">
+                <div className="flex items-center gap-2.5">
+                  <Clock className="w-4 h-4 text-zinc-600 shrink-0" />
+                  <span>Synthesize narration & background soundtrack</span>
+                </div>
+                <span className="text-[10px] text-zinc-600 font-mono">Queued</span>
+              </div>
+
+              {/* Stage 5: Final Assembly & Branding */}
+              <div className="flex items-center justify-between text-zinc-500">
+                <div className="flex items-center gap-2.5">
+                  <Sparkles className="w-4 h-4 text-zinc-600 shrink-0" />
+                  <span>Assemble final commercial & pristine logo outro</span>
+                </div>
+                <span className="text-[10px] text-zinc-600 font-mono">Pending</span>
+              </div>
+
+              {/* Footer Note */}
+              <div className="flex items-center gap-2 text-zinc-400 pt-2 border-t border-zinc-800/60 text-[11px]">
+                <Clock className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
+                <span className="truncate">Production in progress. High-resolution diffusion rendering...</span>
               </div>
             </div>
           </div>

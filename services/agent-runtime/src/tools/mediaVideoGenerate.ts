@@ -216,11 +216,37 @@ export class MediaVideoGenerateTool implements ITool {
    * Resolves a delivered artifact URL to a local filesystem path, or downloads it to a temp path.
    */
   private async resolveOrDownloadArtifact(artifactUrl: string, tmpDest: string): Promise<string> {
-    const prefix = "/api/artifacts/";
-    if (artifactUrl.startsWith(prefix)) {
-      const rawPath = artifactUrl.slice(prefix.length);
-      const segments = rawPath.split("/").map((s) => decodeURIComponent(s));
-      const baseDir = process.env.ORBA_UPLOAD_DIR || path.join(process.cwd(), ".uploads");
+    if (!artifactUrl) {
+      throw new Error("Cannot resolve empty artifact URL");
+    }
+
+    const baseDir = process.env.ORBA_UPLOAD_DIR || path.join(process.cwd(), ".uploads");
+
+    // 1. Direct filesystem path check
+    if (path.isAbsolute(artifactUrl)) {
+      try {
+        const st = await fs.stat(artifactUrl);
+        if (st.isFile() && st.size > 0) return artifactUrl;
+      } catch {}
+    }
+
+    // 2. Base64url encoded artifactId
+    if (!artifactUrl.includes("/") && artifactUrl.length > 10) {
+      try {
+        const decoded = JSON.parse(Buffer.from(artifactUrl, "base64url").toString("utf-8"));
+        if (decoded.w && decoded.b && decoded.p) {
+          const local = resolveWithinBase(baseDir, [decoded.w, decoded.b, decoded.p]);
+          const st = await fs.stat(local);
+          if (st.isFile() && st.size > 0) return local;
+        }
+      } catch {}
+    }
+
+    // 3. Extract path from /api/artifacts/... (works for relative /api/artifacts/... AND absolute https://.../api/artifacts/...)
+    const artIndex = artifactUrl.indexOf("/api/artifacts/");
+    if (artIndex !== -1) {
+      const relPart = artifactUrl.slice(artIndex + "/api/artifacts/".length);
+      const segments = relPart.split("/").map((s) => decodeURIComponent(s));
       try {
         const local = resolveWithinBase(baseDir, segments);
         const st = await fs.stat(local);
@@ -230,15 +256,52 @@ export class MediaVideoGenerateTool implements ITool {
       } catch {}
     }
 
-    const appUrl = (
-      process.env.NEXT_PUBLIC_API_URL ||
-      process.env.ORBA_WEB_URL ||
-      "http://127.0.0.1:3000"
-    ).replace(/\/+$/, "");
+    // 4. Check if artifactUrl matches directly under baseDir (or relative path in uploads)
+    try {
+      const cleanRel = artifactUrl.replace(/^\/+/, "");
+      const segments = cleanRel.split("/").map((s) => decodeURIComponent(s));
+      const directLocal = resolveWithinBase(baseDir, segments);
+      const st = await fs.stat(directLocal);
+      if (st.isFile() && st.size > 0) return directLocal;
+    } catch {}
 
-    const res = await fetch(`${appUrl}${artifactUrl}`);
+    // Search for the filename anywhere in baseDir if it's a simple name like "KuikChat_Logo.png"
+    const simpleName = path.basename(artifactUrl);
+    if (simpleName && simpleName.includes(".")) {
+      try {
+        const entries = await fs.readdir(baseDir, { recursive: true });
+        for (const entry of entries) {
+          if (
+            typeof entry === "string" &&
+            (entry.endsWith(`/${simpleName}`) ||
+              entry.endsWith(`\\${simpleName}`) ||
+              entry === simpleName)
+          ) {
+            const foundPath = path.join(baseDir, entry);
+            const st = await fs.stat(foundPath);
+            if (st.isFile() && st.size > 0) return foundPath;
+          }
+        }
+      } catch {}
+    }
+
+    // 5. Network fetch fallback: ensure proper URL formatting with single slash
+    let fetchUrl: string;
+    if (artifactUrl.startsWith("http://") || artifactUrl.startsWith("https://")) {
+      fetchUrl = artifactUrl;
+    } else {
+      const appUrl = (
+        process.env.NEXT_PUBLIC_API_URL ||
+        process.env.ORBA_WEB_URL ||
+        "http://127.0.0.1:3000"
+      ).replace(/\/+$/, "");
+      const cleanPath = artifactUrl.startsWith("/") ? artifactUrl : `/${artifactUrl}`;
+      fetchUrl = `${appUrl}${cleanPath}`;
+    }
+
+    const res = await fetch(fetchUrl);
     if (!res.ok) {
-      throw new Error(`Failed to fetch artifact from ${artifactUrl}: HTTP ${res.status}`);
+      throw new Error(`Failed to fetch artifact from ${fetchUrl}: HTTP ${res.status}`);
     }
     const buf = Buffer.from(await res.arrayBuffer());
     await fs.writeFile(tmpDest, buf);
@@ -423,7 +486,11 @@ export class MediaVideoGenerateTool implements ITool {
       let jobId = `job_${Date.now()}`;
 
       // Detect logo artifact URL from parameters or context attachments
-      let logoArtifactUrl: string | undefined = args.logo_url ? String(args.logo_url) : undefined;
+      let logoArtifactUrl: string | undefined = args.logo_url
+        ? String(args.logo_url)
+        : args.image_url
+          ? String(args.image_url)
+          : undefined;
       if (!logoArtifactUrl && context?.attachments && context.attachments.length > 0) {
         const logoAtt = context.attachments.find(
           (a) =>
@@ -432,23 +499,21 @@ export class MediaVideoGenerateTool implements ITool {
             /logo/i.test(a.name || ""),
         );
         if (logoAtt) {
-          const rawUrl = (logoAtt as any).url;
-          if (rawUrl && typeof rawUrl === "string" && rawUrl.startsWith("/api/artifacts/")) {
+          const rawUrl = (logoAtt as any).url || (logoAtt as any).previewUrl;
+          if (rawUrl && typeof rawUrl === "string") {
             logoArtifactUrl = rawUrl;
-          } else if (logoAtt.artifactId) {
+          } else if (logoAtt.artifactId || (logoAtt as any).id) {
+            const rawId = logoAtt.artifactId || (logoAtt as any).id;
             try {
               const decoded = JSON.parse(
-                Buffer.from(logoAtt.artifactId, "base64url").toString("utf-8"),
+                Buffer.from(rawId, "base64url").toString("utf-8"),
               );
               logoArtifactUrl = `/api/artifacts/${encodeURIComponent(decoded.w)}/${encodeURIComponent(decoded.b)}/${encodeURIComponent(decoded.p)}`;
             } catch {
-              if (
-                typeof logoAtt.artifactId === "string" &&
-                logoAtt.artifactId.startsWith("/api/artifacts/")
-              ) {
-                logoArtifactUrl = logoAtt.artifactId;
-              }
+              logoArtifactUrl = rawId;
             }
+          } else if (logoAtt.name) {
+            logoArtifactUrl = logoAtt.name;
           }
         }
       }
