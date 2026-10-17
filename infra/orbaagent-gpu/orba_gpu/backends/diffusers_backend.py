@@ -204,11 +204,14 @@ def run_video_inference(
         kwargs["guidance_scale"] = 1.0
         if negative_prompt:
             kwargs["negative_prompt"] = negative_prompt
-    elif negative_prompt:
-        if getattr(pipeline, "do_classifier_free_guidance", False) or is_wan:
+    elif is_wan:
+        kwargs["num_inference_steps"] = 25
+        kwargs["guidance_scale"] = 5.0
+        if negative_prompt:
             kwargs["negative_prompt"] = negative_prompt
-            if is_wan:
-                kwargs.setdefault("guidance_scale", 5.0)
+    elif negative_prompt:
+        if getattr(pipeline, "do_classifier_free_guidance", False):
+            kwargs["negative_prompt"] = negative_prompt
 
     result = pipeline(**kwargs)
     frames = getattr(result, "frames", None)
