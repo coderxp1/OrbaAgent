@@ -1146,9 +1146,8 @@ function MediaToolItem({
     return () => clearInterval(timer);
   }, [result]);
 
-  const isStalled = !result && elapsed >= 180;
-
-  // Stalled / Timed-out state (>180s without worker completion)
+  // Stalled / Timed-out state (>420s without worker completion)
+  const isStalled = !result && elapsed >= 420;
   if (isStalled) {
     return (
       <div className="my-2.5 rounded-2xl border border-amber-900/60 bg-amber-950/20 p-4 text-xs text-amber-200 shadow-lg max-w-xl">
@@ -1185,12 +1184,6 @@ function MediaToolItem({
   // 1. Result not yet available -> genuine dynamic step tracker card
   if (!result) {
     if (isVideo) {
-      // Dynamic stage calculation based on actual elapsed runtime
-      const stage1Done = elapsed >= 2;
-      const stage2Done = elapsed >= 6;
-      const stage3Done = elapsed >= 45;
-      const stage4Done = elapsed >= 65;
-
       return (
         <div className="my-2.5 flex flex-col gap-2 max-w-lg">
           <div className="rounded-2xl border border-zinc-800 bg-[#1e1e20] p-4 shadow-xl text-zinc-200">
@@ -1211,94 +1204,55 @@ function MediaToolItem({
             </div>
 
             <div className="flex flex-col gap-2.5 pt-3 text-xs">
-              {/* Stage 1: Brand Assets */}
-              <div className={`flex items-center justify-between ${stage1Done ? "text-zinc-300" : "text-zinc-100"}`}>
+              {/* Stage 1: Brand Assets & Parameters */}
+              <div className="flex items-center justify-between text-zinc-300">
                 <div className="flex items-center gap-2.5">
-                  {stage1Done ? (
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                  ) : (
-                    <Loader2 className="w-4 h-4 text-blue-400 animate-spin shrink-0" />
-                  )}
-                  <span className={stage1Done ? "text-zinc-300" : "font-medium text-white"}>
-                    Read uploaded brand assets & brief
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span className="text-zinc-300">
+                    Read brand assets & scene parameters
                   </span>
                 </div>
                 <span className="text-[10px] text-zinc-500 font-mono">
-                  {stage1Done ? "Done" : "Reading..."}
+                  Verified
                 </span>
               </div>
 
-              {/* Stage 2: Storyboard */}
-              <div className={`flex items-center justify-between ${stage2Done ? "text-zinc-300" : stage1Done ? "text-zinc-100" : "text-zinc-500"}`}>
+              {/* Stage 2: Video Generation (Active) */}
+              <div className="flex items-center justify-between text-zinc-100">
                 <div className="flex items-center gap-2.5">
-                  {stage2Done ? (
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                  ) : stage1Done ? (
-                    <Loader2 className="w-4 h-4 text-blue-400 animate-spin shrink-0" />
-                  ) : (
-                    <Clock className="w-4 h-4 text-zinc-600 shrink-0" />
-                  )}
-                  <span className={stage2Done ? "text-zinc-300" : stage1Done ? "font-medium text-white" : ""}>
-                    Prepare commercial storyboard & scenes
+                  <Loader2 className="w-4 h-4 text-blue-400 animate-spin shrink-0" />
+                  <span className="font-medium text-white">
+                    Generate cinematic footage (GPU 1 Diffusion)
                   </span>
                 </div>
-                <span className="text-[10px] text-zinc-500 font-mono">
-                  {stage2Done ? "Done" : stage1Done ? "Planning..." : "Queued"}
+                <span className="text-[10px] font-mono text-blue-400">
+                  Rendering... ({elapsed}s)
                 </span>
               </div>
 
-              {/* Stage 3: Video Generation */}
-              <div className={`flex items-center justify-between ${stage3Done ? "text-zinc-300" : stage2Done ? "text-zinc-100" : "text-zinc-500"}`}>
+              {/* Stage 3: Soundtrack & Brand Outro (Queued) */}
+              <div className="flex items-center justify-between text-zinc-500">
                 <div className="flex items-center gap-2.5">
-                  {stage3Done ? (
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                  ) : stage2Done ? (
-                    <Loader2 className="w-4 h-4 text-blue-400 animate-spin shrink-0" />
-                  ) : (
-                    <Clock className="w-4 h-4 text-zinc-600 shrink-0" />
-                  )}
-                  <span className={stage3Done ? "text-zinc-300" : stage2Done ? "font-medium text-white" : ""}>
-                    Generate cinematic footage (Diffusion rendering)
+                  <Clock className="w-4 h-4 text-zinc-600 shrink-0" />
+                  <span>
+                    Synthesize background soundtrack & logo outro
                   </span>
                 </div>
-                <span className={`text-[10px] font-mono ${stage3Done ? "text-zinc-500" : stage2Done ? "text-blue-400" : "text-zinc-600"}`}>
-                  {stage3Done ? "Done" : stage2Done ? "Rendering..." : "Queued"}
+                <span className="text-[10px] font-mono text-zinc-600">
+                  Queued
                 </span>
               </div>
 
-              {/* Stage 4: Soundtrack */}
-              <div className={`flex items-center justify-between ${stage4Done ? "text-zinc-300" : stage3Done ? "text-zinc-100" : "text-zinc-500"}`}>
+              {/* Stage 4: Final Packaging (Pending) */}
+              <div className="flex items-center justify-between text-zinc-500">
                 <div className="flex items-center gap-2.5">
-                  {stage4Done ? (
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                  ) : stage3Done ? (
-                    <Loader2 className="w-4 h-4 text-blue-400 animate-spin shrink-0" />
-                  ) : (
-                    <Clock className="w-4 h-4 text-zinc-600 shrink-0" />
-                  )}
-                  <span className={stage4Done ? "text-zinc-300" : stage3Done ? "font-medium text-white" : ""}>
-                    Synthesize narration & background soundtrack
+                  <Sparkles className="w-4 h-4 text-zinc-600 shrink-0" />
+                  <span>
+                    Assemble final commercial video
                   </span>
                 </div>
-                <span className={`text-[10px] font-mono ${stage4Done ? "text-zinc-500" : stage3Done ? "text-blue-400" : "text-zinc-600"}`}>
-                  {stage4Done ? "Done" : stage3Done ? "Synthesizing..." : "Queued"}
-                </span>
-              </div>
-
-              {/* Stage 5: Final Assembly & Branding */}
-              <div className={`flex items-center justify-between ${stage4Done ? "text-zinc-100" : "text-zinc-500"}`}>
-                <div className="flex items-center gap-2.5">
-                  {stage4Done ? (
-                    <Loader2 className="w-4 h-4 text-amber-400 animate-spin shrink-0" />
-                  ) : (
-                    <Sparkles className="w-4 h-4 text-zinc-600 shrink-0" />
-                  )}
-                  <span className={stage4Done ? "font-medium text-amber-200" : ""}>
-                    Assemble final commercial & pristine logo outro
-                  </span>
-                </div>
-                <span className={`text-[10px] font-mono ${stage4Done ? "text-amber-400" : "text-zinc-600"}`}>
-                  {stage4Done ? "Assembling..." : "Pending"}
+                <span className="text-[10px] font-mono text-zinc-600">
+                  Pending
                 </span>
               </div>
 
@@ -1307,13 +1261,7 @@ function MediaToolItem({
                 <div className="flex items-center gap-2 truncate">
                   <Clock className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
                   <span className="truncate">
-                    {stage4Done
-                      ? "Assembling audio, video clips, and logo branding..."
-                      : stage3Done
-                        ? "Generating synchronized high-fidelity audio..."
-                        : stage2Done
-                          ? "Executing neural diffusion on GPU 1..."
-                          : "Preparing scene composition and prompt guidance..."}
+                    Executing neural diffusion on dedicated GPU 1...
                   </span>
                 </div>
               </div>
