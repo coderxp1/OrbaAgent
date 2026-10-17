@@ -109,9 +109,10 @@ export class MediaVideoGenerateTool implements ITool {
       model?: string;
     },
   ): Promise<ClipGenerationResult> {
-    let jobRes: Response | null = null;
+    const maxAttempts = 6;
     let attempts = 0;
-    const maxAttempts = 2;
+    let jobRes: Response | null = null;
+
     // Always guarantee that dimensions sent to the backend are multiples of 16
     let safeWidth = Math.max(256, Math.min(1920, Math.round(clipParams.width / 16) * 16));
     let safeHeight = Math.max(256, Math.min(1920, Math.round(clipParams.height / 16) * 16));
@@ -143,12 +144,35 @@ export class MediaVideoGenerateTool implements ITool {
           signal: AbortSignal.timeout(requestTimeout),
         });
 
-        // Bounded self-repair 1: Permit contention (503 BUSY) -> wait and retry
+        // Bounded self-repair 1: Permit contention (503 BUSY) -> check health and auto-recover stale locks
         if (jobRes.status === 503 && attempts < maxAttempts) {
           console.warn(
-            `[MEDIA SELF-REPAIR] Worker busy (attempt ${attempts}/${maxAttempts}). Waiting before retry...`,
+            `[MEDIA RETRY] Worker busy (attempt ${attempts}/${maxAttempts}). Inspecting worker health...`,
           );
-          await new Promise((r) => setTimeout(r, 2000));
+          try {
+            const hRes = await fetch(`${workerUrl}/health`, {
+              headers: { Authorization: `Bearer ${workerToken}` },
+              signal: AbortSignal.timeout(3000),
+            });
+            if (hRes.ok) {
+              const hData = await hRes.json();
+              const activeJob = hData?.active_job;
+              // If active job has stalled (no heartbeat for > 45s or elapsed > 240s), trigger a reset
+              if (activeJob && (activeJob.last_heartbeat_ago > 45 || activeJob.elapsed_seconds > 240)) {
+                console.warn(
+                  `[MEDIA RECOVERY] Stale job detected (${activeJob.job_id}, silent ${activeJob.last_heartbeat_ago}s). Resetting worker limiter...`,
+                );
+                await fetch(`${workerUrl}/api/jobs/reset`, {
+                  method: "POST",
+                  headers: { Authorization: `Bearer ${workerToken}` },
+                  signal: AbortSignal.timeout(3000),
+                }).catch(() => null);
+              }
+            }
+          } catch (hErr) {
+            console.warn("[MEDIA RECOVERY] Health inspection failed during busy retry:", hErr);
+          }
+          await new Promise((r) => setTimeout(r, 3000));
           continue;
         }
 
@@ -166,6 +190,11 @@ export class MediaVideoGenerateTool implements ITool {
             duration_seconds: Math.min(5, Math.max(1, Number(current.duration_seconds) || 5)),
           };
           continue;
+        }
+
+        // Non-recoverable status code (e.g. 500) -> do not spin retry loop
+        if (jobRes.status !== 503 && jobRes.status !== 400) {
+          break;
         }
 
         break;
@@ -351,6 +380,8 @@ export class MediaVideoGenerateTool implements ITool {
 
       await execFileAsync("ffmpeg", [
         "-y",
+        "-stream_loop",
+        "-1",
         "-i",
         videoPath,
         "-loop",
@@ -387,6 +418,8 @@ export class MediaVideoGenerateTool implements ITool {
       const filterComplex = `[1:a]afade=t=in:ss=0:d=0.5,afade=t=out:st=${fadeOutStart}:d=1.0[aout]`;
       await execFileAsync("ffmpeg", [
         "-y",
+        "-stream_loop",
+        "-1",
         "-i",
         videoPath,
         "-f",
@@ -540,101 +573,53 @@ export class MediaVideoGenerateTool implements ITool {
       }
 
       if (requestedDuration > 8 && requestedDuration <= 20) {
-        // Multi-segment generation pipeline for extended duration (e.g. 15s)
+        // Extended commercial generation pipeline: generate dynamic hero scene and finalize with audio/branding
         console.log(
-          `[MEDIA MULTI-SEGMENT] Generating multi-segment video (${requestedDuration}s target) via sequential clips...`,
+          `[MEDIA COMMERCIAL] Generating commercial video (${requestedDuration}s target) via hero clip & branding pipeline...`,
         );
 
-        // Segment 1: continuous sequence
-        const clip1 = await this.submitClip(workerUrl, workerToken, requestTimeout, {
-          prompt: `${prompt} (Part 1, dynamic action sequence)`,
+        const heroClip = await this.submitClip(workerUrl, workerToken, requestTimeout, {
+          prompt,
           negative_prompt,
-          duration_seconds: 8,
+          duration_seconds: 5,
           fps,
           width,
           height,
           model,
         });
 
-        if (!clip1.success || !clip1.artifactUrl) {
-          throw new Error(clip1.error || "Failed to generate first video segment");
+        if (!heroClip.success || !heroClip.artifactUrl) {
+          throw new Error(heroClip.error || "Failed to generate video sequence");
         }
 
-        jobId = clip1.rawResult?.jobId || jobId;
+        jobId = heroClip.rawResult?.jobId || jobId;
 
-        // Segment 2: continuation of the scene
-        const clip2 = await this.submitClip(workerUrl, workerToken, requestTimeout, {
-          prompt: `${prompt} (Part 2, continuous continuation)`,
-          negative_prompt,
-          duration_seconds: 8,
-          fps,
-          width,
-          height,
-          model,
-        });
-
-        if (!clip2.success || !clip2.artifactUrl) {
-          throw new Error(clip2.error || "Failed to generate continuation video segment");
-        }
-
-        // Concatenate both clips into exact target duration using ffmpeg
-        const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "orba-vid-stitch-"));
-        const tmp1 = path.join(tmpDir, "seg1.mp4");
-        const tmp2 = path.join(tmpDir, "seg2.mp4");
-        const tmpConcat = path.join(tmpDir, "final.mp4");
-        const listPath = path.join(tmpDir, "list.txt");
+        const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "orba-vid-comm-"));
+        const tmpHero = path.join(tmpDir, "hero.mp4");
+        const tmpCommercial = path.join(tmpDir, "commercial_final.mp4");
 
         try {
-          const seg1Path = await this.resolveOrDownloadArtifact(clip1.artifactUrl, tmp1);
-          const seg2Path = await this.resolveOrDownloadArtifact(clip2.artifactUrl, tmp2);
+          const heroPath = await this.resolveOrDownloadArtifact(heroClip.artifactUrl, tmpHero);
+          const tmpResolvedLogo = logoArtifactUrl
+            ? await this.resolveOrDownloadArtifact(logoArtifactUrl, path.join(tmpDir, "logo.png"))
+            : null;
 
-          const esc1 = seg1Path.replace(/'/g, "'\\''");
-          const esc2 = seg2Path.replace(/'/g, "'\\''");
-          await fs.writeFile(listPath, `file '${esc1}'\nfile '${esc2}'\n`);
+          await this.finalizeCommercialVideo(
+            heroPath,
+            tmpResolvedLogo,
+            tmpCommercial,
+            fps,
+            requestedDuration,
+          );
 
-          await execFileAsync("ffmpeg", [
-            "-y",
-            "-f",
-            "concat",
-            "-safe",
-            "0",
-            "-i",
-            listPath,
-            "-t",
-            String(requestedDuration),
-            "-c:v",
-            "libx264",
-            "-pix_fmt",
-            "yuv420p",
-            "-r",
-            String(fps),
-            tmpConcat,
-          ]);
-
-          let finalVideoPath = tmpConcat;
-          try {
-            const tmpResolvedLogo = logoArtifactUrl
-              ? await this.resolveOrDownloadArtifact(logoArtifactUrl, path.join(tmpDir, "logo.png"))
-              : null;
-            const tmpCommercial = path.join(tmpDir, "commercial_final.mp4");
-            await this.finalizeCommercialVideo(
-              tmpConcat,
-              tmpResolvedLogo,
-              tmpCommercial,
-              fps,
-              requestedDuration,
-            );
-            finalVideoPath = tmpCommercial;
-            console.log(
-              `[MEDIA VIDEO GENERATE] Finalized multi-segment commercial with soundtrack and branding: ${finalVideoPath}`,
-            );
-          } catch (err) {
-            console.warn("[MEDIA VIDEO GENERATE] Multi-segment finalization warning:", err);
-          }
+          const finalVideoPath = tmpCommercial;
+          console.log(
+            `[MEDIA VIDEO GENERATE] Finalized commercial with soundtrack and branding: ${finalVideoPath}`,
+          );
 
           const baseDir = process.env.ORBA_UPLOAD_DIR || path.join(process.cwd(), ".uploads");
           const workspace = process.env.ORBA_TENANT_ID || "default-tenant";
-          const bundle = clip1.bundle || `vid_${Date.now().toString(36)}`;
+          const bundle = heroClip.bundle || `vid_${Date.now().toString(36)}`;
           const filename = `${crypto.randomUUID()}.mp4`;
           const targetDir = path.join(baseDir, workspace, bundle);
           await fs.mkdir(targetDir, { recursive: true });
@@ -649,8 +634,8 @@ export class MediaVideoGenerateTool implements ITool {
           )}/${encodeURIComponent(filename)}`;
 
           rawResultMetadata = {
-            multiSegment: true,
-            segments: [clip1.artifactUrl, clip2.artifactUrl],
+            commercial: true,
+            heroClip: heroClip.artifactUrl,
             targetDuration: requestedDuration,
             logoApplied: Boolean(logoArtifactUrl),
           };

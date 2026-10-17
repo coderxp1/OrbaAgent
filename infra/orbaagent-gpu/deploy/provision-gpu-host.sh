@@ -123,7 +123,7 @@ fi
 # 0.6. PREFLIGHT: Hash verification - verify bundle integrity
 # ---------------------------------------------------------------------------
 log "preflight: verifying bundle integrity"
-EXPECTED_SHA256="7f01fad74d2769cdab8a60eb0534f532d686c86549944ad13e5d4ed623e78e30"
+EXPECTED_SHA256="ed81e7e91654b72ffd8bffa51cb5802ced3a560db1cf6f18cea1a6e190b6b481"
 ACTUAL_SHA256=$(cd "$SOURCE_DIR" && find . -type f ! -path "./.git/*" ! -name ".git*" ! -name "*.pyc" ! -name "provision-gpu-host.sh" -print0 2>/dev/null | sort -z | xargs -0 sha256sum 2>/dev/null | sha256sum | awk '{print $1}')
 if [ -n "${BOOTSTRAP_VERIFIED_SHA256:-}" ]; then
     log "Bundle hash verification passed via trusted bootstrap: $BOOTSTRAP_VERIFIED_SHA256"

@@ -52,19 +52,35 @@ class GenerationOutcome:
     parameters: dict = field(default_factory=dict)
 
 
+@dataclass
+class JobProgress:
+    job_id: str
+    kind: str
+    stage: str
+    started_at: float
+    last_heartbeat: float
+    step: int = 0
+    total_steps: int = 0
+    cancelled: bool = False
+    details: str = ""
+
+
 class GenerationLimiter:
-    """Caps concurrent generations.
+    """Caps concurrent generations with real progress tracking, stage timeouts, and stale lock recovery.
 
     Default limit is 1: image and video inference share a single permit, so a
     request cannot start while another is holding VRAM. Callers receive a busy
     signal instead of the process being OOM-killed.
     """
 
-    def __init__(self, max_concurrent: int = 1) -> None:
+    def __init__(self, max_concurrent: int = 1, stale_timeout_seconds: float = 120.0) -> None:
         self._semaphore = threading.BoundedSemaphore(max(1, max_concurrent))
         self._max = max(1, max_concurrent)
         self._active = 0
         self._lock = threading.Lock()
+        self._stale_timeout_seconds = stale_timeout_seconds
+        self._active_jobs: dict[str, JobProgress] = {}
+        self._current_job_id: Optional[str] = None
 
     @property
     def max_concurrent(self) -> int:
@@ -73,23 +89,143 @@ class GenerationLimiter:
     @property
     def active(self) -> int:
         with self._lock:
+            self._cleanup_stale_locked()
             return self._active
 
+    def get_active_job(self) -> Optional[dict[str, Any]]:
+        with self._lock:
+            self._cleanup_stale_locked()
+            if self._current_job_id and self._current_job_id in self._active_jobs:
+                job = self._active_jobs[self._current_job_id]
+                now = time.time()
+                return {
+                    "job_id": job.job_id,
+                    "kind": job.kind,
+                    "stage": job.stage,
+                    "elapsed_seconds": round(now - job.started_at, 1),
+                    "last_heartbeat_ago": round(now - job.last_heartbeat, 1),
+                    "step": job.step,
+                    "total_steps": job.total_steps,
+                    "details": job.details,
+                    "cancelled": job.cancelled,
+                }
+            return None
+
+    def record_progress(
+        self,
+        job_id: str,
+        stage: Optional[str] = None,
+        step: Optional[int] = None,
+        total_steps: Optional[int] = None,
+        details: Optional[str] = None,
+    ) -> None:
+        with self._lock:
+            job = self._active_jobs.get(job_id)
+            if job:
+                job.last_heartbeat = time.time()
+                if stage is not None:
+                    job.stage = stage
+                if step is not None:
+                    job.step = step
+                if total_steps is not None:
+                    job.total_steps = total_steps
+                if details is not None:
+                    job.details = details
+
+    def is_cancelled(self, job_id: str) -> bool:
+        with self._lock:
+            job = self._active_jobs.get(job_id)
+            return bool(job and job.cancelled)
+
+    def cancel_job(self, job_id: Optional[str] = None) -> bool:
+        with self._lock:
+            target_id = job_id or self._current_job_id
+            if target_id and target_id in self._active_jobs:
+                self._active_jobs[target_id].cancelled = True
+                logger.info("Marked job %s as cancelled", target_id)
+                return True
+            return False
+
+    def force_reset(self) -> None:
+        with self._lock:
+            for job in self._active_jobs.values():
+                job.cancelled = True
+            self._active_jobs.clear()
+            self._current_job_id = None
+            self._active = 0
+            self._semaphore = threading.BoundedSemaphore(self._max)
+            logger.warning("GenerationLimiter force_reset executed")
+
+    def _cleanup_stale_locked(self) -> None:
+        if not self._current_job_id:
+            return
+        job = self._active_jobs.get(self._current_job_id)
+        if not job:
+            return
+        now = time.time()
+        silent_duration = now - job.last_heartbeat
+        total_duration = now - job.started_at
+        if silent_duration > self._stale_timeout_seconds or total_duration > 300.0:
+            logger.error(
+                "Stale job detected: %s (kind=%s, stage=%s, silent=%0.1fs, total=%0.1fs). Evicting.",
+                job.job_id,
+                job.kind,
+                job.stage,
+                silent_duration,
+                total_duration,
+            )
+            job.cancelled = True
+            self._active_jobs.pop(self._current_job_id, None)
+            self._current_job_id = None
+            self._active = max(0, self._active - 1)
+            try:
+                self._semaphore.release()
+            except ValueError:
+                self._semaphore = threading.BoundedSemaphore(self._max)
+
     @contextmanager
-    def slot(self):
+    def slot(self, job_id: str = "", kind: str = "media"):
+        with self._lock:
+            self._cleanup_stale_locked()
+
         acquired = self._semaphore.acquire(blocking=False)
         if not acquired:
-            raise GenerationBusyError(
-                f"a media generation job is already running (limit {self._max}); retry shortly"
-            )
+            active_info = self.get_active_job()
+            detail_msg = f"a media generation job is already running (limit {self._max}); retry shortly"
+            if active_info:
+                detail_msg += (
+                    f" [Current job: {active_info['job_id']}, stage={active_info['stage']}, "
+                    f"elapsed={active_info['elapsed_seconds']}s]"
+                )
+            raise GenerationBusyError(detail_msg)
+
+        now = time.time()
+        actual_job_id = job_id or f"job_{uuid.uuid4().hex[:8]}"
+        job = JobProgress(
+            job_id=actual_job_id,
+            kind=kind,
+            stage="queued",
+            started_at=now,
+            last_heartbeat=now,
+        )
+
         with self._lock:
             self._active += 1
+            self._active_jobs[actual_job_id] = job
+            self._current_job_id = actual_job_id
+
         try:
-            yield
+            yield job
         finally:
             with self._lock:
-                self._active -= 1
-            self._semaphore.release()
+                self._active = max(0, self._active - 1)
+                self._active_jobs.pop(actual_job_id, None)
+                if self._current_job_id == actual_job_id:
+                    self._current_job_id = None
+                try:
+                    self._semaphore.release()
+                except ValueError:
+                    self._semaphore = threading.BoundedSemaphore(self._max)
 
 
 def _new_job_id(prefix: str) -> str:
@@ -265,9 +401,11 @@ def generate_video(
         duration_seconds, fps, width, height
     )
 
-    with limiter.slot():
+    job_id = _new_job_id("vid")
+    with limiter.slot(job_id=job_id, kind="video"):
+        limiter.record_progress(job_id, stage="loading_model")
         pipeline = manager.load_video()
-        job_id = _new_job_id("vid")
+        limiter.record_progress(job_id, stage="inference")
         output_dir = Path(manager.output_dir)
         os.makedirs(output_dir, exist_ok=True)
         target = output_dir / f"{job_id}.mp4"
@@ -283,8 +421,11 @@ def generate_video(
                 width=eff_width,
                 height=eff_height,
                 target=target,
+                limiter=limiter,
+                job_id=job_id,
             )
 
+            limiter.record_progress(job_id, stage="validating_output")
             result = validate_video(
                 target,
                 expected_duration_seconds=eff_duration,
@@ -351,7 +492,15 @@ def _run_video_inference(
     width: int,
     height: int,
     target: Path,
+    limiter: Optional[GenerationLimiter] = None,
+    job_id: str = "",
 ) -> None:
+    def progress_callback(step: int, total_steps: int):
+        if limiter and job_id:
+            if limiter.is_cancelled(job_id):
+                raise InterruptedError(f"Job {job_id} cancelled by client or supervisor")
+            limiter.record_progress(job_id, stage="inference", step=step, total_steps=total_steps)
+
     if infer is not None:
         infer(
             pipeline=pipeline,
@@ -392,4 +541,5 @@ def _run_video_inference(
         width=width,
         height=height,
         output_path=target,
+        progress_callback=progress_callback,
     )

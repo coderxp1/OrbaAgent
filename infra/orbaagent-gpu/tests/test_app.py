@@ -321,3 +321,23 @@ class TestSecretHygiene:
         body = resp.json()
         assert body["delivered_to_production"] is False
         assert "ingest failed" in body["ingest_note"]
+
+    def test_job_cancel_and_reset_endpoints(self, tmp_path):
+        limiter = GenerationLimiter(1)
+        client, _ = build_client(tmp_path, backend="diffusers", limiter=limiter)
+
+        # Health initially has active_job as None
+        h_resp = client.get("/health", headers=auth_headers())
+        assert h_resp.status_code == 200
+        assert h_resp.json()["active_job"] is None
+
+        # Cancel endpoint with no job
+        c_resp = client.post("/api/jobs/cancel", json={"job_id": "nonexistent"}, headers=auth_headers())
+        assert c_resp.status_code == 200
+        assert c_resp.json()["status"] == "NOT_FOUND"
+
+        # Reset endpoint resets permits
+        r_resp = client.post("/api/jobs/reset", headers=auth_headers())
+        assert r_resp.status_code == 200
+        assert r_resp.json()["status"] == "RESET"
+        assert r_resp.json()["active_generations"] == 0

@@ -157,6 +157,7 @@ def run_video_inference(
     height: int,
     output_path: Path,
     ffmpeg_path: str = "ffmpeg",
+    progress_callback: Optional[Callable[[int, int], None]] = None,
 ) -> None:
     """Run video generation and encode the frames and audio to an MP4.
 
@@ -212,6 +213,22 @@ def run_video_inference(
     elif negative_prompt:
         if getattr(pipeline, "do_classifier_free_guidance", False):
             kwargs["negative_prompt"] = negative_prompt
+
+    total_steps = kwargs.get("num_inference_steps", 25)
+
+    def on_step_end(pipe, step_idx, timestep, callback_kwargs):
+        if progress_callback:
+            progress_callback(step_idx + 1, total_steps)
+        return callback_kwargs
+
+    try:
+        call_code = getattr(pipeline.__call__, "__code__", None)
+        if call_code and "callback_on_step_end" in call_code.co_varnames:
+            kwargs["callback_on_step_end"] = on_step_end
+        elif hasattr(pipeline, "callback_on_step_end"):
+            kwargs["callback_on_step_end"] = on_step_end
+    except Exception:
+        pass
 
     result = pipeline(**kwargs)
     frames = getattr(result, "frames", None)

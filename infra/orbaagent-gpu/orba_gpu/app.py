@@ -155,9 +155,22 @@ def create_app(
             "generation_backend": settings.backend or None,
             "models": model_status,
             "active_generations": generation_limiter.active,
+            "active_job": generation_limiter.get_active_job() if hasattr(generation_limiter, "get_active_job") else None,
             "max_concurrent_generations": generation_limiter.max_concurrent,
             "unavailable_reason": unavailable_reason,
         }
+
+    @app.post("/api/jobs/cancel")
+    def cancel_job_endpoint(payload: Optional[dict] = None, token: str = Depends(verify_auth)):
+        job_id = (payload or {}).get("job_id")
+        cancelled = generation_limiter.cancel_job(job_id) if hasattr(generation_limiter, "cancel_job") else False
+        return {"status": "CANCELLED" if cancelled else "NOT_FOUND", "job_id": job_id}
+
+    @app.post("/api/jobs/reset")
+    def reset_limiter_endpoint(token: str = Depends(verify_auth)):
+        if hasattr(generation_limiter, "force_reset"):
+            generation_limiter.force_reset()
+        return {"status": "RESET", "active_generations": generation_limiter.active}
 
     @app.post("/api/generate/image")
     def generate_image_endpoint(payload: dict, token: str = Depends(verify_auth)):

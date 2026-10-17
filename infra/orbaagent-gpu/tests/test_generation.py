@@ -9,6 +9,7 @@ and verified before success was reported.
 from __future__ import annotations
 
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -357,3 +358,46 @@ class TestConcurrencyLimit:
         limiter = GenerationLimiter(2)
         assert limiter.active == 0
         assert limiter.max_concurrent == 2
+
+    def test_job_progress_and_cancellation(self):
+        limiter = GenerationLimiter(1)
+        with limiter.slot(job_id="test_job_1", kind="video") as job:
+            assert job.job_id == "test_job_1"
+            assert limiter.active == 1
+            limiter.record_progress("test_job_1", stage="inference", step=5, total_steps=20)
+            active = limiter.get_active_job()
+            assert active is not None
+            assert active["job_id"] == "test_job_1"
+            assert active["stage"] == "inference"
+            assert active["step"] == 5
+            assert active["total_steps"] == 20
+            assert not limiter.is_cancelled("test_job_1")
+
+            assert limiter.cancel_job("test_job_1") is True
+            assert limiter.is_cancelled("test_job_1") is True
+
+        assert limiter.active == 0
+        assert limiter.get_active_job() is None
+
+    def test_stale_job_auto_eviction(self):
+        limiter = GenerationLimiter(1, stale_timeout_seconds=0.05)
+        with limiter.slot(job_id="stale_job", kind="video"):
+            assert limiter.active == 1
+            # simulate passage of time beyond stale timeout
+            time.sleep(0.08)
+            # A new slot request should auto-evict the stale job and succeed!
+            limiter._cleanup_stale_locked()
+            assert limiter.active == 0
+
+    def test_force_reset_clears_stuck_permit(self):
+        limiter = GenerationLimiter(1)
+        # simulate an abandoned slot
+        with limiter.slot(job_id="abandoned", kind="video"):
+            assert limiter.active == 1
+            limiter.force_reset()
+            assert limiter.active == 0
+            assert limiter.get_active_job() is None
+            # Next request can immediately acquire the slot
+            with limiter.slot(job_id="new_job", kind="image"):
+                assert limiter.active == 1
+        assert limiter.active == 0
