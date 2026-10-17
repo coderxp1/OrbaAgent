@@ -24,6 +24,7 @@ export interface IntentRoutingResult {
  * Words to numbers mapping for duration extraction (e.g. "two-second" -> 2)
  */
 const NUMBER_WORDS: Record<string, number> = {
+  // English
   one: 1,
   two: 2,
   three: 3,
@@ -34,26 +35,52 @@ const NUMBER_WORDS: Record<string, number> = {
   eight: 8,
   nine: 9,
   ten: 10,
+  // Spanish
+  un: 1,
+  uno: 1,
+  una: 1,
+  dos: 2,
+  tres: 3,
+  cuatro: 4,
+  cinco: 5,
+  seis: 6,
+  siete: 7,
+  ocho: 8,
+  nueve: 9,
+  diez: 10,
+  // German
+  ein: 1,
+  eine: 1,
+  eins: 1,
+  zwei: 2,
+  drei: 3,
+  vier: 4,
+  fünf: 5,
+  sechs: 6,
+  sieben: 7,
+  acht: 8,
+  neun: 9,
+  zehn: 10,
 };
 
 /**
  * Parses duration in seconds from user prompt text.
- * Handles patterns like "two-second", "2s", "2 seconds", "4-second clip", etc.
+ * Handles English, Spanish, and German patterns like "two-second", "2s", "dos segundos", "5 sekunden", etc.
  */
 export function extractVideoDurationSeconds(text: string): number | undefined {
   if (!text) return undefined;
   const lower = text.toLowerCase();
 
-  // Pattern 1: word-second (e.g. "two-second", "four seconds")
+  // Pattern 1: word-second (e.g. "two-second", "cuatro segundos", "fünf sekunden")
   const wordMatch = lower.match(
-    /\b(one|two|three|four|five|six|seven|eight|nine|ten)[-\s]+seconds?\b/,
+    /\b(one|two|three|four|five|six|seven|eight|nine|ten|un|uno|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|ein|eine|eins|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn)[-\s]+(?:seconds?|segundos?|sekunden?)\b/,
   );
   if (wordMatch?.[1] && NUMBER_WORDS[wordMatch[1]]) {
     return NUMBER_WORDS[wordMatch[1]];
   }
 
-  // Pattern 2: digit second(s) or Xs (e.g. "2 seconds", "2-second", "2s", "4s")
-  const digitMatch = lower.match(/\b(\d+)(?:[-\s]*seconds?|s)\b/);
+  // Pattern 2: digit second(s) or Xs (e.g. "2 seconds", "8 segundos", "2s", "5s")
+  const digitMatch = lower.match(/\b(\d+)(?:[-\s]*(?:seconds?|segundos?|sekunden?|s))\b/);
   if (digitMatch?.[1]) {
     const val = Number.parseInt(digitMatch[1], 10);
     if (!Number.isNaN(val) && val > 0 && val <= 30) {
@@ -64,16 +91,41 @@ export function extractVideoDurationSeconds(text: string): number | undefined {
   return undefined;
 }
 
+export type VideoOrientation = "vertical" | "horizontal" | "square";
+
 /**
- * Extracts resolution dimensions (width x height) if specified in text (e.g. "480x480", "768x768", "1024x1024").
+ * Detects video orientation intent from prompt text across supported languages.
+ */
+export function extractVideoOrientation(text: string): VideoOrientation | undefined {
+  if (!text) return undefined;
+  const lower = text.toLowerCase();
+  if (/\b(?:vertical|portrait|vertikal|hochformat|9:16|9\/16|tiktok|reels?|shorts?)\b/i.test(lower)) {
+    return "vertical";
+  }
+  if (/\b(?:horizontal|landscape|querformat|apaisado|16:9|16\/9|widescreen)\b/i.test(lower)) {
+    return "horizontal";
+  }
+  if (/\b(?:square|cuadrado|quadratisch|carr[eé]|1:1|1\/1)\b/i.test(lower)) {
+    return "square";
+  }
+  return undefined;
+}
+
+/**
+ * Extracts resolution dimensions (width x height) if specified in text (e.g. "480x480", "768x768", "1280x720").
+ * Automatically snaps dimensions to multiples of 16 to guarantee valid model input.
  */
 export function extractDimensions(text: string): { width: number; height: number } | undefined {
   if (!text) return undefined;
   const match = text.match(/\b(\d{3,4})\s*[xX*×]\s*(\d{3,4})\b/);
   if (match?.[1] && match[2]) {
-    const w = Number.parseInt(match[1], 10);
-    const h = Number.parseInt(match[2], 10);
+    let w = Number.parseInt(match[1], 10);
+    let h = Number.parseInt(match[2], 10);
     if (w >= 256 && w <= 2048 && h >= 256 && h <= 2048) {
+      // Diffusers and DiT models strictly require width and height to be divisible by 16.
+      // Automatically snap to the nearest multiple of 16 (e.g. 1080 -> 1088).
+      w = Math.round(w / 16) * 16;
+      h = Math.round(h / 16) * 16;
       return { width: w, height: h };
     }
   }
@@ -389,10 +441,22 @@ Do NOT execute any tools or task plans for this capability inquiry.`,
     };
   }
 
-  // Video generation intent patterns (explicit video requests, commercials, or rich cinematic scenes)
+  // Video generation intent patterns (explicit video requests in English, Spanish, German, French, commercials, or rich cinematic scenes)
   const videoPatterns = [
     /\b(?:create|generate|make|render|produce)\s+(?:an?\s+)?(?:[\w-]+\s+)*videos?\b/,
     /\b(?:create|generate|make|render|produce)\s+(?:an?\s+)?(?:[\w-]+\s+)*(?:cinematic\s+scene|action\s+scene|motion\s+scene|dramatic\s+scene|thriller\s+scene|chase\s+scene|clip|animation|commercial|advertisement|promo|trailer)\b/,
+    // Spanish patterns: "genera un vídeo con un conejo blanco bailando", "crea un video de...", "haz un video..."
+    /\b(?:genera|generar|crea|crear|haz|hacer|produce|producir|renderiza|renderizar)\s+(?:un\s+)?(?:[\w-]+\s+)*(?:v[ií]deos?|clips?|cortometrajes?|animaci[oó]n|anuncio|spot|comercial)\b/,
+    /\bv[ií]deo\s+(?:de|con|sobre)\b/,
+    /\bun\s+v[ií]deo\b/,
+    // German patterns: "erstelle ein video von einem tanzenden weißen kaninchen", "generiere ein video..."
+    /\b(?:erstelle|erstellen|generiere|generieren|mache|machen|erzeuge|erzeugen|produziere|produzieren)\s+(?:ein\s+)?(?:[\w-]+\s+)*(?:videos?|clips?|kurzfilm|animation|werbung|werbespot)\b/,
+    /\bvideo\s+(?:von|mit|[uü]ber)\b/,
+    /\bein\s+video\b/,
+    // French patterns: "génère une vidéo de...", "crée une vidéo..."
+    /\b(?:g[eé]n[eè]re|g[eé]n[eé]rer|cr[eé]e|cr[eé]er|fais|faire|produis|produire)\s+(?:une?\s+)?(?:[\w-]+\s+)*(?:vid[eé]os?|clips?|animation|publicit[eé])\b/,
+    /\bvid[eé]o\s+(?:de|avec|sur)\b/,
+    /\bune\s+vid[eé]o\b/,
     /\bvideo\s+of\b/,
     /\banimate\b/,
     /\banimation\s+of\b/,
@@ -412,12 +476,38 @@ Do NOT execute any tools or task plans for this capability inquiry.`,
     videoPatterns.some((pattern) => pattern.test(lower));
 
   if (isVideoIntent) {
-    const isCommercial = /\b(?:commercial|advertisement|promo|trailer|viral\s+commercial)\b/i.test(
+    const isCommercial = /\b(?:commercial|advertisement|promo|trailer|viral\s+commercial|anuncio|spot|werbespot)\b/i.test(
       lower,
     );
     const explicitDuration = extractVideoDurationSeconds(content);
-    const duration = explicitDuration || (isCommercial ? 15 : 2);
-    const dims = extractDimensions(content) || { width: 480, height: 480 };
+    const duration = explicitDuration || (isCommercial ? 15 : 5);
+
+    // Resolve orientation and enforce 16-divisible dimensions
+    const orientation = extractVideoOrientation(content);
+    let dims = extractDimensions(content);
+    if (!dims) {
+      if (orientation === "vertical") {
+        dims = { width: 720, height: 1280 }; // 9:16 portrait (720%16=0, 1280%16=0)
+      } else if (orientation === "horizontal") {
+        dims = { width: 1280, height: 720 }; // 16:9 landscape (1280%16=0, 720%16=0)
+      } else if (orientation === "square") {
+        dims = { width: 720, height: 720 }; // 1:1 square (720%16=0)
+      } else {
+        dims = { width: 1280, height: 720 }; // Default 16:9 landscape
+      }
+    } else {
+      // Enforce strict divisibility by 16 on any explicitly extracted dimensions
+      dims = {
+        width: Math.round(dims.width / 16) * 16,
+        height: Math.round(dims.height / 16) * 16,
+      };
+    }
+
+    // Detect user requested style
+    const isExplicitCartoon =
+      /\b(?:cartoon|dibujo|dibujos\s+animados|animaci[oó]n\s+2d|caricatura|anime|manga|pixar|disney|toon|doodle|sketch|comic)\b/i.test(
+        lower,
+      );
 
     const toolsToActivate = ["media_video_generate", "artifact_read", "artifact_list"];
     if (registry) {
@@ -433,14 +523,34 @@ Do NOT execute any tools or task plans for this capability inquiry.`,
         width: dims.width,
         height: dims.height,
         fps: 16,
+        orientation: orientation || "horizontal",
       },
       systemGuidance: `[Intent Router: Detected ${isCommercial ? "Commercial Video" : "Video"} Generation Request]
-The user wants to generate ${isCommercial ? "a commercial video" : "an AI video"}. Tool 'media_video_generate' has been activated.
-${explicitDuration ? `The user explicitly requested a duration of ${explicitDuration} seconds.` : `The user did NOT specify a duration; use the standard default of ${duration} seconds. Do NOT claim the user requested this duration.`}
-${isCommercial ? "Compose a high-end commercial tailored to the brand with sleek product staging, cinematic lighting, vibrant color accents, and dynamic motion. Do NOT hallucinate or attempt to diffuse textual letters into the video prompt; brand logos are composited directly." : ""}
-Execute 'media_video_generate' immediately as the primary action. Do NOT emit preliminary conversational filler or transfer notices. Do NOT run artifact_list.
+The user wants to generate ${isCommercial ? "a commercial video" : "an AI video"} ("${content}"). Tool 'media_video_generate' has been activated.
+ACTION-ORIENTED EXECUTION POLICY (ZERO QUESTIONNAIRES):
+- DO NOT interrogate the user with questionnaires about orientation, duration, style, location, camera movement, or audio.
+- DO NOT present a multi-turn survey or ask "¿Lo genero con el preset por defecto?" or "Dime tus preferencias".
+- Infer sensible defaults immediately:
+  * Duration: ${duration}s
+  * Dimensions: ${dims.width}x${dims.height} (${orientation || "standard 16:9 landscape"})
+  * Visual style: ${
+    isExplicitCartoon
+      ? "Stylized cartoon/animation as explicitly requested by user"
+      : "Photorealistic live-action by default. Use lifelike fur/skin textures, natural anatomy, stable lighting, and coherent physical motion. Never invent cartoon/doodle aesthetics unless explicitly requested."
+  }
+- EXECUTE 'media_video_generate' IMMEDIATELY on this first turn.
+- Briefly acknowledge in the user's language (Spanish, English, German, etc.) and run the tool now.
 Call 'media_video_generate' directly with:
-- prompt: Detailed description of scene motion and elements based on user request
+- prompt: ${
+  isExplicitCartoon
+    ? "Stylized description tailored to user request"
+    : "Photorealistic live-action visual description: natural lighting, lifelike textures, realistic anatomy, coherent cinematic motion"
+}
+- negative_prompt: ${
+  isExplicitCartoon
+    ? "photorealistic, hyperrealistic, deformed, blurry"
+    : "cartoon, anime, 3d render, cgi, blurry, distorted, doodle, sketch, low quality, deformed, artificial"
+}
 - duration_seconds: ${duration}
 - width: ${dims.width}
 - height: ${dims.height}
@@ -452,8 +562,12 @@ Call 'media_video_generate' directly with:
   const imagePatterns = [
     /\b(?:create|generate|make|render|produce)\s+(?:an?\s+)?(?:[\w-]+\s+)*(?:images?|pictures?|photos?|photographs?|illustrations?|artworks?|paintings?|graphics?|scenes?|visuals?|wallpapers?|portraits?|landscapes?)\b/,
     /\b(?:draw|paint|sketch|illustrate)\s+(?:me\s+)?(?:an?\s+)?(?:[\w-]+\s+)*(?:images?|pictures?|photos?|photographs?|illustrations?|artworks?|paintings?|portraits?|scenes?|landscapes?|characters?|creatures?|animals?|cats?|dogs?|spheres?|avatars?|objects?|backgrounds?|wallpapers?)\b/,
+    /\b(?:genera|generar|crea|crear|haz|hacer|produce|producir|dibuja|dibujar)\s+(?:una?\s+)?(?:[\w-]+\s+)*(?:im[aá]genes?|fotos?|fotograf[ií]as?|ilustraci[oó]n|ilustraciones?|dibujos?)\b/,
+    /\b(?:erstelle|erstellen|generiere|generieren|mache|machen|zeichne|zeichnen)\s+(?:ein\s+)?(?:[\w-]+\s+)*(?:bilder?|fotos?|illustrationen?|zeichnungen?)\b/,
     /\b(?:draw|paint|sketch|illustrate)\s+(?:me\s+)?(?:an?\s+)?(?:a|an|the)\s+(?!(?:out|up|plan|diagram|architecture|flowchart|schema|class|interface|function|code|test|table|api|migration|solution|system)\b)[\w\s]{2,40}\b/,
     /\b(?:image|picture|photo|photograph|illustration|artwork|drawing|painting)\s+of\b/,
+    /\b(?:imagen|foto|fotograf[ií]a|dibujo)\s+de\b/,
+    /\b(?:bild|foto|zeichnung)\s+von\b/,
     /\btext[- ]to[- ]image\b/,
     /\bt2i\b/,
     /\bdiffusion\s+render\b/,

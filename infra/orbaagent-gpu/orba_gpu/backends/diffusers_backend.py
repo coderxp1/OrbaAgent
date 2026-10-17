@@ -113,14 +113,31 @@ def run_image_inference(
 
 
 def load_video_pipeline(model_path: str):
-    """Load a text-to-video diffusion pipeline."""
+    """Load a text-to-video diffusion pipeline (Kandinsky 6.0, Prism, or foundation DiT)."""
     import torch
     from diffusers import DiffusionPipeline
 
     device = _device()
     dtype = torch.bfloat16 if device == "cuda" else torch.float32
 
-    pipeline = DiffusionPipeline.from_pretrained(model_path, torch_dtype=dtype, local_files_only=True)
+    pipeline = None
+    import diffusers
+
+    kandinsky_cls = getattr(diffusers, "Kandinsky6TI2VAPipeline", None)
+    if kandinsky_cls is not None and "kandinsky" in model_path.lower():
+        try:
+            pipeline = kandinsky_cls.from_pretrained(
+                model_path, torch_dtype=dtype, local_files_only=True
+            )
+        except Exception:
+            pipeline = None
+
+    # Generic DiffusionPipeline loader (used for foundation models, Prism, Wan, etc.)
+    if pipeline is None:
+        pipeline = diffusers.DiffusionPipeline.from_pretrained(
+            model_path, torch_dtype=dtype, local_files_only=True
+        )
+
     pipeline = pipeline.to(device)
     try:
         pipeline.enable_attention_slicing()
@@ -141,25 +158,39 @@ def run_video_inference(
     output_path: Path,
     ffmpeg_path: str = "ffmpeg",
 ) -> None:
-    """Run video generation and encode the frames to an MP4.
+    """Run video generation and encode the frames and audio to an MP4.
 
-    Frames are written as PNGs and muxed with ffmpeg so the output has an exact
-    frame rate and duration, which is what the validator checks.
+    Supports native joint video-audio models (Kandinsky 6.0, Prism) and muxes
+    synchronized audio tracks into the final MP4 container.
     """
     import tempfile
 
+    try:
+        from diffusers.utils import encode_video
+        has_encode_video = True
+    except ImportError:
+        has_encode_video = False
+
     from diffusers.utils import export_to_video
 
-    target_frames = max(1, int(round(duration_seconds * fps)))
+    pipeline_class = getattr(pipeline, "_class_name", "") or pipeline.__class__.__name__
+    is_kandinsky = "Kandinsky" in pipeline_class
+    is_wan = "Wan" in pipeline_class or hasattr(pipeline, "vae_scale_factor_temporal")
 
-    # Wan architecture uses 4x temporal compression, requiring (num_frames - 1) % 4 == 0 (4N + 1).
-    # Round UP to the next valid 4N + 1 frame count so that requested duration is never truncated below requested seconds.
-    if getattr(pipeline, "_class_name", "") == "WanPipeline" or hasattr(pipeline, "vae_scale_factor_temporal"):
+    if is_kandinsky:
+        target_frames = 121
+        effective_fps = 24
+    elif is_wan:
+        effective_fps = fps
+        target_frames = max(1, int(round(duration_seconds * fps)))
         rem = (target_frames - 1) % 4
         if rem != 0:
             target_frames = (target_frames - 1 + (4 - rem)) + 1
         else:
             target_frames = max(1, target_frames)
+    else:
+        effective_fps = fps
+        target_frames = max(1, int(round(duration_seconds * fps)))
 
     kwargs = {
         "prompt": prompt,
@@ -167,34 +198,34 @@ def run_video_inference(
         "height": height,
         "num_frames": target_frames,
     }
-    if negative_prompt:
-        if getattr(pipeline, "do_classifier_free_guidance", False) or getattr(pipeline, "_class_name", "") == "WanPipeline":
+
+    if is_kandinsky:
+        kwargs["num_inference_steps"] = 10
+        kwargs["guidance_scale"] = 1.0
+        if negative_prompt:
             kwargs["negative_prompt"] = negative_prompt
-            if getattr(pipeline, "_class_name", "") == "WanPipeline":
+    elif negative_prompt:
+        if getattr(pipeline, "do_classifier_free_guidance", False) or is_wan:
+            kwargs["negative_prompt"] = negative_prompt
+            if is_wan:
                 kwargs.setdefault("guidance_scale", 5.0)
 
     result = pipeline(**kwargs)
     frames = getattr(result, "frames", None)
-    # Explicit None/length check: avoids 'truth value of array is ambiguous'
-    # when Wan (or any future pipeline) returns a numpy array instead of a list.
     if frames is None or len(frames) == 0:
         raise RuntimeError("video pipeline returned no frames")
-    # Wan pipeline may return frames with a leading batch dimension:
-    #   result.frames: List[List[PIL.Image]] or ndarray of shape (B, T, H, W, C)
-    # Check type and shape carefully before unwrapping to ensure we do not
-    # accidentally drop frames if the return is already a flat list or 4D array.
+
     if hasattr(frames, "ndim") and frames.ndim == 5:
-        # 5D ndarray: (B, T, H, W, C) -> take first batch sequence (T, H, W, C)
         frames = frames[0]
     elif isinstance(frames, (list, tuple)) and len(frames) > 0:
         first = frames[0]
         if isinstance(first, (list, tuple)):
-            # Nested list: [[frame_0, frame_1, ...]] -> take first batch sequence
             frames = first
         elif hasattr(first, "ndim") and getattr(first, "ndim") == 4 and len(frames) == 1:
-            # List containing a single 4D array (T, H, W, C)
             frames = first
-        # Otherwise: already a flat sequence of frames (List[PIL.Image] or List[ndarray(H,W,C)]), keep intact.
+
+    audio = getattr(result, "audio", None)
+    audio_sample_rate = getattr(pipeline, "audio_sample_rate", 44100)
 
     # Resolve ffmpeg executable (fallback to imageio-ffmpeg if system ffmpeg is absent)
     import shutil
@@ -206,28 +237,57 @@ def run_video_inference(
         except Exception:
             actual_ffmpeg = ffmpeg_path
 
-    # export_to_video writes an mp4 at the given fps using imageio-ffmpeg.
     with tempfile.TemporaryDirectory() as tmp:
         raw_path = os.path.join(tmp, "raw.mp4")
-        export_to_video(frames, raw_path, fps=fps)
+        if has_encode_video and audio is not None:
+            try:
+                encode_video(
+                    frames,
+                    raw_path,
+                    fps=effective_fps,
+                    audio=audio[0][None] if hasattr(audio, "__getitem__") else audio,
+                    audio_sample_rate=audio_sample_rate,
+                )
+            except Exception:
+                export_to_video(frames, raw_path, fps=effective_fps)
+        else:
+            export_to_video(frames, raw_path, fps=effective_fps)
 
-        # Re-encode to guarantee the container/format ffprobe expects.
+        # Check if raw_path has an audio stream
+        has_audio = False
+        try:
+            ffprobe_exe = actual_ffmpeg.replace("ffmpeg", "ffprobe")
+            probe = subprocess.run(
+                [ffprobe_exe, "-i", raw_path, "-show_streams", "-select_streams", "a", "-loglevel", "error"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            has_audio = bool(probe.stdout.strip())
+        except Exception:
+            has_audio = False
+
+        ffmpeg_cmd = [
+            actual_ffmpeg,
+            "-y",
+            "-loglevel",
+            "error",
+            "-i",
+            raw_path,
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-r",
+            str(effective_fps),
+        ]
+        if has_audio:
+            ffmpeg_cmd.extend(["-c:a", "aac", "-b:a", "192k"])
+
+        ffmpeg_cmd.append(str(output_path))
+
         subprocess.run(
-            [
-                actual_ffmpeg,
-                "-y",
-                "-loglevel",
-                "error",
-                "-i",
-                raw_path,
-                "-c:v",
-                "libx264",
-                "-pix_fmt",
-                "yuv420p",
-                "-r",
-                str(fps),
-                str(output_path),
-            ],
+            ffmpeg_cmd,
             check=True,
             capture_output=True,
             text=True,

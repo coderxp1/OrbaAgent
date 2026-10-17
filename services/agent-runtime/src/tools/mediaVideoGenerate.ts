@@ -112,7 +112,15 @@ export class MediaVideoGenerateTool implements ITool {
     let jobRes: Response | null = null;
     let attempts = 0;
     const maxAttempts = 2;
-    let current = { ...clipParams };
+    // Always guarantee that dimensions sent to the backend are multiples of 16
+    let safeWidth = Math.max(256, Math.min(1920, Math.round(clipParams.width / 16) * 16));
+    let safeHeight = Math.max(256, Math.min(1920, Math.round(clipParams.height / 16) * 16));
+
+    let current = {
+      ...clipParams,
+      width: safeWidth,
+      height: safeHeight,
+    };
 
     while (attempts < maxAttempts) {
       attempts++;
@@ -130,7 +138,7 @@ export class MediaVideoGenerateTool implements ITool {
             fps: current.fps,
             width: current.width,
             height: current.height,
-            model: current.model || "wan2.1-t2v-1.3b",
+            model: current.model || "kandinsky-6.0",
           }),
           signal: AbortSignal.timeout(requestTimeout),
         });
@@ -148,14 +156,14 @@ export class MediaVideoGenerateTool implements ITool {
         if (jobRes.status === 400 && attempts < maxAttempts) {
           const errBody = await jobRes.text().catch(() => "");
           console.warn(
-            `[MEDIA SELF-REPAIR] Validation rejected: ${errBody}. Normalizing to standard 480x480 16fps and retrying...`,
+            `[MEDIA SELF-REPAIR] Validation rejected: ${errBody}. Normalizing to standard 16-divisible 480x480 16fps and retrying...`,
           );
           current = {
             ...current,
             width: 480,
             height: 480,
             fps: 16,
-            duration_seconds: Math.min(5, Math.max(1, Number(current.duration_seconds) || 2)),
+            duration_seconds: Math.min(5, Math.max(1, Number(current.duration_seconds) || 5)),
           };
           continue;
         }
@@ -476,12 +484,22 @@ export class MediaVideoGenerateTool implements ITool {
       }
 
       const requestTimeout = lazyLoadPending ? FIRST_REQUEST_TIMEOUT_MS : 300_000;
-      const requestedDuration = Math.min(30, Math.max(1, Number(args.duration_seconds) || 4));
-      const width = Number(args.width) || 480;
-      const height = Number(args.height) || 480;
+      const requestedDuration = Math.min(30, Math.max(1, Number(args.duration_seconds) || 5));
+      const rawWidth = Number(args.width) || 1280;
+      const rawHeight = Number(args.height) || 720;
+      // Guarantee strict divisibility by 16 to avoid diffusers pipeline errors
+      const width = Math.max(256, Math.min(1920, Math.round(rawWidth / 16) * 16));
+      const height = Math.max(256, Math.min(1920, Math.round(rawHeight / 16) * 16));
       const fps = Number(args.fps) || 16;
-      const negative_prompt = args.negative_prompt ? String(args.negative_prompt) : undefined;
-      const model = args.model ? String(args.model) : "wan2.1-t2v-1.3b";
+      const isCartoonPrompt = /\b(?:cartoon|dibujo|dibujos\s+animados|animaci[oó]n|anime|manga|pixar|doodle|sketch)\b/i.test(
+        prompt,
+      );
+      const negative_prompt = args.negative_prompt
+        ? String(args.negative_prompt)
+        : isCartoonPrompt
+          ? "photorealistic, hyperrealistic, deformed, blurry"
+          : "cartoon, anime, 3d render, cgi, blurry, distorted, doodle, sketch, low quality, deformed, artificial";
+      const model = args.model ? String(args.model) : "kandinsky-6.0";
 
       let finalArtifactUrl = "";
       let finalSha256: string | undefined;
@@ -767,7 +785,11 @@ export class MediaVideoGenerateTool implements ITool {
         executionTimeMs: durationMs,
       };
     } catch (err: any) {
-      const errorMsg = `Video generation request failed: ${err.message || String(err)}`;
+      let rawMsg = err.message || String(err);
+      if (rawMsg.includes("divisible by 16")) {
+        rawMsg = "Video generation requires dimensions divisible by 16. Setting has been normalized.";
+      }
+      const errorMsg = `Video generation request failed: ${rawMsg}`;
       console.error(`[MEDIA GENERATION DIAGNOSTIC] ${errorMsg}`);
       return {
         toolCallId,
@@ -776,7 +798,7 @@ export class MediaVideoGenerateTool implements ITool {
         output: "",
         error: errorMsg,
         metadata: {
-          errorDetail: err.message || String(err),
+          errorDetail: rawMsg,
         },
         executionTimeMs: Date.now() - startTime,
       };

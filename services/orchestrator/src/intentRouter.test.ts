@@ -449,5 +449,65 @@ describe("Natural-Language Intent Routing", () => {
       expect(JSON.stringify(result)).not.toMatch(/flux/i);
       expect(JSON.stringify(result)).not.toMatch(/gpu 1/i);
     });
+
+    it("routes Spanish 'Genera un vídeo con un conejo blanco bailando' to media_video with zero questionnaires and photorealistic defaults", () => {
+      const registry = new ToolRegistry();
+      registry.resetActiveToolsToCore();
+
+      const userPrompt = "Genera un vídeo con un conejo blanco bailando";
+      const result = routeUserIntent([{ role: "user", content: userPrompt }], registry);
+
+      expect(result.intent).toBe("media_video");
+      expect(result.toolsToActivate).toContain("media_video_generate");
+      expect(registry.getActiveToolNames()).toContain("media_video_generate");
+      expect(result.extractedParameters?.width).toBe(1280);
+      expect(result.extractedParameters?.height).toBe(720);
+      expect(result.extractedParameters?.width % 16).toBe(0);
+      expect(result.extractedParameters?.height % 16).toBe(0);
+
+      // Verify zero questionnaire policy is explicitly instructed
+      expect(result.systemGuidance).toContain("ZERO QUESTIONNAIRES");
+      expect(result.systemGuidance).toContain("Photorealistic live-action");
+      expect(result.systemGuidance).toContain("DO NOT interrogate");
+    });
+
+    it("routes English 'Generate a vertical video of a white rabbit dancing' to 720x1280 16-divisible resolution", () => {
+      const registry = new ToolRegistry();
+      registry.resetActiveToolsToCore();
+
+      const userPrompt = "Generate a vertical video of a white rabbit dancing";
+      const result = routeUserIntent([{ role: "user", content: userPrompt }], registry);
+
+      expect(result.intent).toBe("media_video");
+      expect(result.toolsToActivate).toContain("media_video_generate");
+      expect(result.extractedParameters?.orientation).toBe("vertical");
+      expect(result.extractedParameters?.width).toBe(720);
+      expect(result.extractedParameters?.height).toBe(1280);
+      expect(result.extractedParameters?.width % 16).toBe(0);
+      expect(result.extractedParameters?.height % 16).toBe(0);
+      expect(result.systemGuidance).toContain("ZERO QUESTIONNAIRES");
+    });
+
+    it("routes German 'Erstelle ein Video von einem tanzenden weißen Kaninchen' to media_video", () => {
+      const registry = new ToolRegistry();
+      registry.resetActiveToolsToCore();
+
+      const userPrompt = "Erstelle ein Video von einem tanzenden weißen Kaninchen";
+      const result = routeUserIntent([{ role: "user", content: userPrompt }], registry);
+
+      expect(result.intent).toBe("media_video");
+      expect(result.toolsToActivate).toContain("media_video_generate");
+      expect(registry.getActiveToolNames()).toContain("media_video_generate");
+      expect(result.systemGuidance).toContain("ZERO QUESTIONNAIRES");
+    });
+
+    it("snaps non-16-divisible dimensions like 1080x1280 to safe multiples of 16", () => {
+      const dims = extractDimensions("resolution 1080x1280");
+      expect(dims).toBeDefined();
+      expect(dims!.width % 16).toBe(0);
+      expect(dims!.height % 16).toBe(0);
+      expect(dims!.width).toBe(1088);
+      expect(dims!.height).toBe(1280);
+    });
   });
 });

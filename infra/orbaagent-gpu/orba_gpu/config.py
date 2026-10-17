@@ -96,7 +96,7 @@ class Settings:
             target_gpu_uuid=get("MEDIA_WORKER_GPU_UUID", DEFAULT_TARGET_GPU_UUID),
             backend=get("MEDIA_GENERATION_BACKEND"),
             image_model_id=get("MEDIA_GENERATION_IMAGE_MODEL", "black-forest-labs/FLUX.1-schnell"),
-            video_model_id=get("MEDIA_GENERATION_VIDEO_MODEL", "Wan-AI/Wan2.1-T2V-1.3B"),
+            video_model_id=get("MEDIA_GENERATION_VIDEO_MODEL", "kandinskylab/Kandinsky-6.0-Pro-distill-5s-Diffusers"),
             models_dir=get("MEDIA_MODELS_DIR", "/models"),
             output_dir=get("MEDIA_OUTPUT_DIR", "/output"),
             port=_env_int(source, "MEDIA_WORKER_PORT", 8190),
@@ -162,9 +162,15 @@ def validate_image_request(
             f"unsupported output_format '{output_format}'; allowed: {', '.join(ALLOWED_IMAGE_FORMATS)}"
         )
 
+    eff_w = clamp(width, MIN_DIMENSION, MAX_IMAGE_DIMENSION)
+    eff_h = clamp(height, MIN_DIMENSION, MAX_IMAGE_DIMENSION)
+    # Snap to multiple of 16
+    eff_w = max(MIN_DIMENSION, round(eff_w / 16) * 16)
+    eff_h = max(MIN_DIMENSION, round(eff_h / 16) * 16)
+
     return (
-        clamp(width, MIN_DIMENSION, MAX_IMAGE_DIMENSION),
-        clamp(height, MIN_DIMENSION, MAX_IMAGE_DIMENSION),
+        eff_w,
+        eff_h,
         clamp(steps, MIN_STEPS, MAX_STEPS),
         fmt,
     )
@@ -176,7 +182,11 @@ def validate_video_request(
     width: int,
     height: int,
 ) -> tuple[int, int, int, int]:
-    """Bound a video request, returning effective (duration, fps, width, height)."""
+    """Bound a video request, returning effective (duration, fps, width, height).
+
+    Automatically bounds and normalizes dimensions to multiples of 16 so that
+    DiT pipelines (Kandinsky 6.0, Prism, etc.) never reject valid requests.
+    """
     if width <= 0 or height <= 0:
         raise ValidationError("width and height must be positive integers")
     if duration_seconds <= 0:
@@ -184,9 +194,15 @@ def validate_video_request(
     if fps <= 0:
         raise ValidationError("fps must be a positive integer")
 
+    eff_w = clamp(width, MIN_DIMENSION, MAX_VIDEO_DIMENSION)
+    eff_h = clamp(height, MIN_DIMENSION, MAX_VIDEO_DIMENSION)
+    # Strict divisibility by 16: prevents diffusers ValueError
+    eff_w = max(MIN_DIMENSION, round(eff_w / 16) * 16)
+    eff_h = max(MIN_DIMENSION, round(eff_h / 16) * 16)
+
     return (
         clamp(duration_seconds, MIN_VIDEO_DURATION_SECONDS, MAX_VIDEO_DURATION_SECONDS),
         clamp(fps, MIN_FPS, MAX_FPS),
-        clamp(width, MIN_DIMENSION, MAX_VIDEO_DIMENSION),
-        clamp(height, MIN_DIMENSION, MAX_VIDEO_DIMENSION),
+        eff_w,
+        eff_h,
     )
