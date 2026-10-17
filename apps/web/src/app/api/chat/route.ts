@@ -83,7 +83,12 @@ export async function POST(request: Request) {
               const decoded = JSON.parse(
                 Buffer.from(att.artifactId, "base64url").toString("utf-8"),
               );
-              const artifactUrl = `/api/artifacts/${encodeURIComponent(decoded.w)}/${encodeURIComponent(decoded.b)}/${encodeURIComponent(decoded.p)}`;
+              const appUrl = (
+                process.env.NEXT_PUBLIC_API_URL ||
+                process.env.ORBA_WEB_URL ||
+                "https://orbaagent.dev"
+              ).replace(/\/+$/, "");
+              const artifactUrl = `${appUrl}/api/artifacts/${encodeURIComponent(decoded.w)}/${encodeURIComponent(decoded.b)}/${encodeURIComponent(decoded.p)}`;
               imageParts.push({
                 type: "image_url",
                 image_url: { url: artifactUrl },
