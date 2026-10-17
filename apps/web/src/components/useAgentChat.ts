@@ -311,6 +311,29 @@ export function useAgentChat() {
           });
         }
       } finally {
+        // Guarantee that no media tool call remains orphaned in pending state if stream ends or aborts
+        setMessages((prev) =>
+          prev.map((msg) => {
+            if (msg.id !== assistantMsgId) return msg;
+            if (!msg.toolCalls || msg.toolCalls.length === 0) return msg;
+            const existingResults = msg.toolResults || [];
+            const missingResults = msg.toolCalls
+              .filter((tc) => !existingResults.some((tr) => tr.toolCallId === tc.id))
+              .map((tc) => ({
+                toolCallId: tc.id,
+                name: tc.name,
+                success: false,
+                error:
+                  "Generation ended or connection closed before receiving the artifact. You can retry the generation below.",
+                output: "",
+              }));
+            if (missingResults.length === 0) return msg;
+            return {
+              ...msg,
+              toolResults: [...existingResults, ...missingResults],
+            };
+          }),
+        );
         setIsGenerating(false);
         setActiveActivity(null);
         abortControllerRef.current = null;

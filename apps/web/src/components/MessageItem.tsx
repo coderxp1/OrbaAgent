@@ -23,6 +23,7 @@ import {
   Loader2,
   MoreHorizontal,
   Play,
+  RotateCcw,
   Sparkles,
   ThumbsDown,
   ThumbsUp,
@@ -30,7 +31,7 @@ import {
   Volume2,
   VolumeX,
 } from "lucide-react";
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { FileChangesReview } from "./FileChangesReview";
 import { TerminalSession } from "./TerminalSession";
 
@@ -267,6 +268,7 @@ export function MessageItem({
               result={result}
               textContent={textContent}
               onReply={onReply}
+              messageTimestamp={message.timestamp}
             />
           );
         })}
@@ -902,6 +904,7 @@ interface MediaToolItemProps {
   result?: ToolExecutionResult;
   textContent: string;
   onReply?: (content: string) => void;
+  messageTimestamp?: string | number;
 }
 
 function CommercialVideoPlayer({
@@ -1110,14 +1113,84 @@ function CommercialVideoPlayer({
   );
 }
 
-function MediaToolItem({ call, result, textContent, onReply }: MediaToolItemProps) {
+function MediaToolItem({
+  call,
+  result,
+  textContent,
+  onReply,
+  messageTimestamp,
+}: MediaToolItemProps) {
   const isVideo = call.name === "media_video_generate";
   const args = (call.arguments || {}) as Record<string, any>;
   const prompt = args.prompt || "Generating media...";
 
-  // 1. Result not yet available -> in-progress step tracker card matching input_file_1.png
+  // Real elapsed time tracking for accurate progress & stalled job detection
+  const [elapsed, setElapsed] = useState(() => {
+    if (messageTimestamp) {
+      const ts =
+        typeof messageTimestamp === "string"
+          ? new Date(messageTimestamp).getTime()
+          : Number(messageTimestamp);
+      if (!isNaN(ts) && ts > 0) {
+        return Math.max(0, Math.floor((Date.now() - ts) / 1000));
+      }
+    }
+    return 0;
+  });
+
+  useEffect(() => {
+    if (result) return;
+    const timer = setInterval(() => {
+      setElapsed((prev) => prev + 1);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [result]);
+
+  const isStalled = !result && elapsed >= 180;
+
+  // Stalled / Timed-out state (>180s without worker completion)
+  if (isStalled) {
+    return (
+      <div className="my-2.5 rounded-2xl border border-amber-900/60 bg-amber-950/20 p-4 text-xs text-amber-200 shadow-lg max-w-xl">
+        <div className="flex items-start gap-3">
+          <AlertCircle className="h-4 w-4 shrink-0 text-amber-400 mt-0.5" />
+          <div className="flex-1">
+            <div className="flex items-center justify-between">
+              <span className="font-semibold text-amber-200">
+                {isVideo ? "Video Generation Timed Out" : "Image Generation Timed Out"}
+              </span>
+              <span className="text-[10px] font-mono text-amber-400/80 bg-amber-900/40 px-2 py-0.5 rounded border border-amber-800/60">
+                Stalled ({elapsed}s)
+              </span>
+            </div>
+            <p className="mt-1 text-amber-300/90 leading-relaxed text-[11px]">
+              Generation took longer than expected ({elapsed}s) without receiving final video frames from the GPU worker. The worker process may have restarted or been under contention.
+            </p>
+            {onReply && (
+              <button
+                type="button"
+                onClick={() => onReply(prompt)}
+                className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-900/50 hover:bg-amber-800/60 text-amber-100 text-xs font-medium border border-amber-700/60 transition-colors shadow-sm cursor-pointer"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                Retry Video Generation
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // 1. Result not yet available -> genuine dynamic step tracker card
   if (!result) {
     if (isVideo) {
+      // Dynamic stage calculation based on actual elapsed runtime
+      const stage1Done = elapsed >= 2;
+      const stage2Done = elapsed >= 6;
+      const stage3Done = elapsed >= 45;
+      const stage4Done = elapsed >= 65;
+
       return (
         <div className="my-2.5 flex flex-col gap-2 max-w-lg">
           <div className="rounded-2xl border border-zinc-800 bg-[#1e1e20] p-4 shadow-xl text-zinc-200">
@@ -1126,61 +1199,123 @@ function MediaToolItem({ call, result, textContent, onReply }: MediaToolItemProp
                 <ChevronUp className="w-4 h-4 text-zinc-400" />
                 <span>Commercial Video Production</span>
               </div>
-              <span className="text-[10px] font-mono text-zinc-400 bg-zinc-800/80 px-2 py-0.5 rounded border border-zinc-700/60">
-                In Production
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-mono text-zinc-400 bg-zinc-800/80 px-2 py-0.5 rounded border border-zinc-700/60">
+                  {elapsed}s
+                </span>
+                <span className="text-[10px] font-mono text-blue-400 bg-blue-950/40 px-2 py-0.5 rounded border border-blue-800/60 flex items-center gap-1">
+                  <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                  In Production
+                </span>
+              </div>
             </div>
 
             <div className="flex flex-col gap-2.5 pt-3 text-xs">
               {/* Stage 1: Brand Assets */}
-              <div className="flex items-center justify-between text-zinc-300">
+              <div className={`flex items-center justify-between ${stage1Done ? "text-zinc-300" : "text-zinc-100"}`}>
                 <div className="flex items-center gap-2.5">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                  <span className="font-medium text-zinc-200">Read uploaded brand assets & brief</span>
+                  {stage1Done ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                  ) : (
+                    <Loader2 className="w-4 h-4 text-blue-400 animate-spin shrink-0" />
+                  )}
+                  <span className={stage1Done ? "text-zinc-300" : "font-medium text-white"}>
+                    Read uploaded brand assets & brief
+                  </span>
                 </div>
-                <span className="text-[10px] text-zinc-500 font-mono">Done</span>
+                <span className="text-[10px] text-zinc-500 font-mono">
+                  {stage1Done ? "Done" : "Reading..."}
+                </span>
               </div>
 
               {/* Stage 2: Storyboard */}
-              <div className="flex items-center justify-between text-zinc-300">
+              <div className={`flex items-center justify-between ${stage2Done ? "text-zinc-300" : stage1Done ? "text-zinc-100" : "text-zinc-500"}`}>
                 <div className="flex items-center gap-2.5">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                  <span className="font-medium text-zinc-200">Prepare commercial storyboard & scenes</span>
+                  {stage2Done ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                  ) : stage1Done ? (
+                    <Loader2 className="w-4 h-4 text-blue-400 animate-spin shrink-0" />
+                  ) : (
+                    <Clock className="w-4 h-4 text-zinc-600 shrink-0" />
+                  )}
+                  <span className={stage2Done ? "text-zinc-300" : stage1Done ? "font-medium text-white" : ""}>
+                    Prepare commercial storyboard & scenes
+                  </span>
                 </div>
-                <span className="text-[10px] text-zinc-500 font-mono">Done</span>
+                <span className="text-[10px] text-zinc-500 font-mono">
+                  {stage2Done ? "Done" : stage1Done ? "Planning..." : "Queued"}
+                </span>
               </div>
 
               {/* Stage 3: Video Generation */}
-              <div className="flex items-center justify-between text-zinc-100">
+              <div className={`flex items-center justify-between ${stage3Done ? "text-zinc-300" : stage2Done ? "text-zinc-100" : "text-zinc-500"}`}>
                 <div className="flex items-center gap-2.5">
-                  <Loader2 className="w-4 h-4 text-blue-400 animate-spin shrink-0" />
-                  <span className="font-medium">Generate cinematic footage</span>
+                  {stage3Done ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                  ) : stage2Done ? (
+                    <Loader2 className="w-4 h-4 text-blue-400 animate-spin shrink-0" />
+                  ) : (
+                    <Clock className="w-4 h-4 text-zinc-600 shrink-0" />
+                  )}
+                  <span className={stage3Done ? "text-zinc-300" : stage2Done ? "font-medium text-white" : ""}>
+                    Generate cinematic footage (Diffusion rendering)
+                  </span>
                 </div>
-                <span className="text-[10px] text-blue-400 font-mono">Rendering...</span>
+                <span className={`text-[10px] font-mono ${stage3Done ? "text-zinc-500" : stage2Done ? "text-blue-400" : "text-zinc-600"}`}>
+                  {stage3Done ? "Done" : stage2Done ? "Rendering..." : "Queued"}
+                </span>
               </div>
 
               {/* Stage 4: Soundtrack */}
-              <div className="flex items-center justify-between text-zinc-500">
+              <div className={`flex items-center justify-between ${stage4Done ? "text-zinc-300" : stage3Done ? "text-zinc-100" : "text-zinc-500"}`}>
                 <div className="flex items-center gap-2.5">
-                  <Clock className="w-4 h-4 text-zinc-600 shrink-0" />
-                  <span>Synthesize narration & background soundtrack</span>
+                  {stage4Done ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                  ) : stage3Done ? (
+                    <Loader2 className="w-4 h-4 text-blue-400 animate-spin shrink-0" />
+                  ) : (
+                    <Clock className="w-4 h-4 text-zinc-600 shrink-0" />
+                  )}
+                  <span className={stage4Done ? "text-zinc-300" : stage3Done ? "font-medium text-white" : ""}>
+                    Synthesize narration & background soundtrack
+                  </span>
                 </div>
-                <span className="text-[10px] text-zinc-600 font-mono">Queued</span>
+                <span className={`text-[10px] font-mono ${stage4Done ? "text-zinc-500" : stage3Done ? "text-blue-400" : "text-zinc-600"}`}>
+                  {stage4Done ? "Done" : stage3Done ? "Synthesizing..." : "Queued"}
+                </span>
               </div>
 
               {/* Stage 5: Final Assembly & Branding */}
-              <div className="flex items-center justify-between text-zinc-500">
+              <div className={`flex items-center justify-between ${stage4Done ? "text-zinc-100" : "text-zinc-500"}`}>
                 <div className="flex items-center gap-2.5">
-                  <Sparkles className="w-4 h-4 text-zinc-600 shrink-0" />
-                  <span>Assemble final commercial & pristine logo outro</span>
+                  {stage4Done ? (
+                    <Loader2 className="w-4 h-4 text-amber-400 animate-spin shrink-0" />
+                  ) : (
+                    <Sparkles className="w-4 h-4 text-zinc-600 shrink-0" />
+                  )}
+                  <span className={stage4Done ? "font-medium text-amber-200" : ""}>
+                    Assemble final commercial & pristine logo outro
+                  </span>
                 </div>
-                <span className="text-[10px] text-zinc-600 font-mono">Pending</span>
+                <span className={`text-[10px] font-mono ${stage4Done ? "text-amber-400" : "text-zinc-600"}`}>
+                  {stage4Done ? "Assembling..." : "Pending"}
+                </span>
               </div>
 
               {/* Footer Note */}
-              <div className="flex items-center gap-2 text-zinc-400 pt-2 border-t border-zinc-800/60 text-[11px]">
-                <Clock className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
-                <span className="truncate">Production in progress. High-resolution diffusion rendering...</span>
+              <div className="flex items-center justify-between text-zinc-400 pt-2 border-t border-zinc-800/60 text-[11px]">
+                <div className="flex items-center gap-2 truncate">
+                  <Clock className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
+                  <span className="truncate">
+                    {stage4Done
+                      ? "Assembling audio, video clips, and logo branding..."
+                      : stage3Done
+                        ? "Generating synchronized high-fidelity audio..."
+                        : stage2Done
+                          ? "Executing neural diffusion on GPU 1..."
+                          : "Preparing scene composition and prompt guidance..."}
+                  </span>
+                </div>
               </div>
             </div>
           </div>
@@ -1200,7 +1335,7 @@ function MediaToolItem({ call, result, textContent, onReply }: MediaToolItemProp
               <span className="font-semibold text-xs text-zinc-200">Creating your image…</span>
               <span className="inline-flex items-center gap-1 rounded-full bg-zinc-800 px-2 py-0.5 text-[10px] font-medium text-zinc-300 border border-zinc-700">
                 <Loader2 className="h-2.5 w-2.5 animate-spin text-blue-400" />
-                Processing
+                {elapsed}s
               </span>
             </div>
             <p className="mt-1 truncate text-xs text-zinc-400 italic">&ldquo;{prompt}&rdquo;</p>
@@ -1213,7 +1348,7 @@ function MediaToolItem({ call, result, textContent, onReply }: MediaToolItemProp
   // 2. Failed state
   if (!result.success) {
     return (
-      <div className="my-2.5 rounded-2xl border border-red-900/60 bg-red-950/30 p-3.5 text-xs text-red-300 shadow-md max-w-xl">
+      <div className="my-2.5 rounded-2xl border border-red-900/60 bg-red-950/30 p-4 text-xs text-red-300 shadow-md max-w-xl">
         <div className="flex items-start gap-2.5">
           <AlertCircle className="h-4 w-4 shrink-0 text-red-400 mt-0.5" />
           <div className="flex-1">
@@ -1223,6 +1358,16 @@ function MediaToolItem({ call, result, textContent, onReply }: MediaToolItemProp
             <p className="mt-1 text-red-300/90 font-mono text-[11px] leading-relaxed">
               {result.error || "An error occurred executing this request."}
             </p>
+            {onReply && (
+              <button
+                type="button"
+                onClick={() => onReply(prompt)}
+                className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-red-900/40 hover:bg-red-800/50 text-red-100 text-xs font-medium border border-red-700/60 transition-colors shadow-sm cursor-pointer"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                Retry Generation
+              </button>
+            )}
           </div>
         </div>
       </div>
