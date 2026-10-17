@@ -333,10 +333,11 @@ export class MediaVideoGenerateTool implements ITool {
     if (logoPath) {
       const outroStart = Math.max(1.0, duration - 2.5);
       const filterComplex = [
-        "[1:v]scale=90:-1,format=rgba,colorchannelmixer=aa=0.75[wm]",
-        `[0:v][wm]overlay=main_w-overlay_w-16:16:enable='between(t,0,${outroStart})'[vmid]`,
-        `[1:v]scale=160:-1,format=rgba,fade=t=in:st=${outroStart}:d=0.6:alpha=1[brand]`,
-        `[vmid][brand]overlay=(main_w-overlay_w)/2:(main_h-overlay_h)/2:enable='gte(t,${outroStart})'[vout]`,
+        "[1:v]split=2[wm_in][brand_in]",
+        "[wm_in]scale=90:-1,format=rgba,colorchannelmixer=aa=0.85[wm]",
+        `[0:v][wm]overlay=main_w-overlay_w-16:16:shortest=1:enable='between(t,0,${outroStart})'[vmid]`,
+        `[brand_in]scale=220:-1,format=rgba,fade=t=in:st=${outroStart}:d=0.6:alpha=1[brand]`,
+        `[vmid][brand]overlay=(main_w-overlay_w)/2:(main_h-overlay_h)/2:shortest=1:enable='gte(t,${outroStart})'[vout]`,
         `[2:a]afade=t=in:ss=0:d=0.5,afade=t=out:st=${fadeOutStart}:d=1.0[aout]`,
       ].join(";");
 
@@ -344,6 +345,8 @@ export class MediaVideoGenerateTool implements ITool {
         "-y",
         "-i",
         videoPath,
+        "-loop",
+        "1",
         "-i",
         logoPath,
         "-f",
