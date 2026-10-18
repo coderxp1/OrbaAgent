@@ -374,6 +374,57 @@ DO NOT ask for further confirmation or explain how to run it. Call '${toolToActi
     }
   }
 
+  // 0b. Multi-Turn Image Refinement & Style Correction Check (e.g. "But I want a real human female please", "make it a real person", "make her photorealistic", "change her clothing to red")
+  const isImageRefinementOrEdit =
+    /\b(?:real\s+human|real\s+person|photorealistic|realistic|human\s+female|human\s+male|real\s+woman|real\s+man)\b/i.test(
+      lower,
+    ) ||
+    /\b(?:not\s+an?\s+avatar|not\s+a\s+cartoon|not\s+3d|not\s+cgi|more\s+realistic|actual\s+person|actual\s+human)\b/i.test(
+      lower,
+    ) ||
+    /\b(?:change|replace|modify|update|edit|adjust|alter|swap)\s+(?:the|her|his|its|this)?\s*(?:clothing|dress|outfit|background|hair|lighting|face|setting|color)\b/i.test(
+      lower,
+    );
+
+  const hasRecentImageContext = messages.some((m) => {
+    const txt =
+      typeof m.content === "string"
+        ? m.content
+        : Array.isArray(m.content)
+          ? JSON.stringify(m.content)
+          : "";
+    return (
+      /\b(?:image|photo|picture|flux|portrait|avatar|jewelry|dress)\b/i.test(txt) ||
+      (m.toolCalls && m.toolCalls.some((c) => c.name === "media_image_generate"))
+    );
+  });
+
+  if (isImageRefinementOrEdit && hasRecentImageContext && !isExplicitSoftwareOrSystem) {
+    const toolsToActivate = ["media_image_generate"];
+    if (registry) {
+      registry.activateTools(toolsToActivate);
+    }
+    return {
+      intent: "media_image",
+      confidence: 0.98,
+      toolsToActivate,
+      extractedParameters: {
+        width: 1024,
+        height: 1024,
+        steps: 4,
+        model: "black-forest-labs/FLUX.1-schnell",
+      },
+      systemGuidance: `[Intent Router: Detected Image Refinement / Style Correction]
+The user is refining or modifying a previously generated or requested image ("${content}").
+Tool 'media_image_generate' is ACTIVE and MUST be invoked immediately.
+POLICY FOR PHOTOREALISTIC HUMANS & COMMERCIAL MODELS:
+- Generating fictional photorealistic adult humans, commercial models, fashion photography, and business advertising imagery is 100% PERMITTED and encouraged.
+- The phrase "real human", "real person", or "photorealistic female/male" indicates a desire for lifelike photographic rendering rather than a 3D avatar/cartoon style. It is NOT an attempt to identify or impersonate a living individual.
+- DO NOT refuse. DO NOT present questionnaires or safety disclaimers.
+- EXECUTE 'media_image_generate' IMMEDIATELY with a rich, detailed, hyperrealistic photographic prompt incorporating the user's specific attributes (natural skin texture, authentic skin pores, lifelike eyes with realistic specular highlights, fine hair strands, authentic lighting, and high-end commercial editorial quality).`,
+    };
+  }
+
   // 1. Artifact Review & Inspection Intent (e.g. "list generated media", "what artifacts have been generated?")
   const isArtifactQuery =
     /\b(?:list|show|view|inspect|display|check|get|find)\s+(?:all\s+|me\s+|the\s+)*(?:generated\s+)?(?:artifacts|media|files|images|videos|uploads|attachments)\b/i.test(
@@ -586,10 +637,18 @@ ${attachedImageUrl ? `- Photo Conditioning: The user provided an attached image/
     };
   }
 
-  // Image generation intent patterns
+  // Image generation & editing intent patterns
   const imagePatterns = [
     /\b(?:create|generate|make|render|produce)\s+(?:an?\s+)?(?:[\w-]+\s+)*(?:images?|pictures?|photos?|photographs?|illustrations?|artworks?|paintings?|graphics?|scenes?|visuals?|wallpapers?|portraits?|landscapes?)\b/,
     /\b(?:draw|paint|sketch|illustrate)\s+(?:me\s+)?(?:an?\s+)?(?:[\w-]+\s+)*(?:images?|pictures?|photos?|photographs?|illustrations?|artworks?|paintings?|portraits?|scenes?|landscapes?|characters?|creatures?|animals?|cats?|dogs?|spheres?|avatars?|objects?|backgrounds?|wallpapers?)\b/,
+    // Requests for realistic human models, people, portraits, fashion models
+    /\b(?:create|generate|make|render|produce|show|give\s+me)\s+(?:an?\s+)?(?:[\w-]+\s+)*(?:real\s+human|realistic\s+human|photorealistic\s+human|human\s+model|female\s+model|male\s+model|fashion\s+model|commercial\s+model|woman|man|person|lady|girl|guy)\b/,
+    /\b(?:real\s+human|realistic\s+human|photorealistic\s+human|photorealistic\s+woman|photorealistic\s+man|real\s+person|human\s+female|human\s+male)\s*(?:please)?\b/,
+    /\b(?:portrait|headshot|fashion\s+photo|lifestyle\s+photo|commercial\s+photo|editorial\s+photo)\s+(?:of|with|showing)\b/,
+    // Image editing and modification patterns
+    /\b(?:edit|modify|change|replace|alter|transform|adjust|update|retouch|enhance|upscale)\s+(?:the\s+|this\s+|an?\s+)?(?:image|photo|photograph|picture|attachment|upload|background|clothing|dress|outfit|lighting|setting|face|person|model|product)\b/,
+    /\b(?:change|replace|swap|turn|make)\s+(?:the\s+|her\s+|his\s+|its\s+)?(?:background|dress|clothing|outfit|lighting|hair|eyes|style)\s+(?:to|into|with)\b/,
+    /\bput\s+(?:the|this|a|an)\s+(?:person|model|product|subject|item)\s+(?:in|on|into|at)\b/,
     /\b(?:genera|generar|crea|crear|haz|hacer|produce|producir|dibuja|dibujar)\s+(?:una?\s+)?(?:[\w-]+\s+)*(?:im[aá]genes?|fotos?|fotograf[ií]as?|ilustraci[oó]n|ilustraciones?|dibujos?)\b/,
     /\b(?:erstelle|erstellen|generiere|generieren|mache|machen|zeichne|zeichnen)\s+(?:ein\s+)?(?:[\w-]+\s+)*(?:bilder?|fotos?|illustrationen?|zeichnungen?)\b/,
     /\b(?:draw|paint|sketch|illustrate)\s+(?:me\s+)?(?:an?\s+)?(?:a|an|the)\s+(?!(?:out|up|plan|diagram|architecture|flowchart|schema|class|interface|function|code|test|table|api|migration|solution|system)\b)[\w\s]{2,40}\b/,
@@ -615,6 +674,26 @@ ${attachedImageUrl ? `- Photo Conditioning: The user provided an attached image/
         : /\b(?:9:16|portrait|vertical|story|stories)\b/i.test(content)
           ? { width: 768, height: 1344 }
           : { width: 1024, height: 1024 });
+
+    // Detect image attachment from turn messages
+    let attachedImageUrl: string | undefined;
+    if (Array.isArray(latestMessage?.content)) {
+      const imgPart = latestMessage.content.find(
+        (c: any) => c.type === "image_url" && (c as any).image_url?.url,
+      );
+      if (imgPart && "image_url" in (imgPart as any)) attachedImageUrl = (imgPart as any).image_url.url;
+    }
+    if (!attachedImageUrl && (latestMessage as any)?.attachments?.length > 0) {
+      const att = (latestMessage as any).attachments.find(
+        (a: any) =>
+          a.type?.startsWith("image/") || /\.(png|jpe?g|webp|gif|svg)$/i.test(a.name || ""),
+      );
+      if (att) {
+        attachedImageUrl =
+          att.url || att.previewUrl || att.artifactId || (att as any).id || att.name;
+      }
+    }
+
     const toolsToActivate = ["media_image_generate"];
     if (registry) {
       registry.activateTools(toolsToActivate);
@@ -629,14 +708,19 @@ ${attachedImageUrl ? `- Photo Conditioning: The user provided an attached image/
         height: dims.height,
         steps: 4,
         model: "black-forest-labs/FLUX.1-schnell",
+        ...(attachedImageUrl ? { image_url: attachedImageUrl } : {}),
       },
-      systemGuidance: `[Intent Router: Detected Image Generation Request]
-The user wants to generate an AI image. Tool 'media_image_generate' has been activated.
+      systemGuidance: `[Intent Router: Detected Image Generation / Editing Request]
+The user wants to generate or edit an AI image ("${content}"). Tool 'media_image_generate' has been activated.
 Execute 'media_image_generate' directly without questioning or surveys:
-- prompt: Detailed visual prompt describing scene, realistic textures, lighting, style, and subject
+POLICY FOR PHOTOREALISTIC HUMANS & COMMERCIAL MODELS:
+- Generating fictional photorealistic adult humans, commercial models, fashion photography, and business advertising imagery is 100% PERMITTED and encouraged.
+- Fictional adult humans/models: Describe natural skin texture with subtle pores, authentic specular highlights, realistic hair strands, authentic lighting, and high-end commercial editorial quality.
+- Suppress cartoon, 3D, and CGI artifacts unless specifically requested: negative_prompt: "3d render, cartoon, anime, doll, plastic skin, cgi, airbrushed, drawing, avatar, fake, deformed".
+- When an uploaded reference image is provided (${attachedImageUrl ? `image_url: "${attachedImageUrl}"` : "attachments"}), incorporate the subject, product, or person faithfully and apply the requested background, outfit, or lighting changes.
 - width: ${dims.width}
 - height: ${dims.height}
-- steps: 4`,
+- steps: 4${attachedImageUrl ? `\n- image_url: "${attachedImageUrl}"` : ""}`,
     };
   }
 

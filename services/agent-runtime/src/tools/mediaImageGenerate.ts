@@ -61,6 +61,11 @@ export class MediaImageGenerateTool implements ITool {
           description: "Target image format. Currently only png is supported.",
           default: "png",
         },
+        image_url: {
+          type: "string",
+          description:
+            "Optional URL or artifactId of an input image/photo to edit, transform, or condition generation on.",
+        },
       },
       required: ["prompt"],
     },
@@ -165,6 +170,31 @@ export class MediaImageGenerateTool implements ITool {
       const maxAttempts = 2;
       let currentArgs: Record<string, any> = { ...args };
 
+      // Automatic human photorealism enhancement: if prompt depicts humans and is not explicitly cartoon,
+      // enforce lifelike photography tokens and suppress 3D render / CGI / doll / avatar artifacts
+      const isHumanPrompt =
+        /\b(?:human|person|woman|man|female|male|girl|guy|model|face|lady|blonde|brunette|portrait|headshot|people)\b/i.test(
+          prompt,
+        );
+      const isCartoon = /\b(?:cartoon|anime|manga|3d\s+render|pixar|doodle|sketch|comic)\b/i.test(
+        prompt,
+      );
+
+      let effectiveNegative = currentArgs.negative_prompt;
+      if (!effectiveNegative && isHumanPrompt && !isCartoon) {
+        effectiveNegative =
+          "3d render, cartoon, anime, doll, plastic skin, cgi, airbrushed, drawing, painting, avatar, fake, deformed, extra fingers, distorted";
+      }
+
+      let effectivePrompt = prompt;
+      if (
+        isHumanPrompt &&
+        !isCartoon &&
+        !/\b(?:skin|pores|texture|photo|photograph|hyperrealistic|editorial)\b/i.test(prompt)
+      ) {
+        effectivePrompt = `${prompt}, photorealistic editorial photography, natural skin texture with subtle pores, lifelike features and natural lighting`;
+      }
+
       while (attempts < maxAttempts) {
         attempts++;
         try {
@@ -182,8 +212,8 @@ export class MediaImageGenerateTool implements ITool {
               Authorization: `Bearer ${workerToken}`,
             },
             body: JSON.stringify({
-              prompt,
-              negative_prompt: currentArgs.negative_prompt,
+              prompt: effectivePrompt,
+              negative_prompt: effectiveNegative,
               width: targetWidth,
               height: targetHeight,
               steps: currentArgs.steps || 4,

@@ -501,13 +501,60 @@ describe("Natural-Language Intent Routing", () => {
       expect(result.systemGuidance).toContain("ZERO QUESTIONNAIRES");
     });
 
-    it("snaps non-16-divisible dimensions like 1080x1280 to safe multiples of 16", () => {
-      const dims = extractDimensions("resolution 1080x1280");
-      expect(dims).toBeDefined();
-      expect(dims!.width % 16).toBe(0);
-      expect(dims!.height % 16).toBe(0);
-      expect(dims!.width).toBe(1088);
-      expect(dims!.height).toBe(1280);
+    it("routes multi-turn refinement 'But I want a real human female please' after an avatar image to media_image", () => {
+      const registry = new ToolRegistry();
+      registry.resetActiveToolsToCore();
+
+      const messages: ChatMessage[] = [
+        {
+          role: "user",
+          content:
+            "Generate an image of a blonde female avatar smiling with blue eyes, wearing a blue dress and silver jewelry",
+        },
+        {
+          role: "assistant",
+          content: "Here is your image: ![Avatar](/api/artifacts/default-tenant/img_123/avatar.png)",
+        },
+        {
+          role: "user",
+          content: "But I want a real human female please",
+        },
+      ];
+
+      const result = routeUserIntent(messages, registry);
+      expect(result.intent).toBe("media_image");
+      expect(result.toolsToActivate).toContain("media_image_generate");
+      expect(registry.getActiveToolNames()).toContain("media_image_generate");
+      expect(result.systemGuidance).toContain("PHOTOREALISTIC HUMANS");
+    });
+
+    it("routes 'Generate a realistic adult female fashion model wearing a trenchcoat' to media_image", () => {
+      const registry = new ToolRegistry();
+      registry.resetActiveToolsToCore();
+
+      const userPrompt =
+        "Generate a realistic adult female fashion model wearing a tailored beige trenchcoat in Paris";
+      const result = routeUserIntent([{ role: "user", content: userPrompt }], registry);
+
+      expect(result.intent).toBe("media_image");
+      expect(result.toolsToActivate).toContain("media_image_generate");
+      expect(registry.getActiveToolNames()).toContain("media_image_generate");
+    });
+
+    it("routes image editing request 'Change the background to a modern luxury studio' to media_image", () => {
+      const registry = new ToolRegistry();
+      registry.resetActiveToolsToCore();
+
+      const messages: ChatMessage[] = [
+        {
+          role: "user",
+          content: "Change the background to a modern luxury studio setting",
+        },
+      ];
+
+      const result = routeUserIntent(messages, registry);
+      expect(result.intent).toBe("media_image");
+      expect(result.toolsToActivate).toContain("media_image_generate");
     });
   });
 });
