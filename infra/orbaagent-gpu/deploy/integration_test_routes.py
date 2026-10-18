@@ -51,7 +51,7 @@ def main():
         output_dir=output_dir,
         token=token,
         image_model_id="black-forest-labs/FLUX.1-schnell",
-        video_model_id="Wan-AI/Wan2.1-T2V-1.3B",
+        video_model_id="Lightricks/LTX-Video",
     )
 
     manager = ModelManager(
@@ -59,7 +59,7 @@ def main():
         output_dir=output_dir,
         backend="diffusers",
         image_model_id="black-forest-labs/FLUX.1-schnell",
-        video_model_id="Wan-AI/Wan2.1-T2V-1.3B",
+        video_model_id="Lightricks/LTX-Video",
         image_loader=load_image_pipeline,
         video_loader=load_video_pipeline,
     )
@@ -168,11 +168,11 @@ def main():
     video_payload = {
         "prompt": "Gentle ocean waves rolling onto white sand",
         "negative_prompt": None,
-        "duration_seconds": 1,
-        "fps": 5,
-        "width": 640,
-        "height": 352,
-        "model": "Wan-AI/Wan2.1-T2V-1.3B",
+        "duration_seconds": 2,
+        "fps": 24,
+        "width": 512,
+        "height": 512,
+        "model": "Lightricks/LTX-Video",
     }
     print("Request Payload:")
     print(json.dumps(video_payload, indent=2))

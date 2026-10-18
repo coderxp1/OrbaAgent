@@ -28,7 +28,7 @@ def make_manager(backend="diffusers", image_loader=None, video_loader=None, tmp_
         img_dir = models_dir / "black-forest-labs" / "FLUX.1-schnell"
         img_dir.mkdir(parents=True, exist_ok=True)
         (img_dir / "model_index.json").write_text("{}")
-        vid_dir = models_dir / "Wan-AI" / "Wan2.1-T2V-1.3B"
+        vid_dir = models_dir / "Lightricks" / "LTX-Video"
         vid_dir.mkdir(parents=True, exist_ok=True)
         (vid_dir / "model_index.json").write_text("{}")
 
@@ -37,7 +37,7 @@ def make_manager(backend="diffusers", image_loader=None, video_loader=None, tmp_
         output_dir=str(tmp_dir / "output"),
         backend=backend,
         image_model_id="black-forest-labs/FLUX.1-schnell",
-        video_model_id="Wan-AI/Wan2.1-T2V-1.3B",
+        video_model_id="Lightricks/LTX-Video",
         image_loader=image_loader,
         video_loader=video_loader,
     )

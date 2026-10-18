@@ -421,8 +421,9 @@ def build_test_worker_client(
     img_dir = models_path / "black-forest-labs" / "FLUX.1-schnell"
     img_dir.mkdir(parents=True, exist_ok=True)
     (img_dir / "config.json").write_text("{}")
-    vid_dir = models_path / "Wan-AI" / "Wan2.1-T2V-1.3B"
+    vid_dir = models_path / "Lightricks" / "LTX-Video"
     vid_dir.mkdir(parents=True, exist_ok=True)
+    (vid_dir / "model_index.json").write_text("{}")
     (vid_dir / "config.json").write_text("{}")
 
     settings = Settings(
@@ -439,7 +440,7 @@ def build_test_worker_client(
         output_dir=settings.output_dir,
         backend="diffusers",
         image_model_id="black-forest-labs/FLUX.1-schnell",
-        video_model_id="Wan-AI/Wan2.1-T2V-1.3B",
+        video_model_id="Lightricks/LTX-Video",
         image_loader=lambda _: "image-pipeline",
         video_loader=lambda _: "video-pipeline",
     )

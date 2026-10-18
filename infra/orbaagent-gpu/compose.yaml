@@ -48,7 +48,7 @@ services:
       # must actually load first.
       - MEDIA_GENERATION_BACKEND=${MEDIA_GENERATION_BACKEND:-}
       - MEDIA_GENERATION_IMAGE_MODEL=${MEDIA_GENERATION_IMAGE_MODEL:-black-forest-labs/FLUX.1-schnell}
-      - MEDIA_GENERATION_VIDEO_MODEL=${MEDIA_GENERATION_VIDEO_MODEL:-Wan-AI/Wan2.1-T2V-1.3B}
+      - MEDIA_GENERATION_VIDEO_MODEL=${MEDIA_GENERATION_VIDEO_MODEL:-Lightricks/LTX-Video}
       - MEDIA_MODELS_DIR=/models
       - MEDIA_OUTPUT_DIR=/output
       # One generation at a time until VRAM behaviour is measured on real hardware.

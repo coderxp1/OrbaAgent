@@ -65,7 +65,7 @@ class Settings:
     target_gpu_uuid: str = DEFAULT_TARGET_GPU_UUID
     backend: str = ""
     image_model_id: str = "black-forest-labs/FLUX.1-schnell"
-    video_model_id: str = "Wan-AI/Wan2.1-T2V-1.3B"
+    video_model_id: str = "Lightricks/LTX-Video"
     models_dir: str = "/models"
     output_dir: str = "/output"
     port: int = 8190

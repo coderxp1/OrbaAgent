@@ -72,7 +72,7 @@ export class GpuAdmissionController {
     if (!active) {
       this.mediaWorkerVramReservationMiB = 0;
     } else {
-      // FLUX.1-schnell ~24 GB; Wan2.1 ~14 GB
+      // FLUX.1-schnell ~24 GB; LTX-Video ~14 GB
       this.mediaWorkerVramReservationMiB = kind === "image" ? 24576 : 14336;
     }
   }

@@ -144,14 +144,21 @@ def load_image_to_video_pipeline(model_path: str):
 
 
 def load_text_to_video_pipeline(model_path: str):
-    """Load a text-to-video diffusion pipeline (Wan-AI/Wan2.1-T2V-1.3B, etc.)."""
+    """Load an LTX text-to-video diffusion pipeline (Lightricks/LTX-Video)."""
     import torch
     import diffusers
 
     device = _device()
     dtype = torch.bfloat16 if device == "cuda" else torch.float32
 
-    pipeline = diffusers.DiffusionPipeline.from_pretrained(
+    t2v_cls = getattr(diffusers, "LTXPipeline", None)
+    if t2v_cls is None:
+        t2v_cls = getattr(diffusers, "DiffusionPipeline", None)
+
+    if t2v_cls is None:
+        raise RuntimeError("No compatible diffusers pipeline class found for LTX text-to-video")
+
+    pipeline = t2v_cls.from_pretrained(
         model_path,
         torch_dtype=dtype,
         local_files_only=True,
@@ -166,9 +173,8 @@ def load_text_to_video_pipeline(model_path: str):
 
 
 def load_video_pipeline(model_path: str, model_type: str = "auto"):
-    """Load a video diffusion pipeline, routing appropriately based on model ID / type."""
-    is_ltx = "ltx" in model_path.lower() or model_type == "image-to-video"
-    if is_ltx:
+    """Load an LTX-Video diffusion pipeline (Image-to-Video or Text-to-Video)."""
+    if model_type == "image-to-video":
         return load_image_to_video_pipeline(model_path)
     return load_text_to_video_pipeline(model_path)
 
@@ -266,31 +272,33 @@ def run_text_to_video_inference(
     prompt: str,
     negative_prompt: Optional[str] = None,
     duration_seconds: int = 4,
-    fps: int = 16,
+    fps: int = 24,
     width: int = 768,
     height: int = 768,
     output_path: Path,
     ffmpeg_path: str = "ffmpeg",
     progress_callback: Optional[Callable[[int, int], None]] = None,
 ) -> None:
-    """Run genuine neural text-to-video inference (Wan 2.1)."""
-    # Wan spatial constraint: divisible by 16
-    target_w = max(256, (width // 16) * 16)
-    target_h = max(256, (height // 16) * 16)
+    """Run genuine neural text-to-video inference using LTX-Video."""
+    # LTX-Video spatial constraint: divisible by 32
+    target_w = max(256, (width // 32) * 32)
+    target_h = max(256, (height // 32) * 32)
 
-    # Wan temporal constraint: num_frames = k * 4 + 1
-    target_frames = max(1, int(round(duration_seconds * fps)))
-    rem = (target_frames - 1) % 4
+    # LTX-Video temporal constraint: num_frames = k * 8 + 1 at 24 FPS
+    effective_fps = 24
+    target_frames = max(9, int(round(duration_seconds * effective_fps)))
+    rem = (target_frames - 1) % 8
     if rem != 0:
-        target_frames = (target_frames - 1 + (4 - rem)) + 1
+        target_frames = (target_frames - 1 + (8 - rem)) + 1
 
     kwargs = {
         "prompt": prompt,
         "width": target_w,
         "height": target_h,
         "num_frames": target_frames,
-        "num_inference_steps": 25,
-        "guidance_scale": 5.0,
+        "frame_rate": effective_fps,
+        "num_inference_steps": 30,
+        "guidance_scale": 3.0,
     }
     if negative_prompt:
         kwargs["negative_prompt"] = negative_prompt
@@ -314,13 +322,13 @@ def run_text_to_video_inference(
     result = pipeline(**kwargs)
     frames = getattr(result, "frames", None)
     if frames is None or len(frames) == 0:
-        raise RuntimeError("Text-to-video pipeline returned no frames")
+        raise RuntimeError("LTX text-to-video pipeline returned no frames")
 
     _export_and_encode_video(
         pipeline=pipeline,
         frames=frames,
         result=result,
-        effective_fps=fps,
+        effective_fps=effective_fps,
         output_path=output_path,
         ffmpeg_path=ffmpeg_path,
     )
@@ -332,7 +340,7 @@ def run_video_inference(
     prompt: str,
     negative_prompt: Optional[str] = None,
     duration_seconds: int = 4,
-    fps: int = 16,
+    fps: int = 24,
     width: int = 768,
     height: int = 768,
     output_path: Path,
@@ -361,7 +369,7 @@ def run_video_inference(
         prompt=prompt,
         negative_prompt=negative_prompt,
         duration_seconds=duration_seconds,
-        fps=fps,
+        fps=24,
         width=width,
         height=height,
         output_path=output_path,

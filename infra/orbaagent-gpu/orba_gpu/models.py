@@ -221,20 +221,21 @@ class ModelManager:
                 ) from exc
             return self._image_pipeline
 
-    def load_video(self, model_id: Optional[str] = None) -> Any:
+    def load_video(self, model_id: Optional[str] = None, model_type: str = "auto") -> Any:
         """Load (or return the cached) video pipeline for the requested model."""
         target_model = model_id or self._video_model_id
+        cache_key = f"{target_model}:{model_type}"
         with self._lock:
             if not hasattr(self, "_video_pipelines"):
                 self._video_pipelines = {}
-            if target_model in self._video_pipelines:
+            if cache_key in self._video_pipelines:
+                return self._video_pipelines[cache_key]
+            if target_model in self._video_pipelines and model_type == "auto":
                 return self._video_pipelines[target_model]
-            if self._video_pipeline is not None and target_model == self._video_model_id:
-                return self._video_pipeline
             if self._backend == "comfyui":
                 from .backends.comfyui_backend import ComfyUIBackend
                 self._video_pipeline = ComfyUIBackend(self._models_dir)
-                self._video_pipelines[target_model] = self._video_pipeline
+                self._video_pipelines[cache_key] = self._video_pipeline
                 self._video_error = None
                 return self._video_pipeline
             if self._backend != "diffusers":
@@ -244,7 +245,16 @@ class ModelManager:
             loader = self._resolve_loader("video")
             try:
                 model_path = resolve_model_path(self._models_dir, target_model)
-                pipeline = loader(model_path)
+                import inspect
+                try:
+                    sig = inspect.signature(loader)
+                    if "model_type" in sig.parameters:
+                        pipeline = loader(model_path, model_type=model_type)
+                    else:
+                        pipeline = loader(model_path)
+                except Exception:
+                    pipeline = loader(model_path)
+                self._video_pipelines[cache_key] = pipeline
                 self._video_pipelines[target_model] = pipeline
                 if target_model == self._video_model_id:
                     self._video_pipeline = pipeline

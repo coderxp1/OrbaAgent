@@ -78,13 +78,14 @@ class TestDiffusersPipelineLoaders:
         mock_diffusion_cls.from_pretrained.return_value = mock_pipeline_instance
 
         mock_diffusers = MagicMock()
+        mock_diffusers.LTXPipeline = mock_diffusion_cls
         mock_diffusers.DiffusionPipeline = mock_diffusion_cls
 
         with patch.dict(sys.modules, {"torch": mock_torch, "diffusers": mock_diffusers}), \
              patch("orba_gpu.backends.diffusers_backend._torch", return_value=mock_torch):
-            pipe = load_video_pipeline("/models/local-wan-path")
+            pipe = load_video_pipeline("/models/Lightricks/LTX-Video")
             mock_diffusion_cls.from_pretrained.assert_called_once_with(
-                "/models/local-wan-path",
+                "/models/Lightricks/LTX-Video",
                 torch_dtype="bfloat16",
                 local_files_only=True,
             )
@@ -107,7 +108,7 @@ class TestDiffusersPipelineLoaders:
 
         with patch.dict(sys.modules, {"torch": mock_torch, "diffusers": mock_diffusers}), \
              patch("orba_gpu.backends.diffusers_backend._torch", return_value=mock_torch):
-            pipe = load_video_pipeline("/models/Lightricks/LTX-Video")
+            pipe = load_video_pipeline("/models/Lightricks/LTX-Video", model_type="image-to-video")
             mock_ltx_cls.from_pretrained.assert_called_once_with(
                 "/models/Lightricks/LTX-Video",
                 torch_dtype="bfloat16",
@@ -123,7 +124,7 @@ class TestRunInferenceNumpyTruthValue:
     Before the fix, ``if not frames:`` raised:
         ValueError: The truth value of an array with more than one element is ambiguous.
     These tests exercise ``run_image_inference`` and ``run_video_inference`` with mocked
-    pipelines that return NumPy arrays — exactly the structure Wan 2.1 produces —
+    pipelines that return NumPy arrays — the structure video diffusion models produce —
     and verify the fix holds without requiring a GPU or real diffusers install.
     """
 
@@ -135,9 +136,9 @@ class TestRunInferenceNumpyTruthValue:
         return mock_torch
 
     def test_run_video_inference_numpy_frames_does_not_raise_truth_value_error(self, tmp_path):
-        """Regression: result.frames as List[List[ndarray(H,W,C)]] (Wan batch output)
+        """Regression: result.frames as List[List[ndarray(H,W,C)]] (video batch output)
         must not trigger 'truth value of an array is ambiguous' at the None/len guard."""
-        # Simulate Wan output: batch=1, T=5 frames, 64x64 RGB
+        # Simulate video output: batch=1, T=5 frames, 64x64 RGB
         T, H, W = 5, 64, 64
         per_frame = np.zeros((H, W, 3), dtype=np.uint8)
         frame_sequence = [per_frame] * T       # flat list of T arrays
@@ -148,7 +149,7 @@ class TestRunInferenceNumpyTruthValue:
 
         mock_pipeline = MagicMock()
         mock_pipeline.return_value = mock_result
-        mock_pipeline._class_name = "WanPipeline"
+        mock_pipeline._class_name = "LTXPipeline"
 
         output_mp4 = tmp_path / "out.mp4"
 
@@ -187,14 +188,14 @@ class TestRunInferenceNumpyTruthValue:
         assert output_mp4.exists()
         assert output_mp4.stat().st_size > 0
 
-    def test_wan_target_frames_rounds_up_to_honor_duration(self, tmp_path):
-        """Wan 4x temporal compression requires (num_frames - 1) % 4 == 0.
-        Verify that 2s @ 16fps (32 frames) rounds UP to 33 frames (2.0625s),
-        and 4s @ 16fps (64 frames) rounds UP to 65 frames (4.0625s), so duration is not truncated."""
+    def test_ltx_target_frames_rounds_up_to_honor_duration(self, tmp_path):
+        """LTX temporal compression requires (num_frames - 1) % 8 == 0.
+        Verify that 2s @ 24fps (48 frames) rounds UP to 49 frames (2.04s),
+        and 4s @ 24fps (96 frames) rounds UP to 97 frames (4.04s), so duration is not truncated."""
         mock_result = MagicMock()
-        mock_result.frames = [[np.zeros((64, 64, 3), dtype=np.uint8)] * 33]
+        mock_result.frames = [[np.zeros((64, 64, 3), dtype=np.uint8)] * 49]
         mock_pipeline = MagicMock(return_value=mock_result)
-        mock_pipeline._class_name = "WanPipeline"
+        mock_pipeline._class_name = "LTXPipeline"
 
         output_mp4 = tmp_path / "out_dur.mp4"
         mock_torch = self._make_mock_torch()
@@ -220,15 +221,15 @@ class TestRunInferenceNumpyTruthValue:
                 prompt="test duration",
                 negative_prompt=None,
                 duration_seconds=2,
-                fps=16,
-                width=64,
-                height=64,
+                fps=24,
+                width=256,
+                height=256,
                 output_path=output_mp4,
             )
 
         call_kwargs = mock_pipeline.call_args.kwargs
-        assert call_kwargs["num_frames"] == 33
-        assert (call_kwargs["num_frames"] - 1) % 4 == 0
+        assert call_kwargs["num_frames"] == 49
+        assert (call_kwargs["num_frames"] - 1) % 8 == 0
 
     def test_run_video_inference_none_frames_raises_runtime_error(self, tmp_path):
         """result.frames = None must raise RuntimeError, not TypeError."""
@@ -459,9 +460,12 @@ class TestImageToVideoInference:
             mock_pipeline.assert_called_once()
             call_kwargs = mock_pipeline.call_args.kwargs
             assert "image" not in call_kwargs
-            # Verifies Wan temporal constraint (k * 4 + 1)
-            assert (call_kwargs["num_frames"] - 1) % 4 == 0
-            assert call_kwargs["guidance_scale"] == 5.0
+            # Verifies LTX temporal constraint (k * 8 + 1)
+            assert (call_kwargs["num_frames"] - 1) % 8 == 0
+            assert call_kwargs["width"] % 32 == 0
+            assert call_kwargs["height"] % 32 == 0
+            assert call_kwargs["frame_rate"] == 24
+            assert call_kwargs["guidance_scale"] == 3.0
 
             mock_export.assert_called_once()
 

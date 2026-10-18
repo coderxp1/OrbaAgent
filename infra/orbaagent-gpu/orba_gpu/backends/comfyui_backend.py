@@ -18,7 +18,7 @@ class ComfyUIBackend:
     def __init__(self, models_dir: str):
         self.models_dir = models_dir
         self.image_model = os.getenv("MEDIA_GENERATION_IMAGE_MODEL", "flux1-schnell")
-        self.video_model = os.getenv("MEDIA_GENERATION_VIDEO_MODEL", "wan2.1_t2v_1.3B_fp16")
+        self.video_model = os.getenv("MEDIA_GENERATION_VIDEO_MODEL", "Lightricks/LTX-Video")
 
     def _queue_prompt(self, prompt_workflow: dict) -> Optional[str]:
         p = {"prompt": prompt_workflow}

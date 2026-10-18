@@ -419,14 +419,13 @@ def generate_video(
         except Exception as exc:
             raise ValidationError(f"Invalid image_data provided for video conditioning: {exc}") from exc
 
-    effective_model = model
-    if not effective_model:
-        effective_model = "Lightricks/LTX-Video" if pil_image is not None else manager.video_model_id
+    effective_model = model or "Lightricks/LTX-Video"
+    model_type = "image-to-video" if pil_image is not None else "text-to-video"
 
     job_id = _new_job_id("vid")
     with limiter.slot(job_id=job_id, kind="video"):
         limiter.record_progress(job_id, stage="loading_model")
-        pipeline = manager.load_video(effective_model)
+        pipeline = manager.load_video(effective_model, model_type=model_type)
         limiter.record_progress(job_id, stage="inference")
         output_dir = Path(manager.output_dir)
         os.makedirs(output_dir, exist_ok=True)

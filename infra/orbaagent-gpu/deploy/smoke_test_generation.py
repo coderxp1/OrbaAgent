@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Isolated Generation Smoke Test on GPU 1 (RTX PRO 6000 Blackwell).
 
-Tests FLUX.1-schnell and Wan 2.1 locally against the promoted paths in
+Tests FLUX.1-schnell and Lightricks LTX-Video locally against the promoted paths in
 /models without downloading weights, while verifying GPU isolation and VRAM.
 """
 
@@ -207,19 +207,18 @@ def test_flux_image(models_dir: str, output_dir: str) -> bool:
         torch.cuda.empty_cache()
 
 
-def test_wan_video(models_dir: str, output_dir: str) -> bool:
-    log_section("3. Wan 2.1 Video Generation Smoke Test")
+def test_ltx_video(models_dir: str, output_dir: str) -> bool:
+    log_section("3. LTX-Video Text-to-Video Generation Smoke Test")
     import torch
-    from diffusers import DiffusionPipeline
+    import diffusers
 
-    model_path = os.path.join(models_dir, "Wan-AI", "Wan2.1-T2V-1.3B")
-    output_path = os.path.join(output_dir, "smoke_test_wan.mp4")
+    model_path = os.path.join(models_dir, "Lightricks", "LTX-Video")
+    output_path = os.path.join(output_dir, "smoke_test_ltx_t2v.mp4")
     os.makedirs(output_dir, exist_ok=True)
 
     print(f"Model Path:          {model_path}")
     print(f"Output Target:       {output_path}")
 
-    # Verify local files exist
     model_index = os.path.join(model_path, "model_index.json")
     if not os.path.isfile(model_index):
         print(f"FAIL: model_index.json not found at {model_index}")
@@ -227,9 +226,10 @@ def test_wan_video(models_dir: str, output_dir: str) -> bool:
     print("Local model_index.json confirmed.")
 
     t0 = time.time()
-    print("\nLoading DiffusionPipeline (local_files_only=True, dtype=bfloat16)...")
+    print("\nLoading LTXPipeline (local_files_only=True, dtype=bfloat16)...")
+    pipe_cls = getattr(diffusers, "LTXPipeline", None) or getattr(diffusers, "DiffusionPipeline")
     try:
-        pipeline = DiffusionPipeline.from_pretrained(
+        pipeline = pipe_cls.from_pretrained(
             model_path,
             torch_dtype=torch.bfloat16,
             local_files_only=True,
@@ -245,24 +245,22 @@ def test_wan_video(models_dir: str, output_dir: str) -> bool:
         print(f"Pipeline Class:      {pipeline.__class__.__name__}")
         print(f"VRAM after load:     Allocated: {alloc:.1f} MB | Reserved: {res:.1f} MB")
     except Exception as e:
-        print(f"FAIL loading Wan pipeline: {type(e).__name__}: {e}")
+        print(f"FAIL loading LTX pipeline: {type(e).__name__}: {e}")
         import traceback
         traceback.print_exc()
         return False
 
-    # Wan 2.1 small test parameters: height & width divisible by 16 (640=16*40, 352=16*22)
-    # Frames: 4N+1 (5 frames = 1.0s at 5 fps)
-    prompt = "A gentle ocean wave rolling onto sand"
-    width = 640
-    height = 352
-    num_frames = 5
-    steps = 8
-    fps = 5
+    prompt = "A gentle ocean wave rolling onto sand in golden hour"
+    width = 512
+    height = 512
+    num_frames = 25
+    steps = 20
+    fps = 24
 
     print(f"\nRunning generation:")
     print(f"  Prompt:     {prompt}")
-    print(f"  Size:       {width}x{height} (both divisible by 16)")
-    print(f"  Frames:     {num_frames} (divisible by 4N+1)")
+    print(f"  Size:       {width}x{height} (divisible by 32)")
+    print(f"  Frames:     {num_frames} (k*8+1)")
     print(f"  Steps:      {steps}")
     print(f"  Target FPS: {fps}")
 
@@ -275,6 +273,8 @@ def test_wan_video(models_dir: str, output_dir: str) -> bool:
             height=height,
             num_frames=num_frames,
             num_inference_steps=steps,
+            frame_rate=fps,
+            guidance_scale=3.0,
         )
         torch.cuda.synchronize()
         t_gen = time.time() - t_gen_start
@@ -287,9 +287,8 @@ def test_wan_video(models_dir: str, output_dir: str) -> bool:
             print("FAIL: No frames returned by pipeline.")
             return False
 
-        # Export frames to MP4 using export_to_video
         from diffusers.utils import export_to_video
-        raw_path = os.path.join(output_dir, "raw_wan.mp4")
+        raw_path = os.path.join(output_dir, "raw_ltx_t2v.mp4")
         if hasattr(frames, "ndim") and frames.ndim == 5:
             video_frames = frames[0]
         elif isinstance(frames, (list, tuple)) and len(frames) > 0 and isinstance(frames[0], (list, tuple)):
@@ -298,7 +297,6 @@ def test_wan_video(models_dir: str, output_dir: str) -> bool:
             video_frames = frames
         export_to_video(video_frames, raw_path, fps=fps)
 
-        # Ensure valid MP4 container using imageio-ffmpeg bundled binary if ffmpeg is missing
         import shutil
         ffmpeg_bin = shutil.which("ffmpeg")
         if not ffmpeg_bin:
@@ -328,7 +326,6 @@ def test_wan_video(models_dir: str, output_dir: str) -> bool:
         file_size = os.path.getsize(target_file)
         print(f"Video saved to:      {target_file} ({file_size:,} bytes)")
 
-        # Validate video in-container using bundled imageio (no host ffprobe needed)
         import imageio
         try:
             reader = imageio.get_reader(target_file)
@@ -336,9 +333,7 @@ def test_wan_video(models_dir: str, output_dir: str) -> bool:
             act_fps = meta.get("fps", fps)
             act_size = meta.get("size", (width, height))
             act_dur = meta.get("duration", 0.0)
-            counted_frames = 0
-            for _ in reader:
-                counted_frames += 1
+            counted_frames = sum(1 for _ in reader)
             reader.close()
 
             print(f"\nIn-Container Video Validation (via imageio):")
@@ -350,7 +345,7 @@ def test_wan_video(models_dir: str, output_dir: str) -> bool:
             print(f"  File Size:         {file_size:,} bytes")
 
             if file_size > 5000 and counted_frames >= num_frames:
-                print("\n>>> Wan 2.1 VIDEO SMOKE TEST: PASSED <<<")
+                print("\n>>> LTX-Video TEXT-TO-VIDEO SMOKE TEST: PASSED <<<")
                 return True
             else:
                 print(f"FAIL: Video validation failed (frames={counted_frames}, size={file_size} B)")
@@ -362,7 +357,7 @@ def test_wan_video(models_dir: str, output_dir: str) -> bool:
             return False
 
     except Exception as e:
-        print(f"FAIL during Wan inference: {type(e).__name__}: {e}")
+        print(f"FAIL during LTX inference: {type(e).__name__}: {e}")
         import traceback
         traceback.print_exc()
         return False
@@ -371,11 +366,125 @@ def test_wan_video(models_dir: str, output_dir: str) -> bool:
         torch.cuda.empty_cache()
 
 
+def test_ltx_image_to_video(models_dir: str, output_dir: str, input_image_path: str = None) -> bool:
+    log_section("4. LTX-Video Image-to-Video Generation Smoke Test")
+    import torch
+    import diffusers
+    from PIL import Image
+
+    model_path = os.path.join(models_dir, "Lightricks", "LTX-Video")
+    output_path = os.path.join(output_dir, "smoke_test_ltx_i2v.mp4")
+    os.makedirs(output_dir, exist_ok=True)
+
+    print(f"Model Path:          {model_path}")
+    print(f"Output Target:       {output_path}")
+
+    model_index = os.path.join(model_path, "model_index.json")
+    if not os.path.isfile(model_index):
+        print(f"FAIL: model_index.json not found at {model_index}")
+        return False
+
+    if input_image_path and os.path.isfile(input_image_path):
+        source_image = Image.open(input_image_path).convert("RGB")
+        print(f"Using provided source image: {input_image_path} ({source_image.size})")
+    else:
+        source_image = Image.new("RGB", (512, 512), color=(140, 100, 80))
+        print(f"Using synthetic source image: 512x512")
+
+    t0 = time.time()
+    print("\nLoading LTXImageToVideoPipeline (local_files_only=True, dtype=bfloat16)...")
+    pipe_cls = getattr(diffusers, "LTXImageToVideoPipeline", None) or getattr(diffusers, "DiffusionPipeline")
+    try:
+        pipeline = pipe_cls.from_pretrained(
+            model_path,
+            torch_dtype=torch.bfloat16,
+            local_files_only=True,
+        )
+        pipeline = pipeline.to("cuda")
+        try:
+            pipeline.enable_attention_slicing()
+        except Exception:
+            pass
+        t_load = time.time() - t0
+        print(f"Model loaded successfully in {t_load:.2f}s.")
+    except Exception as e:
+        print(f"FAIL loading LTX I2V pipeline: {type(e).__name__}: {e}")
+        return False
+
+    prompt = "natural subtle head turn, gentle blink, soft warm lighting"
+    width = 512
+    height = 512
+    num_frames = 25
+    steps = 20
+    fps = 24
+
+    t_gen_start = time.time()
+    try:
+        torch.cuda.reset_peak_memory_stats(0)
+        result = pipeline(
+            image=source_image,
+            prompt=prompt,
+            width=width,
+            height=height,
+            num_frames=num_frames,
+            num_inference_steps=steps,
+            frame_rate=fps,
+            guidance_scale=3.0,
+        )
+        torch.cuda.synchronize()
+        t_gen = time.time() - t_gen_start
+        peak_alloc = torch.cuda.max_memory_allocated(0) / (1024 * 1024)
+        print(f"Generation completed in {t_gen:.2f}s.")
+        print(f"Peak VRAM during gen: {peak_alloc:.1f} MB")
+
+        frames = getattr(result, "frames", None)
+        if frames is None or len(frames) == 0:
+            print("FAIL: No frames returned by pipeline.")
+            return False
+
+        from diffusers.utils import export_to_video
+        raw_path = os.path.join(output_dir, "raw_ltx_i2v.mp4")
+        video_frames = frames[0] if (isinstance(frames, (list, tuple)) and len(frames) > 0 and isinstance(frames[0], (list, tuple))) else frames
+        export_to_video(video_frames, raw_path, fps=fps)
+
+        import shutil
+        ffmpeg_bin = shutil.which("ffmpeg")
+        if ffmpeg_bin:
+            ffmpeg_cmd = [
+                ffmpeg_bin, "-y", "-loglevel", "error",
+                "-i", raw_path,
+                "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                "-r", str(fps),
+                output_path,
+            ]
+            try:
+                subprocess.run(ffmpeg_cmd, check=True, capture_output=True, text=True, timeout=120)
+                target_file = output_path
+            except Exception:
+                target_file = raw_path
+        else:
+            target_file = raw_path
+
+        file_size = os.path.getsize(target_file)
+        print(f"Video saved to: {target_file} ({file_size:,} bytes)")
+        if file_size > 5000:
+            print("\n>>> LTX-Video IMAGE-TO-VIDEO SMOKE TEST: PASSED <<<")
+            return True
+        return False
+    except Exception as e:
+        print(f"FAIL during LTX I2V inference: {type(e).__name__}: {e}")
+        return False
+    finally:
+        del pipeline
+        torch.cuda.empty_cache()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Isolated GPU 1 generation smoke tests")
-    parser.add_argument("--mode", choices=["all", "image", "video", "inspect"], default="video")
+    parser.add_argument("--mode", choices=["all", "image", "video", "t2v", "i2v", "inspect"], default="video")
     parser.add_argument("--models-dir", default="/models")
     parser.add_argument("--output-dir", default="/output")
+    parser.add_argument("--input-image", default=None, help="Optional source image for image-to-video test")
     args = parser.parse_args()
 
     runtime_info = inspect_runtime()
@@ -385,21 +494,28 @@ def main() -> None:
         return
 
     flux_ok = None
-    wan_ok = None
+    t2v_ok = None
+    i2v_ok = None
 
     if args.mode in ("all", "image"):
         flux_ok = test_flux_image(args.models_dir, args.output_dir)
 
-    if args.mode in ("all", "video"):
-        wan_ok = test_wan_video(args.models_dir, args.output_dir)
+    if args.mode in ("all", "video", "t2v"):
+        t2v_ok = test_ltx_video(args.models_dir, args.output_dir)
+
+    if args.mode in ("all", "video", "i2v"):
+        i2v_ok = test_ltx_image_to_video(args.models_dir, args.output_dir, args.input_image)
 
     log_section("SUMMARY OF SMOKE TESTS")
     if flux_ok is not None:
-        print(f"FLUX.1-schnell Image Test: {'PASSED' if flux_ok else 'FAILED'}")
-    if wan_ok is not None:
-        print(f"Wan 2.1 Video Test:        {'PASSED' if wan_ok else 'FAILED'}")
+        print(f"FLUX.1-schnell Image Test:      {'PASSED' if flux_ok else 'FAILED'}")
+    if t2v_ok is not None:
+        print(f"LTX-Video Text-to-Video Test:   {'PASSED' if t2v_ok else 'FAILED'}")
+    if i2v_ok is not None:
+        print(f"LTX-Video Image-to-Video Test:  {'PASSED' if i2v_ok else 'FAILED'}")
 
-    if (flux_ok is False) or (wan_ok is False):
+    results = [r for r in (flux_ok, t2v_ok, i2v_ok) if r is not None]
+    if any(r is False for r in results):
         sys.exit(1)
     sys.exit(0)
 

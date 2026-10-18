@@ -33,11 +33,9 @@ def make_manager(tmp_path, *, image_loader=None, video_loader=None):
     img_dir = models_dir / "black-forest-labs" / "FLUX.1-schnell"
     img_dir.mkdir(parents=True, exist_ok=True)
     (img_dir / "config.json").write_text("{}")
-    vid_dir = models_dir / "Wan-AI" / "Wan2.1-T2V-1.3B"
-    vid_dir.mkdir(parents=True, exist_ok=True)
-    (vid_dir / "config.json").write_text("{}")
     ltx_dir = models_dir / "Lightricks" / "LTX-Video"
     ltx_dir.mkdir(parents=True, exist_ok=True)
+    (ltx_dir / "model_index.json").write_text("{}")
     (ltx_dir / "config.json").write_text("{}")
 
     return ModelManager(
@@ -45,7 +43,7 @@ def make_manager(tmp_path, *, image_loader=None, video_loader=None):
         output_dir=str(tmp_path / "output"),
         backend="diffusers",
         image_model_id="black-forest-labs/FLUX.1-schnell",
-        video_model_id="Wan-AI/Wan2.1-T2V-1.3B",
+        video_model_id="Lightricks/LTX-Video",
         image_loader=image_loader or (lambda _: "image-pipeline"),
         video_loader=video_loader or (lambda _: "video-pipeline"),
     )
@@ -255,7 +253,7 @@ class TestVideoPaths:
         assert outcome.parameters["fps"] == 16
         assert outcome.parameters["width"] == 256
         assert outcome.parameters["height"] == 256
-        assert outcome.model == "Wan-AI/Wan2.1-T2V-1.3B"
+        assert outcome.model == "Lightricks/LTX-Video"
 
     def test_image_to_video_with_base64_routes_to_ltx_and_passes_image(self, tmp_path):
         manager = make_manager(tmp_path)

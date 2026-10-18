@@ -449,7 +449,7 @@ export function AiSettingsView() {
         <div className="p-4 rounded-xl bg-[#18181b] border border-zinc-800 flex items-center justify-between">
           <div>
             <div className="text-xs font-semibold text-white">Media Generation Engine</div>
-            <div className="text-[11px] text-zinc-400">FLUX.1-schnell (Photorealistic native images) + Wan2.1 (Cinematic video)</div>
+            <div className="text-[11px] text-zinc-400">FLUX.1-schnell (Photorealistic native images) + LTX-Video (Cinematic video)</div>
           </div>
           <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-950 text-emerald-300 border border-emerald-800">
             Active

@@ -154,7 +154,7 @@ export class MediaVideoGenerateTool implements ITool {
             fps: current.fps,
             width: current.width,
             height: current.height,
-            model: current.model || (current.image_data || current.image_url ? "Lightricks/LTX-Video" : "Wan-AI/Wan2.1-T2V-1.3B"),
+            model: current.model || "Lightricks/LTX-Video",
             ...(current.image_data ? { image_data: current.image_data } : {}),
             ...(current.image_url ? { image_url: current.image_url } : {}),
           }),
@@ -557,9 +557,7 @@ export class MediaVideoGenerateTool implements ITool {
       }
 
       const isImageToVideo = Boolean(inputImageData);
-      const chosenModel = isImageToVideo
-        ? (model && model !== "kandinsky-6.0" ? model : "Lightricks/LTX-Video")
-        : (model && model !== "kandinsky-6.0" ? model : "Wan-AI/Wan2.1-T2V-1.3B");
+      const chosenModel = model && model !== "kandinsky-6.0" ? model : "Lightricks/LTX-Video";
 
       const baseDuration = Math.min(requestedDuration, 5);
       console.log(
