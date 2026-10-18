@@ -389,9 +389,9 @@ OrbaAgent is a professional conversational AI assistant first.
           type: "agent_activity",
           traceId: trace.traceId,
           activity: {
-            step: `Executing GPU ${isVideo ? "video" : "image"} pipeline`,
+            step: `Executing ${isVideo ? "video" : "image"} pipeline`,
             status: "in_progress",
-            details: `Autonomous failover: dispatching directly to dedicated GPU worker (GPU 1)`,
+            details: `Autonomous routing: dispatching to high-performance media engine`,
           },
         };
       } else if (streamErrorEvent && pendingToolCalls.length === 0) {

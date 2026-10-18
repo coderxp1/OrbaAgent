@@ -136,7 +136,7 @@ export function unavailableMediaResult(
   const detail =
     customReason ||
     reason ||
-    `${isVideo ? "Video" : "Image"} generation is unavailable (GPU media worker is offline or unconfigured).`;
+    `${isVideo ? "Video" : "Image"} generation is unavailable (Media processing service is offline or unconfigured).`;
 
   // Log detailed diagnostics to server logs only, without secrets
   console.error(

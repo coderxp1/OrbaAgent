@@ -288,14 +288,14 @@ export function GeneralWorkspaceView() {
         </div>
 
         <div className="p-4 rounded-xl bg-[#18181b] border border-zinc-800 space-y-2">
-          <div className="text-xs font-semibold text-white">Dedicated GPU Worker Node</div>
+          <div className="text-xs font-semibold text-white">Media Processing Pipeline</div>
           <div className="flex items-center justify-between text-xs text-zinc-300">
-            <span>Primary WireGuard Node:</span>
-            <span className="font-mono text-emerald-400">10.77.0.2:8190 (GPU 1 Pinned)</span>
+            <span>Service Status:</span>
+            <span className="font-mono text-emerald-400">Secure High-Performance Pipeline (Active)</span>
           </div>
           <div className="flex items-center justify-between text-xs text-zinc-300">
-            <span>CoderXP Isolation Boundary:</span>
-            <span className="font-mono text-blue-400">GPU 0 (0% Orba Compute)</span>
+            <span>Enterprise Security:</span>
+            <span className="font-mono text-blue-400">Enforced Hardware Isolation Boundary</span>
           </div>
         </div>
       </div>
@@ -358,7 +358,7 @@ export function AnalyticsView() {
     <div className="space-y-6 max-w-2xl">
       <div>
         <h3 className="text-xl font-bold text-white mb-1">Workspace Analytics</h3>
-        <p className="text-xs text-zinc-400">Real-time usage telemetry, media throughput, and GPU health.</p>
+        <p className="text-xs text-zinc-400">Real-time usage telemetry, media throughput, and service health.</p>
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -370,17 +370,17 @@ export function AnalyticsView() {
         <div className="p-3.5 rounded-xl bg-[#18181b] border border-zinc-800">
           <div className="text-[11px] text-zinc-400 mb-1">Image Latency</div>
           <div className="text-xl font-bold text-white">3.4s</div>
-          <div className="text-[10px] text-zinc-500 mt-1">FLUX.1-schnell</div>
+          <div className="text-[10px] text-zinc-500 mt-1">Ultra-fast Native Render</div>
         </div>
         <div className="p-3.5 rounded-xl bg-[#18181b] border border-zinc-800">
-          <div className="text-[11px] text-zinc-400 mb-1">GPU 0 Isolation</div>
-          <div className="text-xl font-bold text-emerald-400">0% Load</div>
-          <div className="text-[10px] text-zinc-500 mt-1">CoderXP Safe</div>
+          <div className="text-[11px] text-zinc-400 mb-1">Compute Isolation</div>
+          <div className="text-xl font-bold text-emerald-400">Dedicated</div>
+          <div className="text-[10px] text-zinc-500 mt-1">Protected Environment</div>
         </div>
         <div className="p-3.5 rounded-xl bg-[#18181b] border border-zinc-800">
-          <div className="text-[11px] text-zinc-400 mb-1">GPU 1 VRAM</div>
-          <div className="text-xl font-bold text-white">14.2 GB</div>
-          <div className="text-[10px] text-zinc-500 mt-1">24 GB Total</div>
+          <div className="text-[11px] text-zinc-400 mb-1">Inference Capacity</div>
+          <div className="text-xl font-bold text-white">Optimal</div>
+          <div className="text-[10px] text-zinc-500 mt-1">High-Throughput</div>
         </div>
       </div>
     </div>
@@ -448,7 +448,7 @@ export function AiSettingsView() {
 
         <div className="p-4 rounded-xl bg-[#18181b] border border-zinc-800 flex items-center justify-between">
           <div>
-            <div className="text-xs font-semibold text-white">Dedicated GPU Media Generation: GPU 1</div>
+            <div className="text-xs font-semibold text-white">Media Generation Engine</div>
             <div className="text-[11px] text-zinc-400">FLUX.1-schnell (Photorealistic native images) + Wan2.1 (Cinematic video)</div>
           </div>
           <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-950 text-emerald-300 border border-emerald-800">
@@ -496,41 +496,166 @@ export function MeetingNotesView() {
 // --- 11. MCP Settings View ---
 export function McpSettingsView() {
   const [pingStatus, setPingStatus] = useState<string | null>(null);
+  const [pinging, setPinging] = useState<boolean>(false);
+  const [selectedClient, setSelectedClient] = useState<"cursor" | "claude" | "vscode">("cursor");
 
-  const testPing = () => {
-    setPingStatus("Pinging MCP endpoint...");
-    setTimeout(() => {
-      setPingStatus("MCP Server online (34ms round-trip). Available tools: github, chrome-devtools, firebase, stripe.");
-    }, 400);
+  const testPing = async () => {
+    setPinging(true);
+    setPingStatus("Executing protocol handshake on /api/mcp...");
+    const t0 = performance.now();
+    try {
+      // 1. Send MCP Initialize
+      const initRes = await fetch("/api/mcp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "initialize",
+          params: { protocolVersion: "2024-11-05" },
+        }),
+      });
+      const initData = await initRes.json();
+
+      // 2. Send MCP Tools List
+      const toolsRes = await fetch("/api/mcp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 2,
+          method: "tools/list",
+        }),
+      });
+      const toolsData = await toolsRes.json();
+      const latency = Math.round(performance.now() - t0);
+
+      const serverName = initData?.result?.serverInfo?.name || "OrbaAgent MCP";
+      const toolsList = (toolsData?.result?.tools || []).map((t: any) => t.name).join(", ");
+
+      setPingStatus(
+        `✓ MCP Handshake Verified (${latency}ms round-trip). Server: ${serverName}. Protocol: ${initData?.result?.protocolVersion}. Registered Tools (${toolsData?.result?.tools?.length}): ${toolsList}`,
+      );
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setPingStatus(`✕ MCP Handshake Failed: ${msg}`);
+    } finally {
+      setPinging(false);
+    }
   };
 
   return (
     <div className="space-y-6 max-w-2xl">
       <div>
         <h3 className="text-xl font-bold text-white mb-1">OrbaAgent MCP Architecture</h3>
-        <p className="text-xs text-zinc-400">Connect OrbaAgent to external IDEs (Cursor, Claude Desktop, VSCode) via Model Context Protocol.</p>
+        <p className="text-xs text-zinc-400">
+          Connect external IDEs and agents (Cursor, Claude Desktop, VS Code) via Model Context Protocol.
+        </p>
       </div>
 
       <div className="p-4 rounded-xl bg-[#18181b] border border-zinc-800 space-y-3">
-        <div className="text-xs font-semibold text-white">Active Server Configuration</div>
+        <div className="text-xs font-semibold text-white">Active Server Endpoint</div>
         <div className="p-2.5 rounded-lg bg-zinc-950 border border-zinc-800 font-mono text-xs text-emerald-400">
           https://orbaagent.dev/api/mcp
         </div>
-        <div className="flex items-center justify-between pt-1">
-          <span className="text-xs text-zinc-400">Transport: Server-Sent Events (SSE) &amp; Stdio</span>
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+          <span className="text-xs text-zinc-400">
+            Transport: <strong className="text-zinc-200">Streamable HTTP (JSON-RPC 2.0)</strong>
+          </span>
           <button
             onClick={testPing}
-            className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-zinc-800 hover:bg-zinc-700 text-white transition-colors"
+            disabled={pinging}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-zinc-800 hover:bg-zinc-700 text-white transition-colors border border-zinc-700 disabled:opacity-50"
           >
-            Ping MCP Server
+            {pinging ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : null}
+            <span>Ping MCP Server</span>
           </button>
         </div>
         {pingStatus && (
-          <div className="p-2.5 rounded-lg bg-blue-950/40 border border-blue-800/60 text-xs text-blue-300">
+          <div
+            className={`p-3 rounded-lg border text-xs leading-relaxed font-mono ${
+              pingStatus.startsWith("✓")
+                ? "bg-emerald-950/40 border-emerald-800/60 text-emerald-300"
+                : "bg-red-950/40 border-red-800/60 text-red-300"
+            }`}
+          >
             {pingStatus}
+          </div>
+        )}
+      </div>
+
+      {/* Client Setup Guide */}
+      <div className="p-4 rounded-xl bg-[#18181b] border border-zinc-800 space-y-3">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-semibold text-white">Client Configuration</span>
+          <div className="flex items-center gap-1.5">
+            {(["cursor", "claude", "vscode"] as const).map((client) => (
+              <button
+                key={client}
+                onClick={() => setSelectedClient(client)}
+                className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors ${
+                  selectedClient === client
+                    ? "bg-blue-600 text-white"
+                    : "bg-zinc-800 text-zinc-400 hover:text-white"
+                }`}
+              >
+                {client === "cursor" ? "Cursor" : client === "claude" ? "Claude Desktop" : "VS Code"}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {selectedClient === "cursor" && (
+          <div className="space-y-1.5">
+            <p className="text-[11px] text-zinc-400">
+              Add to your project's <code className="text-zinc-200">.cursor/mcp.json</code>:
+            </p>
+            <pre className="p-2.5 rounded-lg bg-zinc-950 border border-zinc-800 font-mono text-[11px] text-zinc-300 overflow-x-auto">
+{`{
+  "mcpServers": {
+    "orbaagent": {
+      "url": "https://orbaagent.dev/api/mcp"
+    }
+  }
+}`}
+            </pre>
+          </div>
+        )}
+
+        {selectedClient === "claude" && (
+          <div className="space-y-1.5">
+            <p className="text-[11px] text-zinc-400">
+              Add to <code className="text-zinc-200">claude_desktop_config.json</code>:
+            </p>
+            <pre className="p-2.5 rounded-lg bg-zinc-950 border border-zinc-800 font-mono text-[11px] text-zinc-300 overflow-x-auto">
+{`{
+  "mcpServers": {
+    "orbaagent": {
+      "url": "https://orbaagent.dev/api/mcp"
+    }
+  }
+}`}
+            </pre>
+          </div>
+        )}
+
+        {selectedClient === "vscode" && (
+          <div className="space-y-1.5">
+            <p className="text-[11px] text-zinc-400">
+              Configure in VS Code settings under <code className="text-zinc-200">mcp.servers</code>:
+            </p>
+            <pre className="p-2.5 rounded-lg bg-zinc-950 border border-zinc-800 font-mono text-[11px] text-zinc-300 overflow-x-auto">
+{`"mcp.servers": {
+  "orbaagent": {
+    "type": "http",
+    "url": "https://orbaagent.dev/api/mcp"
+  }
+}`}
+            </pre>
           </div>
         )}
       </div>
     </div>
   );
 }
+

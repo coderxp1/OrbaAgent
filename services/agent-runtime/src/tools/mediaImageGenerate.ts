@@ -117,7 +117,7 @@ export class MediaImageGenerateTool implements ITool {
 
       if (!healthRes || !healthRes.ok) {
         const statusDetail = healthRes ? `HTTP ${healthRes.status}` : "network error / timeout";
-        const errorMsg = `Image generation failed: GPU worker health check failed (${statusDetail}).`;
+        const errorMsg = `Image generation failed: Media processing service health check failed (${statusDetail}).`;
         console.error(`[MEDIA GENERATION DIAGNOSTIC] ${errorMsg}`);
         return {
           toolCallId,
@@ -146,7 +146,7 @@ export class MediaImageGenerateTool implements ITool {
       const lazyLoadPending = isLazyLoadAllowed(health);
 
       if (!capabilityReady && !lazyLoadPending) {
-        const errorMsg = `Image generation unavailable: GPU worker reports no real image generation backend (generation_backend=${health?.generation_backend ?? "none"}, reason: ${health?.unavailable_reason ?? "model not loaded"}).`;
+        const errorMsg = `Image generation unavailable: Media processing service reports no active image generation backend (backend=${health?.generation_backend ?? "none"}, reason: ${health?.unavailable_reason ?? "model initializing"}).`;
         console.error(`[MEDIA GENERATION DIAGNOSTIC] ${errorMsg}`);
         return {
           toolCallId,
@@ -257,7 +257,7 @@ export class MediaImageGenerateTool implements ITool {
 
       if (!jobRes || !jobRes.ok) {
         const errorText = await jobRes?.text().catch(() => "Unknown error");
-        const errorMsg = `Image generation failed (temporarily unavailable): GPU worker returned HTTP ${jobRes?.status}: ${errorText}`;
+        const errorMsg = `Image generation failed (temporarily unavailable): Media processing service returned HTTP ${jobRes?.status}: ${errorText}`;
         console.error(`[MEDIA GENERATION DIAGNOSTIC] ${errorMsg}`);
         return {
           toolCallId,
@@ -286,7 +286,7 @@ export class MediaImageGenerateTool implements ITool {
           name: this.definition.name,
           success: false,
           output: "",
-          error: `Image generated on GPU host, but artifact delivery to the web application failed (${result.ingest_note || "Ingest rejected"}). Artifact is not retrievable.`,
+          error: `Image generated successfully, but artifact delivery to the web application failed (${result.ingest_note || "Ingest rejected"}). Artifact is not retrievable.`,
           metadata: result,
           executionTimeMs: durationMs,
         };
@@ -315,7 +315,7 @@ export class MediaImageGenerateTool implements ITool {
           name: this.definition.name,
           success: false,
           output: "",
-          error: `Image generated on GPU host, but post-generation verification failed (${verification.error || "Artifact unretrievable"}).`,
+          error: `Image generated successfully, but post-generation verification failed (${verification.error || "Artifact unretrievable"}).`,
           metadata: { ...result, verification },
           executionTimeMs: durationMs,
         };

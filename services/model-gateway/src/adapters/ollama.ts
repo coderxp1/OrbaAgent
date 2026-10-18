@@ -393,7 +393,7 @@ export class OllamaAdapter implements IModelProviderAdapter {
     yield {
       type: "thinking_delta",
       traceId: request.trace.traceId,
-      thinkingDelta: `[Local Intelligence Engine] Formulating execution plan on dedicated GPU 1 for model ${request.modelId || "local-default"}...`,
+      thinkingDelta: `[Local Intelligence Engine] Formulating execution plan for model ${request.modelId || "local-default"}...`,
     };
 
     if (request.tools && request.tools.length > 0) {
@@ -408,7 +408,7 @@ export class OllamaAdapter implements IModelProviderAdapter {
       };
     }
 
-    const responseText = `[Local Intelligence Engine] Execution completed safely on GPU 1 for model ${request.modelId || "local-default"}.`;
+    const responseText = `[Local Intelligence Engine] Execution completed safely for model ${request.modelId || "local-default"}.`;
     for (const char of responseText) {
       yield {
         type: "text_delta",
@@ -445,7 +445,7 @@ export class OllamaAdapter implements IModelProviderAdapter {
         : [];
 
     return {
-      text: `[Local Intelligence Engine] Mock completion for model ${request.modelId || "local-default"} on GPU 1.`,
+      text: `[Local Intelligence Engine] Mock completion for model ${request.modelId || "local-default"}.`,
       thinking: "[Local Intelligence Engine] Formulating plan...",
       toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
       usage: { promptTokens: 15, completionTokens: 25, totalTokens: 40 },

@@ -1197,7 +1197,7 @@ function MediaToolItem({
               </span>
             </div>
             <p className="mt-1 text-amber-300/90 leading-relaxed text-[11px]">
-              Generation took longer than expected ({elapsed}s) without receiving final video frames from the GPU worker. The worker process may have restarted or been under contention.
+              Generation took longer than expected ({elapsed}s) without receiving final video frames from the media processing service. The processing job may have restarted or been under contention.
             </p>
             {onReply && (
               <button
@@ -1256,7 +1256,7 @@ function MediaToolItem({
                 <div className="flex items-center gap-2.5">
                   <Loader2 className="w-4 h-4 text-blue-400 animate-spin shrink-0" />
                   <span className="font-medium text-white">
-                    Generate cinematic footage (GPU 1 Diffusion)
+                    Generate cinematic footage (High-Precision Video Generation)
                   </span>
                 </div>
                 <span className="text-[10px] font-mono text-blue-400">
@@ -1295,7 +1295,7 @@ function MediaToolItem({
                 <div className="flex items-center gap-2 truncate">
                   <Clock className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
                   <span className="truncate">
-                    Executing neural diffusion on dedicated GPU 1...
+                    Executing neural synthesis pipeline...
                   </span>
                 </div>
               </div>
