@@ -656,10 +656,8 @@ export class MediaVideoGenerateTool implements ITool {
             await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
           }
         }
-      }
 
-
-      const durationMs = Date.now() - startTime;
+        const durationMs = Date.now() - startTime;
 
       // Post-generation verification: ensure the delivered artifact actually exists and is valid
       const verification = await verifyDeliveredArtifact(
