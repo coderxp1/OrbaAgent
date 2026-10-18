@@ -608,7 +608,13 @@ ${attachedImageUrl ? `- Photo Conditioning: The user provided an attached image/
     imagePatterns.some((pattern) => pattern.test(lower));
 
   if (isImageIntent) {
-    const dims = extractDimensions(content) || { width: 512, height: 512 };
+    const dims =
+      extractDimensions(content) ||
+      (/\b(?:16:9|landscape|wide|wallpaper|banner)\b/i.test(content)
+        ? { width: 1344, height: 768 }
+        : /\b(?:9:16|portrait|vertical|story|stories)\b/i.test(content)
+          ? { width: 768, height: 1344 }
+          : { width: 1024, height: 1024 });
     const toolsToActivate = ["media_image_generate"];
     if (registry) {
       registry.activateTools(toolsToActivate);
@@ -626,8 +632,8 @@ ${attachedImageUrl ? `- Photo Conditioning: The user provided an attached image/
       },
       systemGuidance: `[Intent Router: Detected Image Generation Request]
 The user wants to generate an AI image. Tool 'media_image_generate' has been activated.
-Execute 'media_image_generate' with:
-- prompt: Detailed visual prompt describing scene, lighting, style, and subject
+Execute 'media_image_generate' directly without questioning or surveys:
+- prompt: Detailed visual prompt describing scene, realistic textures, lighting, style, and subject
 - width: ${dims.width}
 - height: ${dims.height}
 - steps: 4`,

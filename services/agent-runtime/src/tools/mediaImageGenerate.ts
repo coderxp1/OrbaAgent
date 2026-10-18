@@ -27,11 +27,11 @@ export class MediaImageGenerateTool implements ITool {
         },
         width: {
           type: "number",
-          description: "Image width in pixels (e.g. 512, 768, 1024). Default is 1024.",
+          description: "Image width in pixels. High-resolution default is 1024 (e.g. 1024 for square, 1344 for wide 16:9 landscape, 768 for 9:16 portrait). Always use at least 1024 unless low-res is specifically requested.",
         },
         height: {
           type: "number",
-          description: "Image height in pixels (e.g. 512, 768, 1024). Default is 1024.",
+          description: "Image height in pixels. High-resolution default is 1024 (e.g. 1024 for square, 768 for wide 16:9 landscape, 1344 for 9:16 portrait). Always use at least 1024 unless low-res is specifically requested.",
         },
         steps: {
           type: "number",
@@ -158,6 +158,13 @@ export class MediaImageGenerateTool implements ITool {
       while (attempts < maxAttempts) {
         attempts++;
         try {
+          const requestedWidth = Number(currentArgs.width) || 1024;
+          const requestedHeight = Number(currentArgs.height) || 1024;
+          // FLUX.1 is a native 1024px flow-matching transformer.
+          // If caller passed 512x512 without explicit small-dimension override, upgrade to native 1024x1024 for crystal-clear 4K/retina sharpness.
+          const targetWidth = requestedWidth <= 512 && requestedHeight <= 512 ? 1024 : requestedWidth;
+          const targetHeight = requestedWidth <= 512 && requestedHeight <= 512 ? 1024 : requestedHeight;
+
           jobRes = await fetch(`${workerUrl}/api/generate/image`, {
             method: "POST",
             headers: {
@@ -167,8 +174,8 @@ export class MediaImageGenerateTool implements ITool {
             body: JSON.stringify({
               prompt,
               negative_prompt: currentArgs.negative_prompt,
-              width: currentArgs.width || 1024,
-              height: currentArgs.height || 1024,
+              width: targetWidth,
+              height: targetHeight,
               steps: currentArgs.steps || 4,
               seed: currentArgs.seed,
               model: currentArgs.model || "flux1-schnell",

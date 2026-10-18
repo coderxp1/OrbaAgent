@@ -301,6 +301,7 @@ export function MessageItem({
             return !res;
           });
           const hasMediaVideoTool = mediaToolCalls.some((c) => c.name === "media_video_generate");
+          const hasMediaImageTool = mediaToolCalls.some((c) => c.name === "media_image_generate");
           const isRedundantMediaText = (text: string) => {
             const lower = text.toLowerCase();
             return (
@@ -334,6 +335,7 @@ export function MessageItem({
                     onCopy={handleCopy}
                     copiedCode={copiedCode}
                     hasMediaVideoTool={hasMediaVideoTool}
+                    hasMediaImageTool={hasMediaImageTool}
                   />
                 ) : (
                   message.content.map((p, idx) =>
@@ -344,6 +346,7 @@ export function MessageItem({
                         onCopy={handleCopy}
                         copiedCode={copiedCode}
                         hasMediaVideoTool={hasMediaVideoTool}
+                        hasMediaImageTool={hasMediaImageTool}
                       />
                     ) : isSafeImageUrl(p.image_url.url) ? (
                       <img
@@ -458,11 +461,13 @@ function FormattedContent({
   onCopy,
   copiedCode,
   hasMediaVideoTool = false,
+  hasMediaImageTool = false,
 }: {
   content: string;
   onCopy: (code: string) => void;
   copiedCode: string | null;
   hasMediaVideoTool?: boolean;
+  hasMediaImageTool?: boolean;
 }) {
   // Split on fenced code blocks: ```lang ... ```
   const parts = content.split(/(```[\s\S]*?```)/g);
@@ -509,7 +514,14 @@ function FormattedContent({
         }
 
         // Render structured markdown blocks
-        return <MarkdownBlock key={itemKey} text={part} hasMediaVideoTool={hasMediaVideoTool} />;
+        return (
+          <MarkdownBlock
+            key={itemKey}
+            text={part}
+            hasMediaVideoTool={hasMediaVideoTool}
+            hasMediaImageTool={hasMediaImageTool}
+          />
+        );
       })}
     </div>
   );
@@ -518,9 +530,11 @@ function FormattedContent({
 function MarkdownBlock({
   text,
   hasMediaVideoTool = false,
+  hasMediaImageTool = false,
 }: {
   text: string;
   hasMediaVideoTool?: boolean;
+  hasMediaImageTool?: boolean;
 }) {
   const lines = text.split("\n");
   const elements: React.ReactNode[] = [];
@@ -571,7 +585,7 @@ function MarkdownBlock({
       flushList();
       elements.push(
         <h3 key={i} className="text-base font-semibold text-white mt-4 mb-1">
-          {renderInlineMarkdown(trimmed.slice(4), hasMediaVideoTool)}
+          {renderInlineMarkdown(trimmed.slice(4), hasMediaVideoTool, hasMediaImageTool)}
         </h3>,
       );
       continue;
@@ -583,7 +597,7 @@ function MarkdownBlock({
           key={i}
           className="text-lg font-semibold text-white mt-5 mb-1.5 border-b border-zinc-800/60 pb-1"
         >
-          {renderInlineMarkdown(trimmed.slice(3), hasMediaVideoTool)}
+          {renderInlineMarkdown(trimmed.slice(3), hasMediaVideoTool, hasMediaImageTool)}
         </h2>,
       );
       continue;
@@ -595,7 +609,7 @@ function MarkdownBlock({
           key={i}
           className="text-xl font-bold text-white mt-6 mb-2 border-b border-zinc-800/80 pb-1.5"
         >
-          {renderInlineMarkdown(trimmed.slice(2), hasMediaVideoTool)}
+          {renderInlineMarkdown(trimmed.slice(2), hasMediaVideoTool, hasMediaImageTool)}
         </h1>,
       );
       continue;
@@ -613,7 +627,7 @@ function MarkdownBlock({
       flushList();
       elements.push(
         <blockquote key={i} className="border-l-2 border-zinc-600 pl-3.5 my-2 text-zinc-400 italic">
-          {renderInlineMarkdown(trimmed.slice(2), hasMediaVideoTool)}
+          {renderInlineMarkdown(trimmed.slice(2), hasMediaVideoTool, hasMediaImageTool)}
         </blockquote>,
       );
       continue;
@@ -626,7 +640,7 @@ function MarkdownBlock({
         flushList();
         currentList = { type: "ul", items: [] };
       }
-      currentList.items.push(renderInlineMarkdown(bulletMatch[1], hasMediaVideoTool));
+      currentList.items.push(renderInlineMarkdown(bulletMatch[1], hasMediaVideoTool, hasMediaImageTool));
       continue;
     }
 
@@ -637,14 +651,14 @@ function MarkdownBlock({
         flushList();
         currentList = { type: "ol", items: [] };
       }
-      currentList.items.push(renderInlineMarkdown(numMatch[1], hasMediaVideoTool));
+      currentList.items.push(renderInlineMarkdown(numMatch[1], hasMediaVideoTool, hasMediaImageTool));
       continue;
     }
 
     flushList();
     elements.push(
       <p key={i} className="my-1.5 leading-relaxed text-zinc-200">
-        {renderInlineMarkdown(line, hasMediaVideoTool)}
+        {renderInlineMarkdown(line, hasMediaVideoTool, hasMediaImageTool)}
       </p>,
     );
   }
@@ -728,7 +742,11 @@ function isSafeImageUrl(rawUrl: string): boolean {
   return false;
 }
 
-function renderInlineMarkdown(text: string, hasMediaVideoTool: boolean = false): React.ReactNode {
+function renderInlineMarkdown(
+  text: string,
+  hasMediaVideoTool: boolean = false,
+  hasMediaImageTool: boolean = false,
+): React.ReactNode {
   // Regex to match markdown images: ![alt](url) and links: [text](url)
   const pattern = /(!?\[[^\]]*\]\([^)]+\))/g;
   const tokens = text.split(pattern);
@@ -739,6 +757,12 @@ function renderInlineMarkdown(text: string, hasMediaVideoTool: boolean = false):
     if (imgMatch) {
       const alt = imgMatch[1];
       const src = imgMatch[2].trim();
+
+      // If media_image_generate is active, ImageResultCard is rendered as the centerpiece.
+      // Suppress duplicate markdown image tags to prevent double cards or broken layout.
+      if (hasMediaImageTool && src.includes("/api/artifacts/")) {
+        return null;
+      }
 
       if (!isSafeImageUrl(src)) {
         return (
@@ -791,6 +815,15 @@ function renderInlineMarkdown(text: string, hasMediaVideoTool: boolean = false):
     if (linkMatch) {
       const linkText = linkMatch[1];
       const href = linkMatch[2].trim();
+
+      // Suppress duplicate raw link to generated image when ImageResultCard is already active
+      if (
+        hasMediaImageTool &&
+        href.includes("/api/artifacts/") &&
+        /\.(png|jpe?g|webp)$/i.test(href)
+      ) {
+        return null;
+      }
 
       if (!isSafeUrl(href)) {
         return (
@@ -1326,7 +1359,7 @@ function MediaToolItem({
     );
   }
 
-  if (artifactUrl && !contentHasArtifact) {
+  if (artifactUrl) {
     return <ImageResultCard artifactUrl={artifactUrl} prompt={prompt} onReply={onReply} />;
   }
 
