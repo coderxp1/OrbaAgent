@@ -33,6 +33,11 @@ const LAZY_LOAD_MARKER = "first request loads the weights";
 export function isLazyLoadAllowed(health: GpuWorkerHealth | null): boolean {
   if (!health) return false;
   if (health.generation_backend !== "diffusers") return false;
+  const imageRequested = (health as any).models?.image?.requested === true;
+  const noImageError = !(health as any).models?.image?.load_error;
+  if (imageRequested && noImageError) {
+    return true;
+  }
   if (typeof health.unavailable_reason !== "string") return false;
   return health.unavailable_reason.includes(LAZY_LOAD_MARKER);
 }
