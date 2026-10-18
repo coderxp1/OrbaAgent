@@ -100,12 +100,13 @@ export function useAgentChat() {
                 return;
               }
 
-              let dataUrl: string | null = null;
-
-              // 1. Read from browser File if present
-              if (att.file) {
+              let imgUrl: string | null = null;
+              if (att.url) {
+                imgUrl = att.url.startsWith("http") ? att.url : `${window.location.origin}${att.url}`;
+              } else if (att.file && att.file.size < 500 * 1024) {
+                // Only fallback to small data URL if not yet uploaded and < 500KB
                 try {
-                  dataUrl = await new Promise<string>((resolve, reject) => {
+                  imgUrl = await new Promise<string>((resolve, reject) => {
                     const reader = new FileReader();
                     reader.onload = () => resolve(reader.result as string);
                     reader.onerror = reject;
@@ -116,41 +117,8 @@ export function useAgentChat() {
                 }
               }
 
-              // 2. Fallback: fetch artifact URL as blob if file not attached in memory
-              if (!dataUrl && att.url) {
-                try {
-                  const res = await fetch(att.url);
-                  if (res.ok) {
-                    const blob = await res.blob();
-                    dataUrl = await new Promise<string>((resolve, reject) => {
-                      const reader = new FileReader();
-                      reader.onload = () => resolve(reader.result as string);
-                      reader.onerror = reject;
-                      reader.readAsDataURL(blob);
-                    });
-                  }
-                } catch (e) {
-                  console.warn("Could not load artifact URL as blob:", e);
-                }
-              }
-
-              if (dataUrl) {
-                if (
-                  dataUrl.startsWith("data:application/octet-stream") ||
-                  !dataUrl.startsWith("data:image/")
-                ) {
-                  const ext = (att.name || "").split(".").pop()?.toLowerCase();
-                  const cleanMime =
-                    ext === "png"
-                      ? "image/png"
-                      : ext === "webp"
-                        ? "image/webp"
-                        : ext === "gif"
-                          ? "image/gif"
-                          : "image/jpeg";
-                  dataUrl = dataUrl.replace(/^data:[^;]*/, `data:${cleanMime}`);
-                }
-                parts.push({ type: "image_url", image_url: { url: dataUrl } });
+              if (imgUrl) {
+                parts.push({ type: "image_url", image_url: { url: imgUrl } });
               }
             }
           }

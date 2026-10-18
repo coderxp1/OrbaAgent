@@ -305,6 +305,7 @@ OrbaAgent is a professional conversational AI assistant first.
 
       const pendingToolCalls: ToolCall[] = [];
       let stepText = "";
+      let streamErrorEvent: any = null;
 
       for await (const event of this.gateway.streamChat(stepRequest)) {
         if (event.type === "tool_call_start" && event.toolCall) {
@@ -313,10 +314,89 @@ OrbaAgent is a professional conversational AI assistant first.
         } else if (event.type === "text_delta" && event.textDelta) {
           stepText += event.textDelta;
           yield event;
+        } else if (event.type === "error") {
+          streamErrorEvent = event;
+          // If media generation intent was detected, do not immediately yield the fatal error to the user;
+          // give the dedicated GPU media pipeline a chance to execute autonomously
+          if (intentResult.intent !== "media_video" && intentResult.intent !== "media_image") {
+            yield event;
+          }
         } else if (event.type === "done") {
         } else {
           yield event;
         }
+      }
+
+      // Resilient Media Fallback: If text model gateway failed or rate-limited, but intent is explicit media generation,
+      // dispatch directly to the media tool with extracted parameters
+      if (
+        (streamErrorEvent || pendingToolCalls.length === 0) &&
+        (intentResult.intent === "media_video" || intentResult.intent === "media_image") &&
+        iteration === 1 &&
+        !hasExecutedAnyTools
+      ) {
+        const isVideo = intentResult.intent === "media_video";
+        const toolName = isVideo ? "media_video_generate" : "media_image_generate";
+
+        // Find attached image URL if available
+        let attachedImageUrl = (intentResult.extractedParameters as any)?.image_url;
+        if (!attachedImageUrl && rawRequest.attachments && rawRequest.attachments.length > 0) {
+          const imgAtt = rawRequest.attachments.find((a) =>
+            a.type?.startsWith("image/") || /\.(png|jpe?g|webp|gif|bmp)$/i.test(a.name || ""),
+          );
+          if (imgAtt) {
+            attachedImageUrl =
+              (imgAtt as any).url ||
+              (imgAtt.artifactId
+                ? `/api/artifacts/default-tenant/${imgAtt.artifactId}`
+                : undefined);
+          }
+        }
+
+        const rawLastMsg = rawRequest.messages[rawRequest.messages.length - 1]?.content;
+        const fallbackPrompt =
+          (intentResult.extractedParameters as any)?.prompt ||
+          (typeof rawLastMsg === "string"
+            ? rawLastMsg
+            : Array.isArray(rawLastMsg)
+              ? (rawLastMsg as any[]).find((p) => p.type === "text")?.text || "Cinematic video"
+              : "Cinematic video");
+
+        const fallbackArgs = isVideo
+          ? {
+              prompt: fallbackPrompt,
+              width: intentResult.extractedParameters?.width || 720,
+              height: intentResult.extractedParameters?.height || 1280,
+              duration_seconds: intentResult.extractedParameters?.duration_seconds || 3,
+              fps: intentResult.extractedParameters?.fps || 16,
+              ...(attachedImageUrl ? { image_url: attachedImageUrl } : {}),
+            }
+          : {
+              prompt: fallbackPrompt,
+              width: intentResult.extractedParameters?.width || 1024,
+              height: intentResult.extractedParameters?.height || 1024,
+              steps: 4,
+              ...(attachedImageUrl ? { image_url: attachedImageUrl } : {}),
+            };
+
+        pendingToolCalls.push({
+          id: `direct_media_${Date.now()}`,
+          name: toolName,
+          arguments: fallbackArgs,
+        });
+
+        yield {
+          type: "agent_activity",
+          traceId: trace.traceId,
+          activity: {
+            step: `Executing GPU ${isVideo ? "video" : "image"} pipeline`,
+            status: "in_progress",
+            details: `Autonomous failover: dispatching directly to dedicated GPU worker (GPU 1)`,
+          },
+        };
+      } else if (streamErrorEvent && pendingToolCalls.length === 0) {
+        yield streamErrorEvent;
+        break;
       }
 
       // Case 1: No tool calls were produced in this turn

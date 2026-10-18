@@ -70,6 +70,37 @@ export async function POST(request: Request) {
         Array.isArray(lastUser.content) &&
         lastUser.content.some((p: any) => p.type === "image_url");
 
+      // If client sent base64 data: URIs, sanitize them by replacing with compact server artifact URLs
+      if (Array.isArray(lastUser.content)) {
+        hydratedMessages[lastUserIdx] = {
+          ...lastUser,
+          content: lastUser.content.map((part: any, pIdx: number) => {
+            if (
+              part?.type === "image_url" &&
+              typeof part?.image_url?.url === "string" &&
+              part.image_url.url.startsWith("data:")
+            ) {
+              const matchedAtt = rawAttachments[pIdx - 1] || rawAttachments[0];
+              if (matchedAtt?.artifactId) {
+                try {
+                  const decoded = JSON.parse(
+                    Buffer.from(matchedAtt.artifactId, "base64url").toString("utf-8"),
+                  );
+                  const appUrl = (
+                    process.env.NEXT_PUBLIC_API_URL ||
+                    process.env.ORBA_WEB_URL ||
+                    "https://orbaagent.dev"
+                  ).replace(/\/+$/, "");
+                  const artifactUrl = `${appUrl}/api/artifacts/${encodeURIComponent(decoded.w)}/${encodeURIComponent(decoded.b)}/${encodeURIComponent(decoded.p)}`;
+                  return { type: "image_url", image_url: { url: artifactUrl } };
+                } catch {}
+              }
+            }
+            return part;
+          }),
+        };
+      }
+
       if (!hasImagePart) {
         const imageParts: any[] = [];
         const baseDir = process.env.ORBA_UPLOAD_DIR || path.join(process.cwd(), ".uploads");

@@ -800,20 +800,8 @@ export default function WorkspacePage() {
                         onInsertSnippet={(s) =>
                           setInputPrompt((prev) => (prev ? `${prev}\n${s}` : s))
                         }
+                        onStartVoiceNote={toggleListening}
                       />
-                      {/* Action Pill: + Review for me */}
-                      <button
-                        onClick={() =>
-                          setInputPrompt(
-                            "Review the current codebase and let me know if all is correct so far.",
-                          )
-                        }
-                        type="button"
-                        className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#2a2a2a] hover:bg-[#333333] text-xs font-medium text-zinc-300 transition-colors"
-                      >
-                        <Sparkles className="w-3.5 h-3.5 text-blue-400" />
-                        <span>Review for me</span>
-                      </button>
                     </div>
 
                     <div className="flex items-center gap-2">
@@ -1115,19 +1103,8 @@ export default function WorkspacePage() {
                         onInsertSnippet={(s) =>
                           setInputPrompt((prev) => (prev ? `${prev}\n${s}` : s))
                         }
+                        onStartVoiceNote={toggleListening}
                       />
-                      <button
-                        onClick={() =>
-                          setInputPrompt(
-                            "Review the repository changes and verify if tests pass cleanly.",
-                          )
-                        }
-                        type="button"
-                        className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#2a2a2a] hover:bg-[#333333] text-xs font-medium text-zinc-300 transition-colors"
-                      >
-                        <Sparkles className="w-3.5 h-3.5 text-blue-400" />
-                        <span>Review for me</span>
-                      </button>
                     </div>
 
                     <div className="flex items-center gap-2">

@@ -22,6 +22,8 @@ import {
   Sparkles,
   Users,
   X,
+  AlertCircle,
+  Activity,
 } from "lucide-react";
 import type React from "react";
 import { useEffect, useState } from "react";
@@ -41,6 +43,19 @@ import {
   TeamsIcon,
 } from "./AppIcons";
 import { GitHubConnectionModal } from "./GitHubConnectionModal";
+import {
+  AccountProfileView,
+  PreferencesView,
+  NotificationsView,
+  MailCalendarView,
+  GeneralWorkspaceView,
+  PeopleView,
+  AnalyticsView,
+  ImportView,
+  AiSettingsView,
+  MeetingNotesView,
+  McpSettingsView,
+} from "./SettingsViews";
 
 interface ConnectionsModalProps {
   isOpen: boolean;
@@ -55,7 +70,23 @@ interface AppCardInfo {
   icon: React.ReactNode;
   description: string;
   useCases: string[];
+  requiredScopes?: string[];
+  docUrl?: string;
 }
+
+type SettingsNavId =
+  | "connections"
+  | "account"
+  | "preferences"
+  | "notifications"
+  | "mail_calendar"
+  | "general"
+  | "people"
+  | "analytics"
+  | "import"
+  | "ai_settings"
+  | "meeting_notes"
+  | "mcp";
 
 const APPS: AppCardInfo[] = [
   {
@@ -70,6 +101,7 @@ const APPS: AppCardInfo[] = [
       "Inspect team availability and suggest open slots",
       "Draft pre-meeting briefing docs automatically",
     ],
+    requiredScopes: ["https://www.googleapis.com/auth/calendar.readonly", "https://www.googleapis.com/auth/calendar.events"],
   },
   {
     id: "teams",
@@ -83,6 +115,7 @@ const APPS: AppCardInfo[] = [
       "Summarize daily standup notes from engineering channels",
       "Send completion updates directly to Microsoft Teams",
     ],
+    requiredScopes: ["ChannelMessage.Read.All", "Chat.Read", "User.Read"],
   },
   {
     id: "outlook",
@@ -96,6 +129,7 @@ const APPS: AppCardInfo[] = [
       "Draft replies and summary threads with technical context",
       "Sync Outlook events directly with agent tasks",
     ],
+    requiredScopes: ["Mail.Read", "Calendars.ReadWrite", "User.Read"],
   },
   {
     id: "salesforce",
@@ -103,12 +137,13 @@ const APPS: AppCardInfo[] = [
     category: "AI connector",
     icon: <SalesforceIcon className="w-8 h-8" />,
     description:
-      "Connect Salesforce to query customer accounts, opportunities, lead statuses, and support tickets.",
+      "Connect Salesforce to query CRM contacts, inspect deal pipelines, and update lead notes.",
     useCases: [
-      "Look up customer account tier and SLA requirements",
-      "Cross-reference engineering bugs with enterprise customer accounts",
-      "Generate customer impact reports for scheduled maintenance",
+      "Retrieve customer record details during customer escalations",
+      "Summarize recent account activities and deal milestones",
+      "Log conversation action items back to Salesforce leads",
     ],
+    requiredScopes: ["api", "refresh_token", "offline_access"],
   },
   {
     id: "asana",
@@ -116,29 +151,27 @@ const APPS: AppCardInfo[] = [
     category: "AI connector",
     icon: <AsanaIcon className="w-8 h-8" />,
     description:
-      "Connect Asana to track sprint tasks, project milestones, and assign engineering issues automatically.",
+      "Connect Asana to sync project tasks, assign milestones, and keep roadmap items updated.",
     useCases: [
-      "Sync sprint tasks and backlog items",
-      "Update task completion states after testing passes",
-      "Link code commits to Asana project deliverables",
+      "Fetch active sprint tasks and blockers",
+      "Create follow-up action items directly from agent plans",
+      "Update task status upon verification completion",
     ],
+    requiredScopes: ["default"],
   },
   {
     id: "atlassian",
     name: "Atlassian",
     category: "AI connector",
-    icon: (
-      <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center font-bold text-white text-base">
-        A
-      </div>
-    ),
+    icon: <SharePointIcon className="w-8 h-8" />,
     description:
-      "Connect Atlassian Jira and Confluence to read issues, update sprint boards, and search company wikis.",
+      "Connect Jira and Confluence to read project issues, track bug tickets, and reference team knowledge bases.",
     useCases: [
-      "Retrieve Jira ticket details and acceptance criteria",
-      "Search Confluence architecture specs and runbooks",
-      "Update issue status to 'In Code Review' upon branch creation",
+      "Find Jira issues associated with pull requests and commits",
+      "Query Confluence design documents for architecture guidelines",
+      "Transition issue status upon successful deployment",
     ],
+    requiredScopes: ["read:jira-work", "read:confluence-content.all"],
   },
   {
     id: "box",
@@ -146,12 +179,13 @@ const APPS: AppCardInfo[] = [
     category: "AI connector",
     icon: <BoxIcon className="w-8 h-8" />,
     description:
-      "Connect Box to index and retrieve enterprise documents, architectural diagrams, and compliance assets.",
+      "Connect Box to securely index enterprise files, technical whitepapers, and shared workspace documents.",
     useCases: [
       "Search design documents and security policies",
       "Export generated technical reports to shared Box folders",
       "Verify compliance guidelines against proposed changes",
     ],
+    requiredScopes: ["root_readwrite"],
   },
   {
     id: "github",
@@ -169,6 +203,7 @@ const APPS: AppCardInfo[] = [
       "Find examples and implementations across repos",
       "Ask questions like 'What changed in the last deploy?'",
     ],
+    requiredScopes: ["repo", "read:user"],
   },
   {
     id: "gmail",
@@ -182,6 +217,7 @@ const APPS: AppCardInfo[] = [
       "Find customer bug reports and error stack traces",
       "Draft concise technical update emails for leadership",
     ],
+    requiredScopes: ["https://www.googleapis.com/auth/gmail.readonly"],
   },
   {
     id: "google_drive",
@@ -195,6 +231,7 @@ const APPS: AppCardInfo[] = [
       "Extract data from team spreadsheets for analysis",
       "Verify technical implementation against design specifications",
     ],
+    requiredScopes: ["https://www.googleapis.com/auth/drive.readonly"],
   },
   {
     id: "linear",
@@ -202,12 +239,13 @@ const APPS: AppCardInfo[] = [
     category: "AI connector",
     icon: <LinearIcon className="w-8 h-8" />,
     description:
-      "Connect Linear to streamline issue tracking, git branch creation, and pull request linking.",
+      "Connect Linear to streamline issue tracking, resolve bug tickets, and update cycles seamlessly.",
     useCases: [
-      "Look up active cycle issues and priority bugs",
-      "Associate autonomous agent runs with Linear issue IDs",
-      "Auto-close resolved tickets when tests verify clean passes",
+      "Look up project roadmap issues and linked git branches",
+      "Automatically triage bug reports with reproduction steps",
+      "Comment on issues with generation results and code diffs",
     ],
+    requiredScopes: ["read", "write", "issues:create"],
   },
   {
     id: "sharepoint",
@@ -215,16 +253,19 @@ const APPS: AppCardInfo[] = [
     category: "AI connector",
     icon: <SharePointIcon className="w-8 h-8" />,
     description:
-      "Connect SharePoint & OneDrive to index Microsoft 365 organization knowledge and documents.",
+      "Connect SharePoint & OneDrive to index team drives, shared folders, and corporate presentations.",
     useCases: [
-      "Search enterprise documentation and SharePoint wikis",
-      "Access internal company architecture standards",
-      "Safely retrieve corporate compliance checklists",
+      "Search team drives for brand assets and design logos",
+      "Read internal engineering guidelines and compliance docs",
+      "Extract tables and figures from Office documents",
     ],
+    requiredScopes: ["Files.Read.All", "Sites.Read.All"],
   },
 ];
 
 export function ConnectionsModal({ isOpen, onClose, initialApp }: ConnectionsModalProps) {
+  const [activeNav, setActiveNav] = useState<SettingsNavId>("connections");
+  const [userName, setUserName] = useState<string>("Hartmann");
   const [selectedApp, setSelectedApp] = useState<AppCardInfo | null>(null);
   const [activeTab, setActiveTab] = useState<"discover" | "installed" | "manage">("discover");
   const [activeFilter, setActiveFilter] = useState<string>("AI connector");
@@ -234,14 +275,33 @@ export function ConnectionsModal({ isOpen, onClose, initialApp }: ConnectionsMod
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [isGitHubModalOpen, setIsGitHubModalOpen] = useState<boolean>(false);
 
+  // Diagnostic verification state
+  const [verifying, setVerifying] = useState<boolean>(false);
+  const [verifyResult, setVerifyResult] = useState<{
+    success: boolean;
+    status: string;
+    message: string;
+  } | null>(null);
+
   useEffect(() => {
     if (!isOpen) return;
+
+    // Load user profile
+    fetch("/api/user/profile")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data?.displayName) setUserName(data.displayName);
+      })
+      .catch(() => {});
 
     if (initialApp) {
       const match = APPS.find(
         (a) => a.id === initialApp || a.name.toLowerCase() === initialApp.toLowerCase(),
       );
-      if (match) setSelectedApp(match);
+      if (match) {
+        setSelectedApp(match);
+        setActiveNav("connections");
+      }
     } else {
       setSelectedApp(null);
     }
@@ -277,6 +337,7 @@ export function ConnectionsModal({ isOpen, onClose, initialApp }: ConnectionsMod
     }
 
     setActionLoading(true);
+    setVerifyResult(null);
     const currentStatus = connections[app.id]?.connected || false;
 
     if (app.id === "github" && currentStatus) {
@@ -303,7 +364,7 @@ export function ConnectionsModal({ isOpen, onClose, initialApp }: ConnectionsMod
       name: app.id,
       displayName: app.name,
       connected: !currentStatus,
-      accountName: !currentStatus ? `Hartmann (${app.name})` : undefined,
+      accountName: !currentStatus ? `${userName} (${app.name})` : undefined,
       lastSyncedAt: !currentStatus ? new Date().toISOString() : undefined,
     };
 
@@ -326,6 +387,29 @@ export function ConnectionsModal({ isOpen, onClose, initialApp }: ConnectionsMod
     }
   };
 
+  const handleRunDiagnostic = async (appId: string) => {
+    setVerifying(true);
+    setVerifyResult(null);
+    try {
+      const res = await fetch("/api/connections/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: appId }),
+      });
+      const data = await res.json();
+      setVerifyResult(data);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setVerifyResult({
+        success: false,
+        status: "ERROR",
+        message: `Diagnostic request failed: ${msg}`,
+      });
+    } finally {
+      setVerifying(false);
+    }
+  };
+
   const filteredApps = APPS.filter((app) => {
     const matchesSearch =
       app.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -344,147 +428,319 @@ export function ConnectionsModal({ isOpen, onClose, initialApp }: ConnectionsMod
         <button
           onClick={onClose}
           type="button"
+          aria-label="Close settings"
           className="absolute top-4 right-4 z-20 p-1.5 text-zinc-400 hover:text-white rounded-lg hover:bg-zinc-800 transition-colors"
         >
           <X className="w-5 h-5" />
         </button>
 
-        {/* If detail modal for a specific app is selected */}
-        {selectedApp ? (
-          <div className="flex flex-col md:flex-row w-full h-full overflow-hidden">
-            {/* Left Column of Detail: Navigation & Tabs */}
-            <div className="hidden md:flex w-72 bg-[#141414] border-r border-[#262626] p-6 flex-col justify-between shrink-0">
-              <div>
-                <button
-                  onClick={() => setSelectedApp(null)}
-                  type="button"
-                  className="flex items-center gap-2 text-xs font-medium text-zinc-400 hover:text-white mb-6 transition-colors"
-                >
-                  <ChevronRight className="w-4 h-4 rotate-180" />
-                  <span>Back to connections</span>
-                </button>
-
-                <div className="flex items-center gap-3 mb-2">
-                  <div className="p-2 rounded-xl bg-zinc-800/80">{selectedApp.icon}</div>
-                  <div>
-                    <h3 className="text-lg font-bold text-white">{selectedApp.name}</h3>
-                    <p className="text-[11px] text-zinc-400">
-                      {connections[selectedApp.id]?.connected
-                        ? "1 of 4 connection types installed"
-                        : "0 of 4 connection types installed"}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="mt-8 flex flex-col gap-1.5">
-                  <button
-                    type="button"
-                    className="flex flex-col text-left p-3 rounded-xl border border-zinc-800/50 hover:bg-zinc-800/30 text-xs transition-colors"
-                  >
-                    <div className="flex items-center gap-2 font-medium text-zinc-300">
-                      <RefreshCw className="w-3.5 h-3.5 text-zinc-400" />
-                      <span>Link preview &amp; legacy sync</span>
-                    </div>
-                    <span className="text-[11px] text-zinc-500 mt-0.5">
-                      Sync and view updates in OrbaAgent
-                    </span>
-                  </button>
-
-                  <button
-                    type="button"
-                    className="flex flex-col text-left p-3 rounded-xl border border-zinc-800/50 hover:bg-zinc-800/30 text-xs transition-colors"
-                  >
-                    <div className="flex items-center gap-2 font-medium text-zinc-300">
-                      <RefreshCw className="w-3.5 h-3.5 text-zinc-400" />
-                      <span>Database sync</span>
-                    </div>
-                    <span className="text-[11px] text-zinc-500 mt-0.5">
-                      Sync data to your databases
-                    </span>
-                  </button>
-
-                  <button
-                    type="button"
-                    className="flex flex-col text-left p-3 rounded-xl border border-blue-500/50 bg-blue-500/10 text-xs text-blue-200"
-                  >
-                    <div className="flex items-center gap-2 font-semibold text-blue-400">
-                      <Bot className="w-3.5 h-3.5" />
-                      <span>AI connector</span>
-                    </div>
-                    <span className="text-[11px] text-zinc-400 mt-0.5">
-                      Get answers in OrbaAgent AI
-                    </span>
-                  </button>
-
-                  <button
-                    type="button"
-                    className="flex flex-col text-left p-3 rounded-xl border border-zinc-800/50 hover:bg-zinc-800/30 text-xs transition-colors"
-                  >
-                    <div className="flex items-center gap-2 font-medium text-zinc-300">
-                      <SlidersHorizontal className="w-3.5 h-3.5 text-zinc-400" />
-                      <span>MCP server</span>
-                    </div>
-                    <span className="text-[11px] text-zinc-500 mt-0.5">
-                      Enable tool access in OrbaAgent AI
-                    </span>
-                  </button>
-                </div>
-              </div>
-
-              <div className="text-[11px] text-zinc-500 pt-4 border-t border-zinc-800/60">
-                Managed securely with enterprise permission isolation
-              </div>
+        {/* Global Modal Left Navigation Pane */}
+        <div className="hidden md:flex w-64 bg-[#141414] border-r border-[#262626] p-4 flex-col justify-between shrink-0">
+          <div className="overflow-y-auto">
+            {/* Search Bar top */}
+            <div className="relative mb-5">
+              <Search className="w-3.5 h-3.5 text-zinc-500 absolute left-2.5 top-2.5" />
+              <input
+                type="text"
+                placeholder="Search settings"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full bg-[#1e1e1e] border border-blue-500/40 rounded-lg pl-8 pr-12 py-1.5 text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+              <span className="absolute right-2 top-2 text-[9px] bg-zinc-800 text-zinc-400 px-1 py-0.5 rounded font-mono">
+                Beta
+              </span>
             </div>
 
-            {/* Right Column of Detail: Feature Showcase & Connect Action */}
+            {/* Account Section */}
+            <div className="mb-4">
+              <div className="text-[11px] font-semibold text-zinc-500 px-2.5 mb-1">Account</div>
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveNav("account");
+                  setSelectedApp(null);
+                  setVerifyResult(null);
+                }}
+                className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs transition-colors text-left ${
+                  activeNav === "account"
+                    ? "bg-zinc-800/90 text-white font-semibold"
+                    : "text-zinc-300 hover:bg-zinc-800/50"
+                }`}
+              >
+                <div className="w-4 h-4 rounded bg-gradient-to-tr from-blue-600 to-indigo-600 text-white text-[10px] font-bold flex items-center justify-center shrink-0">
+                  {userName.slice(0, 1).toUpperCase()}
+                </div>
+                <span className="truncate">{userName}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveNav("preferences");
+                  setSelectedApp(null);
+                  setVerifyResult(null);
+                }}
+                className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs transition-colors text-left ${
+                  activeNav === "preferences"
+                    ? "bg-zinc-800/90 text-white font-semibold"
+                    : "text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200"
+                }`}
+              >
+                <Sliders className="w-3.5 h-3.5 shrink-0" />
+                <span>Preferences</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveNav("notifications");
+                  setSelectedApp(null);
+                  setVerifyResult(null);
+                }}
+                className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs transition-colors text-left ${
+                  activeNav === "notifications"
+                    ? "bg-zinc-800/90 text-white font-semibold"
+                    : "text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200"
+                }`}
+              >
+                <Bell className="w-3.5 h-3.5 shrink-0" />
+                <span>Notifications</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveNav("mail_calendar");
+                  setSelectedApp(null);
+                  setVerifyResult(null);
+                }}
+                className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs transition-colors text-left ${
+                  activeNav === "mail_calendar"
+                    ? "bg-zinc-800/90 text-white font-semibold"
+                    : "text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200"
+                }`}
+              >
+                <Mail className="w-3.5 h-3.5 shrink-0" />
+                <span>Mail &amp; Calendar</span>
+              </button>
+            </div>
+
+            {/* Workspace Section */}
+            <div className="mb-4">
+              <div className="text-[11px] font-semibold text-zinc-500 px-2.5 mb-1">Workspace</div>
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveNav("general");
+                  setSelectedApp(null);
+                  setVerifyResult(null);
+                }}
+                className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs transition-colors text-left ${
+                  activeNav === "general"
+                    ? "bg-zinc-800/90 text-white font-semibold"
+                    : "text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200"
+                }`}
+              >
+                <Settings className="w-3.5 h-3.5 shrink-0" />
+                <span>General</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveNav("people");
+                  setSelectedApp(null);
+                  setVerifyResult(null);
+                }}
+                className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs transition-colors text-left ${
+                  activeNav === "people"
+                    ? "bg-zinc-800/90 text-white font-semibold"
+                    : "text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200"
+                }`}
+              >
+                <Users className="w-3.5 h-3.5 shrink-0" />
+                <span>People</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveNav("analytics");
+                  setSelectedApp(null);
+                  setVerifyResult(null);
+                }}
+                className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs transition-colors text-left ${
+                  activeNav === "analytics"
+                    ? "bg-zinc-800/90 text-white font-semibold"
+                    : "text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200"
+                }`}
+              >
+                <BarChart2 className="w-3.5 h-3.5 shrink-0" />
+                <span>Analytics</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveNav("import");
+                  setSelectedApp(null);
+                  setVerifyResult(null);
+                }}
+                className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs transition-colors text-left ${
+                  activeNav === "import"
+                    ? "bg-zinc-800/90 text-white font-semibold"
+                    : "text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200"
+                }`}
+              >
+                <DownloadCloud className="w-3.5 h-3.5 shrink-0" />
+                <span>Import</span>
+              </button>
+            </div>
+
+            {/* Features Section */}
+            <div>
+              <div className="text-[11px] font-semibold text-zinc-500 px-2.5 mb-1">Features</div>
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveNav("ai_settings");
+                  setSelectedApp(null);
+                  setVerifyResult(null);
+                }}
+                className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs transition-colors text-left ${
+                  activeNav === "ai_settings"
+                    ? "bg-zinc-800/90 text-white font-semibold"
+                    : "text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200"
+                }`}
+              >
+                <Sparkles className="w-3.5 h-3.5 shrink-0" />
+                <span>OrbaAgent AI</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveNav("meeting_notes");
+                  setSelectedApp(null);
+                  setVerifyResult(null);
+                }}
+                className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs transition-colors text-left ${
+                  activeNav === "meeting_notes"
+                    ? "bg-zinc-800/90 text-white font-semibold"
+                    : "text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200"
+                }`}
+              >
+                <Calendar className="w-3.5 h-3.5 shrink-0" />
+                <span>Meeting notes</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveNav("connections");
+                  setSelectedApp(null);
+                  setVerifyResult(null);
+                }}
+                className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs transition-colors text-left ${
+                  activeNav === "connections"
+                    ? "bg-zinc-800/90 text-white font-semibold"
+                    : "text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200"
+                }`}
+              >
+                <Grid className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                <span>Connections</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveNav("mcp");
+                  setSelectedApp(null);
+                  setVerifyResult(null);
+                }}
+                className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs transition-colors text-left ${
+                  activeNav === "mcp"
+                    ? "bg-zinc-800/90 text-white font-semibold"
+                    : "text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200"
+                }`}
+              >
+                <SlidersHorizontal className="w-3.5 h-3.5 shrink-0" />
+                <span>OrbaAgent MCP</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="pt-3 border-t border-zinc-800/60 text-[11px] text-zinc-500">
+            OrbaAgent v0.1.0 • Phase 1
+          </div>
+        </div>
+
+        {/* Main Content Area */}
+        <div className="flex-1 overflow-hidden flex flex-col">
+          {/* Mobile Back / Destination switcher */}
+          <div className="md:hidden p-3 bg-[#141414] border-b border-[#262626] flex items-center justify-between">
+            <span className="text-xs font-semibold text-white capitalize">{activeNav.replace("_", " ")}</span>
+            <button
+              onClick={() => {
+                setActiveNav("connections");
+                setSelectedApp(null);
+              }}
+              className="text-xs text-blue-400"
+            >
+              All Sections
+            </button>
+          </div>
+
+          {/* Render selected app detail */}
+          {activeNav === "connections" && selectedApp ? (
             <div className="flex-1 p-4 sm:p-8 overflow-y-auto flex flex-col justify-between min-w-0">
               <div>
                 <button
-                  onClick={() => setSelectedApp(null)}
+                  onClick={() => {
+                    setSelectedApp(null);
+                    setVerifyResult(null);
+                  }}
                   type="button"
-                  className="md:hidden flex items-center gap-1.5 text-xs text-zinc-400 hover:text-white mb-4 transition-colors"
+                  className="flex items-center gap-1.5 text-xs text-zinc-400 hover:text-white mb-4 transition-colors"
                 >
                   <ChevronRight className="w-4 h-4 rotate-180" />
                   <span>Back to connections</span>
                 </button>
 
-                <div className="flex items-center gap-2 mb-4">
-                  <span className="text-xl font-bold text-white">AI connector</span>
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] bg-zinc-800 text-zinc-300 font-medium">
-                    <ShieldCheck className="w-3 h-3 text-emerald-400" /> OrbaAgent Verified
-                  </span>
-                </div>
-
-                {/* Illustration Box */}
-                <div className="w-full h-44 rounded-2xl bg-[#121212] border border-[#262626] flex items-center justify-center p-6 mb-6 relative overflow-hidden">
-                  <div className="flex items-center gap-6 z-10">
-                    <div className="w-14 h-14 rounded-2xl bg-zinc-800 border border-zinc-700 flex items-center justify-center shadow-lg">
-                      {selectedApp.icon}
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <div className="w-2 h-2 rounded-full bg-blue-500 animate-ping" />
-                      <div className="w-10 h-0.5 bg-gradient-to-r from-blue-500 to-indigo-500" />
-                      <div className="w-2 h-2 rounded-full bg-indigo-500" />
-                    </div>
-                    <div className="w-14 h-14 rounded-2xl bg-zinc-900 border border-zinc-700 flex items-center justify-center shadow-lg">
-                      <img src="/orba-mascot.svg" alt="OrbaAgent" className="w-9 h-9" />
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-xl bg-zinc-800/80">{selectedApp.icon}</div>
+                    <div>
+                      <h3 className="text-xl font-bold text-white">{selectedApp.name}</h3>
+                      <span className="inline-flex items-center gap-1 text-[11px] text-zinc-400">
+                        <ShieldCheck className="w-3 h-3 text-emerald-400" /> OrbaAgent Verified AI Connector
+                      </span>
                     </div>
                   </div>
-                  <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(59,130,246,0.08),transparent_70%)]" />
+                  <div>
+                    <span
+                      className={`px-2.5 py-1 rounded-full text-xs font-semibold ${
+                        connections[selectedApp.id]?.connected
+                          ? "bg-emerald-950/80 text-emerald-300 border border-emerald-800/50"
+                          : "bg-zinc-800 text-zinc-400"
+                      }`}
+                    >
+                      {connections[selectedApp.id]?.connected ? "Installed & Active" : "Not connected"}
+                    </span>
+                  </div>
                 </div>
 
-                <h4 className="text-base font-bold text-white mb-2">
-                  Search and run tasks across {selectedApp.name} from OrbaAgent
-                </h4>
-                <p className="text-xs text-zinc-400 leading-relaxed mb-6">
+                <p className="text-xs text-zinc-300 leading-relaxed mb-5">
                   {selectedApp.description}
                 </p>
 
-                <div className="mb-6">
-                  <h5 className="text-xs font-semibold text-zinc-300 uppercase tracking-wider mb-3">
-                    Use cases
+                {/* Capability & Use cases */}
+                <div className="mb-6 p-4 rounded-xl bg-[#141414] border border-zinc-800 space-y-3">
+                  <h5 className="text-xs font-semibold text-zinc-300 uppercase tracking-wider">
+                    Supported Read &amp; Execution Scopes
                   </h5>
-                  <div className="space-y-2.5">
+                  <div className="space-y-2">
                     {selectedApp.useCases.map((uc) => (
                       <div key={uc} className="flex items-center gap-2.5 text-xs text-zinc-300">
                         <Check className="w-3.5 h-3.5 text-blue-400 shrink-0" />
@@ -492,154 +748,89 @@ export function ConnectionsModal({ isOpen, onClose, initialApp }: ConnectionsMod
                       </div>
                     ))}
                   </div>
-                </div>
-              </div>
-
-              {/* Action Button at bottom */}
-              <div className="pt-6 border-t border-zinc-800 flex items-center justify-between">
-                <div className="text-xs text-zinc-400">
-                  Status:{" "}
-                  <span
-                    className={
-                      connections[selectedApp.id]?.connected
-                        ? "text-emerald-400 font-semibold"
-                        : "text-zinc-500"
-                    }
-                  >
-                    {connections[selectedApp.id]?.connected
-                      ? "Installed & Active"
-                      : "Not connected"}
-                  </span>
-                </div>
-                <button
-                  onClick={() => handleToggleConnection(selectedApp)}
-                  disabled={actionLoading}
-                  type="button"
-                  className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-xs transition-all shadow-md ${
-                    connections[selectedApp.id]?.connected
-                      ? "bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/30"
-                      : "bg-blue-600 hover:bg-blue-500 text-white shadow-blue-900/30"
-                  }`}
-                >
-                  {actionLoading ? (
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                  ) : connections[selectedApp.id]?.connected ? (
-                    <span>Disconnect integration</span>
-                  ) : (
-                    <span>+ Add for workspace</span>
-                  )}
-                </button>
-              </div>
-            </div>
-          </div>
-        ) : (
-          /* Normal Settings View */
-          <div className="flex w-full h-full overflow-hidden">
-            {/* Left Nav Pane (Matching mockups media_1791118351272.png) */}
-            <div className="hidden md:flex w-64 bg-[#141414] border-r border-[#262626] p-4 flex-col justify-between shrink-0">
-              <div className="overflow-y-auto">
-                {/* Search Bar top */}
-                <div className="relative mb-6">
-                  <Search className="w-3.5 h-3.5 text-zinc-500 absolute left-2.5 top-2.5" />
-                  <input
-                    type="text"
-                    placeholder="Search settings"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full bg-[#1e1e1e] border border-blue-500/40 rounded-lg pl-8 pr-12 py-1.5 text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  />
-                  <span className="absolute right-2 top-2 text-[9px] bg-zinc-800 text-zinc-400 px-1 py-0.5 rounded font-mono">
-                    Beta
-                  </span>
-                </div>
-
-                {/* Account Section */}
-                <div className="mb-5">
-                  <div className="text-[11px] font-semibold text-zinc-500 px-2.5 mb-1">Account</div>
-                  <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-zinc-300 hover:bg-zinc-800/50 cursor-pointer">
-                    <div className="w-4 h-4 rounded bg-zinc-700 text-white text-[10px] font-bold flex items-center justify-center">
-                      H
+                  {selectedApp.requiredScopes && (
+                    <div className="pt-2 text-[11px] text-zinc-500 font-mono">
+                      Required Scopes: {selectedApp.requiredScopes.join(", ")}
                     </div>
-                    <span>Hartmann</span>
-                  </div>
-                  <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-zinc-400 hover:bg-zinc-800/50 cursor-pointer">
-                    <Sliders className="w-3.5 h-3.5" />
-                    <span>Preferences</span>
-                  </div>
-                  <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-zinc-400 hover:bg-zinc-800/50 cursor-pointer">
-                    <Bell className="w-3.5 h-3.5" />
-                    <span>Notifications</span>
-                  </div>
-                  <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-zinc-400 hover:bg-zinc-800/50 cursor-pointer">
-                    <Mail className="w-3.5 h-3.5" />
-                    <span>Mail &amp; Calendar</span>
-                  </div>
+                  )}
                 </div>
 
-                {/* Workspace Section */}
-                <div className="mb-5">
-                  <div className="text-[11px] font-semibold text-zinc-500 px-2.5 mb-1">
-                    Workspace
+                {/* Live Diagnostic Verification Box */}
+                {verifyResult && (
+                  <div
+                    className={`p-4 rounded-xl border mb-6 text-xs transition-all ${
+                      verifyResult.success
+                        ? "bg-emerald-950/40 border-emerald-800/60 text-emerald-300"
+                        : "bg-amber-950/40 border-amber-800/60 text-amber-200"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 font-semibold mb-1">
+                      {verifyResult.success ? (
+                        <Check className="w-4 h-4 text-emerald-400 shrink-0" />
+                      ) : (
+                        <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                      )}
+                      <span>Status: {verifyResult.status}</span>
+                    </div>
+                    <p className="leading-relaxed">{verifyResult.message}</p>
                   </div>
-                  <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-zinc-400 hover:bg-zinc-800/50 cursor-pointer">
-                    <Settings className="w-3.5 h-3.5" />
-                    <span>General</span>
-                  </div>
-                  <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-zinc-400 hover:bg-zinc-800/50 cursor-pointer">
-                    <Users className="w-3.5 h-3.5" />
-                    <span>People</span>
-                  </div>
-                  <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-zinc-400 hover:bg-zinc-800/50 cursor-pointer">
-                    <BarChart2 className="w-3.5 h-3.5" />
-                    <span>Analytics</span>
-                  </div>
-                  <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-zinc-400 hover:bg-zinc-800/50 cursor-pointer">
-                    <DownloadCloud className="w-3.5 h-3.5" />
-                    <span>Import</span>
-                  </div>
-                </div>
-
-                {/* Features Section */}
-                <div>
-                  <div className="text-[11px] font-semibold text-zinc-500 px-2.5 mb-1">
-                    Features
-                  </div>
-                  <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-zinc-400 hover:bg-zinc-800/50 cursor-pointer">
-                    <Sparkles className="w-3.5 h-3.5" />
-                    <span>OrbaAgent AI</span>
-                  </div>
-                  <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-zinc-400 hover:bg-zinc-800/50 cursor-pointer">
-                    <Calendar className="w-3.5 h-3.5" />
-                    <span>Meeting notes</span>
-                  </div>
-                  <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-zinc-800/90 text-white cursor-pointer">
-                    <Grid className="w-3.5 h-3.5 text-blue-400" />
-                    <span>Connections</span>
-                  </div>
-                  <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-zinc-400 hover:bg-zinc-800/50 cursor-pointer">
-                    <SlidersHorizontal className="w-3.5 h-3.5" />
-                    <span>OrbaAgent MCP</span>
-                  </div>
-                </div>
+                )}
               </div>
 
-              <div className="pt-3 border-t border-zinc-800/60 text-[11px] text-zinc-500">
-                OrbaAgent v0.1.0 • Phase 1
+              {/* Action buttons footer */}
+              <div className="pt-6 border-t border-zinc-800 flex flex-wrap items-center justify-between gap-3">
+                <button
+                  type="button"
+                  onClick={() => handleRunDiagnostic(selectedApp.id)}
+                  disabled={verifying}
+                  className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold bg-zinc-800 hover:bg-zinc-700 text-zinc-200 transition-colors border border-zinc-700"
+                >
+                  {verifying ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Activity className="w-3.5 h-3.5 text-blue-400" />
+                  )}
+                  <span>Test Live Read-Only Access</span>
+                </button>
+
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => handleToggleConnection(selectedApp)}
+                    disabled={actionLoading}
+                    type="button"
+                    className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-xs transition-all shadow-md ${
+                      connections[selectedApp.id]?.connected
+                        ? "bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/30"
+                        : "bg-blue-600 hover:bg-blue-500 text-white shadow-blue-900/30"
+                    }`}
+                  >
+                    {actionLoading ? (
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    ) : connections[selectedApp.id]?.connected ? (
+                      <span>Disconnect integration</span>
+                    ) : (
+                      <span>+ Add for workspace</span>
+                    )}
+                  </button>
+                </div>
               </div>
             </div>
-
-            {/* Main Content Pane */}
+          ) : activeNav === "connections" ? (
+            /* Connections Grid */
             <div className="flex-1 p-4 sm:p-8 overflow-y-auto min-w-0">
               <h2 className="text-2xl font-bold text-white mb-2">Connections</h2>
               <p className="text-xs text-zinc-400 max-w-2xl leading-relaxed mb-4">
                 Connect apps to use in OrbaAgent. Let OrbaAgent and OrbaAgent AI search, sync, and
-                take actions in Slack, Drive, Jira and more.{" "}
+                take actions across your workspace tools.{" "}
                 <span className="text-blue-400 hover:underline cursor-pointer">Learn more</span>
               </p>
 
               <div className="text-xs text-zinc-400 mb-6 flex items-center gap-1.5">
                 <span>Use OrbaAgent in ChatGPT, Claude, and Cursor:</span>
-                <span className="text-blue-400 hover:underline cursor-pointer flex items-center gap-1">
+                <span
+                  onClick={() => setActiveNav("mcp")}
+                  className="text-blue-400 hover:underline cursor-pointer flex items-center gap-1"
+                >
                   OrbaAgent MCP <ArrowRight className="w-3 h-3" />
                 </span>
               </div>
@@ -714,12 +905,9 @@ export function ConnectionsModal({ isOpen, onClose, initialApp }: ConnectionsMod
                     {filter}
                   </button>
                 ))}
-                <span className="text-xs text-zinc-500 cursor-pointer hover:text-zinc-400">
-                  1 more...
-                </span>
               </div>
 
-              {/* Apps Grid (Matching media_1791118353705.png) */}
+              {/* Apps Grid */}
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                 {filteredApps.map((app) => {
                   const isConnected = Boolean(connections[app.id]?.connected);
@@ -727,7 +915,10 @@ export function ConnectionsModal({ isOpen, onClose, initialApp }: ConnectionsMod
                     <button
                       type="button"
                       key={app.id}
-                      onClick={() => setSelectedApp(app)}
+                      onClick={() => {
+                        setSelectedApp(app);
+                        setVerifyResult(null);
+                      }}
                       className="group flex w-full text-left items-center justify-between p-4 rounded-xl bg-[#141414] border border-[#262626] hover:border-zinc-700 hover:bg-[#1a1a1a] transition-all cursor-pointer"
                     >
                       <div className="flex items-center gap-3 overflow-hidden">
@@ -748,8 +939,25 @@ export function ConnectionsModal({ isOpen, onClose, initialApp }: ConnectionsMod
                 })}
               </div>
             </div>
-          </div>
-        )}
+          ) : (
+            /* Dedicated Settings Views for all 11 destinations */
+            <div className="flex-1 p-4 sm:p-8 overflow-y-auto min-w-0">
+              {activeNav === "account" && (
+                <AccountProfileView onProfileChange={(name) => setUserName(name)} />
+              )}
+              {activeNav === "preferences" && <PreferencesView />}
+              {activeNav === "notifications" && <NotificationsView />}
+              {activeNav === "mail_calendar" && <MailCalendarView />}
+              {activeNav === "general" && <GeneralWorkspaceView />}
+              {activeNav === "people" && <PeopleView />}
+              {activeNav === "analytics" && <AnalyticsView />}
+              {activeNav === "import" && <ImportView />}
+              {activeNav === "ai_settings" && <AiSettingsView />}
+              {activeNav === "meeting_notes" && <MeetingNotesView />}
+              {activeNav === "mcp" && <McpSettingsView />}
+            </div>
+          )}
+        </div>
 
         <GitHubConnectionModal
           isOpen={isGitHubModalOpen}
