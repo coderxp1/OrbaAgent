@@ -440,17 +440,19 @@ export async function renderImageConditionedVideo(
   const fadeOutStart = Math.max(0.5, duration - 1.5);
   const fadeOutDuration = Math.min(1.5, duration - fadeOutStart);
 
+  let inputIndexCount = 0;
   const inputs: string[] = [
     "-y",
     "-loop", "1",
     "-t", String(duration),
     "-i", imagePath,
   ];
+  inputIndexCount++; // 0: imagePath
 
   let voiceInputIndex = -1;
   if (hasVoice) {
     inputs.push("-i", tmpVoice);
-    voiceInputIndex = 1;
+    voiceInputIndex = inputIndexCount++;
   }
 
   // Profile ambience/music
@@ -459,13 +461,13 @@ export async function renderImageConditionedVideo(
   if (!isSilent && profile.musicExpr) {
     const filter = profile.musicFilter ? `,${profile.musicFilter}` : "";
     inputs.push("-f", "lavfi", "-t", String(duration), "-i", `aevalsrc=${profile.musicExpr}:s=44100${filter}`);
-    ambienceInputIndex = (inputs.length - 2) / 2; // compute correct input index
+    ambienceInputIndex = inputIndexCount++;
   }
 
   let logoInputIndex = -1;
   if (logoPath) {
     inputs.push("-loop", "1", "-i", logoPath);
-    logoInputIndex = (inputs.length - 2) / 2;
+    logoInputIndex = inputIndexCount++;
   }
 
   const filterSteps: string[] = [];
