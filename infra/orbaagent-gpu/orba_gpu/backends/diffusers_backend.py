@@ -112,42 +112,50 @@ def run_image_inference(
     image.save(output_path, format="PNG" if suffix == "png" else suffix.upper())
 
 
-def load_video_pipeline(model_path: str):
-    """Load a video diffusion pipeline (Wan-AI/Wan2.1-T2V-1.3B, Lightricks/LTX-Video, etc.)."""
+def load_image_to_video_pipeline(model_path: str):
+    """Load an image-to-video diffusion pipeline (Lightricks/LTX-Video)."""
     import torch
-    from diffusers import DiffusionPipeline
+    import diffusers
 
     device = _device()
     dtype = torch.bfloat16 if device == "cuda" else torch.float32
 
-    pipeline = None
+    # LTX-Video official Diffusers classes
+    pipeline_cls = getattr(diffusers, "LTXImageToVideoPipeline", None)
+    if pipeline_cls is None:
+        pipeline_cls = getattr(diffusers, "LTXPipeline", None)
+    if pipeline_cls is None:
+        pipeline_cls = getattr(diffusers, "DiffusionPipeline", None)
+
+    if pipeline_cls is None:
+        raise RuntimeError("No compatible diffusers pipeline class found for LTX-Video")
+
+    pipeline = pipeline_cls.from_pretrained(
+        model_path,
+        torch_dtype=dtype,
+        local_files_only=True,
+    )
+    pipeline = pipeline.to(device)
+    try:
+        pipeline.enable_attention_slicing()
+    except Exception:
+        pass
+    return pipeline
+
+
+def load_text_to_video_pipeline(model_path: str):
+    """Load a text-to-video diffusion pipeline (Wan-AI/Wan2.1-T2V-1.3B, etc.)."""
+    import torch
     import diffusers
 
-    # LTX-Video pipeline loader (Diffusers LTXImageToVideoPipeline or LTXPipeline)
-    if "ltx" in model_path.lower():
-        ltx_i2v_cls = getattr(diffusers, "LTXImageToVideoPipeline", None)
-        if ltx_i2v_cls is not None:
-            try:
-                pipeline = ltx_i2v_cls.from_pretrained(
-                    model_path, torch_dtype=dtype, local_files_only=True
-                )
-            except Exception:
-                pipeline = None
+    device = _device()
+    dtype = torch.bfloat16 if device == "cuda" else torch.float32
 
-    kandinsky_cls = getattr(diffusers, "Kandinsky6TI2VAPipeline", None)
-    if pipeline is None and kandinsky_cls is not None and "kandinsky" in model_path.lower():
-        try:
-            pipeline = kandinsky_cls.from_pretrained(
-                model_path, torch_dtype=dtype, local_files_only=True
-            )
-        except Exception:
-            pipeline = None
-
-    # Generic DiffusionPipeline loader (used for foundation models, Prism, Wan, etc.)
-    if pipeline is None:
-        pipeline = diffusers.DiffusionPipeline.from_pretrained(
-            model_path, torch_dtype=dtype, local_files_only=True
-        )
+    pipeline = diffusers.DiffusionPipeline.from_pretrained(
+        model_path,
+        torch_dtype=dtype,
+        local_files_only=True,
+    )
 
     pipeline = pipeline.to(device)
     try:
@@ -157,97 +165,71 @@ def load_video_pipeline(model_path: str):
     return pipeline
 
 
-def run_video_inference(
+def load_video_pipeline(model_path: str, model_type: str = "auto"):
+    """Load a video diffusion pipeline, routing appropriately based on model ID / type."""
+    is_ltx = "ltx" in model_path.lower() or model_type == "image-to-video"
+    if is_ltx:
+        return load_image_to_video_pipeline(model_path)
+    return load_text_to_video_pipeline(model_path)
+
+
+def run_image_to_video_inference(
     *,
     pipeline,
     prompt: str,
+    image: Any,
     negative_prompt: Optional[str] = None,
     duration_seconds: int = 4,
-    fps: int = 16,
+    fps: int = 24,
     width: int = 768,
     height: int = 768,
     output_path: Path,
-    image: Any = None,
     ffmpeg_path: str = "ffmpeg",
     progress_callback: Optional[Callable[[int, int], None]] = None,
 ) -> None:
-    """Run video generation and encode the frames and audio to an MP4.
+    """Run genuine neural image-conditioned video inference (LTX-Video).
 
-    Supports native joint video-audio models (Kandinsky 6.0, Prism), pure text-to-video (Wan 2.1),
-    and genuine image-conditioned video generation (Lightricks LTX-Video).
+    Accepts a validated source image and motion prompt, conditions the diffusion process
+    on the image latents, and generates new video frames.
+    Does NOT substitute FFmpeg zoom, pan, brightness breathing, or any still-image animation.
     """
-    import tempfile
+    if image is None:
+        raise ValueError("Image-to-video inference requires a valid conditioning image")
 
-    try:
-        from diffusers.utils import encode_video
-        has_encode_video = True
-    except ImportError:
-        has_encode_video = False
+    from PIL import Image
 
-    from diffusers.utils import export_to_video
+    if not isinstance(image, Image.Image):
+        raise TypeError(f"Conditioning image must be a PIL Image instance, got {type(image)}")
 
-    pipeline_class = getattr(pipeline, "_class_name", "") or pipeline.__class__.__name__
-    is_ltx = "LTX" in pipeline_class
-    is_kandinsky = "Kandinsky" in pipeline_class
-    is_wan = "Wan" in pipeline_class or hasattr(pipeline, "vae_scale_factor_temporal")
+    # Ensure RGB color space
+    image = image.convert("RGB")
 
-    if is_ltx:
-        effective_fps = 24
-        # LTX-Video frame count rule: num_frames must equal k * 8 + 1
-        target_frames = max(9, int(round(duration_seconds * effective_fps)))
-        rem = (target_frames - 1) % 8
-        if rem != 0:
-            target_frames = (target_frames - 1 + (8 - rem)) + 1
-        # LTX-Video spatial rule: dimensions must be divisible by 32
-        width = max(256, (width // 32) * 32)
-        height = max(256, (height // 32) * 32)
-    elif is_kandinsky:
-        target_frames = 121
-        effective_fps = 24
-    elif is_wan:
-        effective_fps = fps
-        target_frames = max(1, int(round(duration_seconds * fps)))
-        rem = (target_frames - 1) % 4
-        if rem != 0:
-            target_frames = (target_frames - 1 + (4 - rem)) + 1
-        else:
-            target_frames = max(1, target_frames)
-    else:
-        effective_fps = fps
-        target_frames = max(1, int(round(duration_seconds * fps)))
+    # LTX-Video spatial constraint: dimensions must be divisible by 32
+    target_w = max(256, (width // 32) * 32)
+    target_h = max(256, (height // 32) * 32)
+    resized_image = image.resize((target_w, target_h), Image.Resampling.LANCZOS)
+
+    # LTX-Video temporal constraint: num_frames must equal k * 8 + 1
+    effective_fps = 24
+    target_frames = max(9, int(round(duration_seconds * effective_fps)))
+    rem = (target_frames - 1) % 8
+    if rem != 0:
+        target_frames = (target_frames - 1 + (8 - rem)) + 1
 
     kwargs = {
+        "image": resized_image,
         "prompt": prompt,
-        "width": width,
-        "height": height,
+        "width": target_w,
+        "height": target_h,
         "num_frames": target_frames,
+        "frame_rate": effective_fps,
+        "num_inference_steps": 30,
+        "guidance_scale": 3.0,
     }
+    if negative_prompt:
+        kwargs["negative_prompt"] = negative_prompt
 
-    if is_ltx:
-        kwargs["num_inference_steps"] = 30
-        kwargs["guidance_scale"] = 3.0
-        if image is not None:
-            if hasattr(image, "resize"):
-                kwargs["image"] = image.resize((width, height))
-            else:
-                kwargs["image"] = image
-        if negative_prompt:
-            kwargs["negative_prompt"] = negative_prompt
-    elif is_kandinsky:
-        kwargs["num_inference_steps"] = 10
-        kwargs["guidance_scale"] = 1.0
-        if negative_prompt:
-            kwargs["negative_prompt"] = negative_prompt
-    elif is_wan:
-        kwargs["num_inference_steps"] = 25
-        kwargs["guidance_scale"] = 5.0
-        if negative_prompt:
-            kwargs["negative_prompt"] = negative_prompt
-    elif negative_prompt:
-        if getattr(pipeline, "do_classifier_free_guidance", False):
-            kwargs["negative_prompt"] = negative_prompt
-
-    total_steps = kwargs.get("num_inference_steps", 25)
+    total_steps = kwargs["num_inference_steps"]
 
     def on_step_end(pipe, step_idx, timestep, callback_kwargs):
         if progress_callback:
@@ -266,7 +248,147 @@ def run_video_inference(
     result = pipeline(**kwargs)
     frames = getattr(result, "frames", None)
     if frames is None or len(frames) == 0:
-        raise RuntimeError("video pipeline returned no frames")
+        raise RuntimeError("Image-to-video pipeline returned no frames")
+
+    _export_and_encode_video(
+        pipeline=pipeline,
+        frames=frames,
+        result=result,
+        effective_fps=effective_fps,
+        output_path=output_path,
+        ffmpeg_path=ffmpeg_path,
+    )
+
+
+def run_text_to_video_inference(
+    *,
+    pipeline,
+    prompt: str,
+    negative_prompt: Optional[str] = None,
+    duration_seconds: int = 4,
+    fps: int = 16,
+    width: int = 768,
+    height: int = 768,
+    output_path: Path,
+    ffmpeg_path: str = "ffmpeg",
+    progress_callback: Optional[Callable[[int, int], None]] = None,
+) -> None:
+    """Run genuine neural text-to-video inference (Wan 2.1)."""
+    # Wan spatial constraint: divisible by 16
+    target_w = max(256, (width // 16) * 16)
+    target_h = max(256, (height // 16) * 16)
+
+    # Wan temporal constraint: num_frames = k * 4 + 1
+    target_frames = max(1, int(round(duration_seconds * fps)))
+    rem = (target_frames - 1) % 4
+    if rem != 0:
+        target_frames = (target_frames - 1 + (4 - rem)) + 1
+
+    kwargs = {
+        "prompt": prompt,
+        "width": target_w,
+        "height": target_h,
+        "num_frames": target_frames,
+        "num_inference_steps": 25,
+        "guidance_scale": 5.0,
+    }
+    if negative_prompt:
+        kwargs["negative_prompt"] = negative_prompt
+
+    total_steps = kwargs["num_inference_steps"]
+
+    def on_step_end(pipe, step_idx, timestep, callback_kwargs):
+        if progress_callback:
+            progress_callback(step_idx + 1, total_steps)
+        return callback_kwargs
+
+    try:
+        call_code = getattr(pipeline.__call__, "__code__", None)
+        if call_code and "callback_on_step_end" in call_code.co_varnames:
+            kwargs["callback_on_step_end"] = on_step_end
+        elif hasattr(pipeline, "callback_on_step_end"):
+            kwargs["callback_on_step_end"] = on_step_end
+    except Exception:
+        pass
+
+    result = pipeline(**kwargs)
+    frames = getattr(result, "frames", None)
+    if frames is None or len(frames) == 0:
+        raise RuntimeError("Text-to-video pipeline returned no frames")
+
+    _export_and_encode_video(
+        pipeline=pipeline,
+        frames=frames,
+        result=result,
+        effective_fps=fps,
+        output_path=output_path,
+        ffmpeg_path=ffmpeg_path,
+    )
+
+
+def run_video_inference(
+    *,
+    pipeline,
+    prompt: str,
+    negative_prompt: Optional[str] = None,
+    duration_seconds: int = 4,
+    fps: int = 16,
+    width: int = 768,
+    height: int = 768,
+    output_path: Path,
+    image: Any = None,
+    ffmpeg_path: str = "ffmpeg",
+    progress_callback: Optional[Callable[[int, int], None]] = None,
+) -> None:
+    """Run video inference, dispatching to genuine Image-to-Video or Text-to-Video."""
+    if image is not None:
+        return run_image_to_video_inference(
+            pipeline=pipeline,
+            prompt=prompt,
+            image=image,
+            negative_prompt=negative_prompt,
+            duration_seconds=duration_seconds,
+            fps=24,
+            width=width,
+            height=height,
+            output_path=output_path,
+            ffmpeg_path=ffmpeg_path,
+            progress_callback=progress_callback,
+        )
+
+    return run_text_to_video_inference(
+        pipeline=pipeline,
+        prompt=prompt,
+        negative_prompt=negative_prompt,
+        duration_seconds=duration_seconds,
+        fps=fps,
+        width=width,
+        height=height,
+        output_path=output_path,
+        ffmpeg_path=ffmpeg_path,
+        progress_callback=progress_callback,
+    )
+
+
+def _export_and_encode_video(
+    *,
+    pipeline: Any,
+    frames: Any,
+    result: Any,
+    effective_fps: int,
+    output_path: Path,
+    ffmpeg_path: str = "ffmpeg",
+) -> None:
+    """Helper to convert pipeline frames to an MP4 artifact using ffmpeg."""
+    import tempfile
+
+    try:
+        from diffusers.utils import encode_video
+        has_encode_video = True
+    except ImportError:
+        has_encode_video = False
+
+    from diffusers.utils import export_to_video
 
     if hasattr(frames, "ndim") and frames.ndim == 5:
         frames = frames[0]

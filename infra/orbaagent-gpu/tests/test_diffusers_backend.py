@@ -91,6 +91,31 @@ class TestDiffusersPipelineLoaders:
             mock_pipeline_instance.to.assert_called_once_with("cuda")
             assert pipe is mock_pipeline_instance
 
+    def test_load_image_to_video_pipeline_for_ltx_enforces_local_files_only(self):
+        mock_torch = MagicMock()
+        mock_torch.cuda.is_available.return_value = True
+        mock_torch.bfloat16 = "bfloat16"
+
+        mock_pipeline_instance = MagicMock()
+        mock_pipeline_instance.to.return_value = mock_pipeline_instance
+
+        mock_ltx_cls = MagicMock()
+        mock_ltx_cls.from_pretrained.return_value = mock_pipeline_instance
+
+        mock_diffusers = MagicMock()
+        mock_diffusers.LTXImageToVideoPipeline = mock_ltx_cls
+
+        with patch.dict(sys.modules, {"torch": mock_torch, "diffusers": mock_diffusers}), \
+             patch("orba_gpu.backends.diffusers_backend._torch", return_value=mock_torch):
+            pipe = load_video_pipeline("/models/Lightricks/LTX-Video")
+            mock_ltx_cls.from_pretrained.assert_called_once_with(
+                "/models/Lightricks/LTX-Video",
+                torch_dtype="bfloat16",
+                local_files_only=True,
+            )
+            mock_pipeline_instance.to.assert_called_once_with("cuda")
+            assert pipe is mock_pipeline_instance
+
 
 class TestRunInferenceNumpyTruthValue:
     """Regression tests for the HTTP 500 caused by ambiguous NumPy truth-value checks.
@@ -360,3 +385,83 @@ class TestVideoValidationFallback:
             )
             assert result.ok is False
             assert "ffprobe could not read the generated video" in result.error
+
+
+class TestImageToVideoInference:
+    """Explicit tests for genuine LTX-Video image conditioning and text-to-video separation."""
+
+    def test_run_image_to_video_inference_conditions_on_image(self, tmp_path):
+        from PIL import Image
+        from orba_gpu.backends.diffusers_backend import run_image_to_video_inference
+
+        img = Image.new("RGB", (500, 500), color="blue")
+        out_mp4 = tmp_path / "output.mp4"
+
+        mock_result = MagicMock()
+        mock_result.frames = [[np.zeros((64, 64, 3), dtype=np.uint8)]]
+        mock_pipeline = MagicMock(return_value=mock_result)
+
+        with patch("orba_gpu.backends.diffusers_backend._export_and_encode_video") as mock_export:
+            run_image_to_video_inference(
+                pipeline=mock_pipeline,
+                prompt="a person blinking naturally",
+                image=img,
+                duration_seconds=2,
+                width=500,
+                height=500,
+                output_path=out_mp4,
+            )
+
+            mock_pipeline.assert_called_once()
+            call_kwargs = mock_pipeline.call_args.kwargs
+            assert "image" in call_kwargs
+            # Verifies spatial divisibility by 32
+            assert call_kwargs["width"] % 32 == 0
+            assert call_kwargs["height"] % 32 == 0
+            # Verifies temporal formula (k * 8 + 1)
+            assert (call_kwargs["num_frames"] - 1) % 8 == 0
+            assert call_kwargs["frame_rate"] == 24
+            assert call_kwargs["guidance_scale"] == 3.0
+
+            mock_export.assert_called_once()
+
+    def test_run_image_to_video_inference_rejects_none_image(self, tmp_path):
+        from orba_gpu.backends.diffusers_backend import run_image_to_video_inference
+
+        mock_pipeline = MagicMock()
+        with pytest.raises(ValueError, match="requires a valid conditioning image"):
+            run_image_to_video_inference(
+                pipeline=mock_pipeline,
+                prompt="test",
+                image=None,
+                output_path=tmp_path / "out.mp4",
+            )
+
+    def test_run_text_to_video_inference_has_no_image_keyword(self, tmp_path):
+        from orba_gpu.backends.diffusers_backend import run_text_to_video_inference
+
+        out_mp4 = tmp_path / "output.mp4"
+        mock_result = MagicMock()
+        mock_result.frames = [[np.zeros((64, 64, 3), dtype=np.uint8)]]
+        mock_pipeline = MagicMock(return_value=mock_result)
+
+        with patch("orba_gpu.backends.diffusers_backend._export_and_encode_video") as mock_export:
+            run_text_to_video_inference(
+                pipeline=mock_pipeline,
+                prompt="a drone flying over mountains",
+                duration_seconds=2,
+                fps=16,
+                width=512,
+                height=512,
+                output_path=out_mp4,
+            )
+
+            mock_pipeline.assert_called_once()
+            call_kwargs = mock_pipeline.call_args.kwargs
+            assert "image" not in call_kwargs
+            # Verifies Wan temporal constraint (k * 4 + 1)
+            assert (call_kwargs["num_frames"] - 1) % 4 == 0
+            assert call_kwargs["guidance_scale"] == 5.0
+
+            mock_export.assert_called_once()
+
