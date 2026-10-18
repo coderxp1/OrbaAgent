@@ -120,7 +120,7 @@ export class MediaVideoGenerateTool implements ITool {
       image_url?: string;
     },
   ): Promise<ClipGenerationResult> {
-    const maxAttempts = 6;
+    const maxAttempts = 10;
     let attempts = 0;
     let jobRes: Response | null = null;
 
@@ -169,8 +169,8 @@ export class MediaVideoGenerateTool implements ITool {
             if (hRes.ok) {
               const hData = await hRes.json();
               const activeJob = hData?.active_job;
-              // If active job has stalled (no heartbeat for > 45s or elapsed > 240s), trigger a reset
-              if (activeJob && (activeJob.last_heartbeat_ago > 45 || activeJob.elapsed_seconds > 240)) {
+              // If active job has stalled (no heartbeat for > 60s or elapsed > 500s without recent progress), trigger a reset
+              if (activeJob && (activeJob.last_heartbeat_ago > 60 || (activeJob.last_heartbeat_ago > 30 && activeJob.elapsed_seconds > 500))) {
                 console.warn(
                   `[MEDIA RECOVERY] Stale job detected (${activeJob.job_id}, silent ${activeJob.last_heartbeat_ago}s). Resetting worker limiter...`,
                 );
@@ -184,7 +184,7 @@ export class MediaVideoGenerateTool implements ITool {
           } catch (hErr) {
             console.warn("[MEDIA RECOVERY] Health inspection failed during busy retry:", hErr);
           }
-          await new Promise((r) => setTimeout(r, 3000));
+          await new Promise((r) => setTimeout(r, 4000));
           continue;
         }
 
@@ -389,7 +389,13 @@ export class MediaVideoGenerateTool implements ITool {
   ): Promise<ToolExecutionResult> {
     const startTime = Date.now();
     const toolCallId = (args._toolCallId as string) || `tc_vid_${Date.now()}`;
-    const prompt = String(args.prompt || "").trim();
+    const prompt = String(
+      args.prompt ||
+        args.description ||
+        args.text ||
+        args.caption ||
+        (args.image_url ? "Coherent cinematic motion following the reference photograph" : ""),
+    ).trim();
 
     if (!prompt) {
       return {
