@@ -1094,7 +1094,7 @@ export default function WorkspacePage() {
         {messages.length > 0 && (
           <div className="p-4 bg-gradient-to-t from-[#131313] via-[#131313] to-transparent">
             <div className="max-w-3xl mx-auto">
-              <div className="w-full rounded-3xl bg-[#18181b]/95 border border-zinc-800/80 shadow-2xl backdrop-blur-xl overflow-hidden focus-within:border-zinc-700 focus-within:ring-1 focus-within:ring-zinc-700/50 transition-all">
+              <div className="w-full rounded-3xl bg-[#18181b]/95 border border-zinc-800/80 shadow-2xl backdrop-blur-xl focus-within:border-zinc-700 focus-within:ring-1 focus-within:ring-zinc-700/50 transition-all">
                 <div className="p-3.5 flex flex-col gap-2">
                   {/* Attached Files Visual Previews */}
                   {renderAttachmentPreviews()}
