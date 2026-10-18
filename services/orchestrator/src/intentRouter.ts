@@ -599,7 +599,7 @@ Do NOT execute any tools or task plans for this capability inquiry.`,
         width: dims.width,
         height: dims.height,
         fps: 16,
-        orientation: orientation || "horizontal",
+        orientation: orientation || (dims.height > dims.width ? "vertical" : "horizontal"),
         ...(attachedImageUrl ? { image_url: attachedImageUrl } : {}),
       },
       systemGuidance: `[Intent Router: Detected ${isCommercial ? "Commercial Video" : "Video"} Generation Request]
@@ -609,22 +609,22 @@ ACTION-ORIENTED EXECUTION POLICY (ZERO QUESTIONNAIRES):
 - DO NOT present a multi-turn survey or ask "¿Lo genero con el preset por defecto?" or "Dime tus preferencias".
 - Infer sensible defaults immediately:
   * Duration: ${duration}s
-  * Dimensions: ${dims.width}x${dims.height} (${orientation || "standard 16:9 landscape"})
+  * Dimensions: ${dims.width}x${dims.height} (${orientation || (dims.height > dims.width ? "vertical 9:16 portrait" : "standard 16:9 landscape")})
+  * Orientation: ${orientation || (dims.height > dims.width ? "vertical" : "horizontal")}
   * Visual style: ${
     isExplicitCartoon
       ? "Stylized cartoon/animation as explicitly requested by user"
       : "Photorealistic live-action by default. Use lifelike fur/skin textures, natural anatomy, stable lighting, and coherent physical motion. Never invent cartoon/doodle aesthetics unless explicitly requested."
   }
+CONTENT & PROMPT PRESERVATION POLICY:
+- You MUST preserve ALL requested subjects, people, products, brands, actions, dialogue, and orientation exactly as requested by the user.
+- NEVER replace the user's specific subjects or products with generic boilerplate text.
+- If dialogue or speech is requested ("saying ...", quotes), include the spoken phrase explicitly so the audio engine synthesizes dialogue.
 - EXECUTE 'media_video_generate' IMMEDIATELY on this first turn.
 - Briefly acknowledge in the user's language (Spanish, English, German, etc.) and run the tool now.
 ${attachedImageUrl ? `- Photo Conditioning: The user provided an attached image/photo. Pass image_url: "${attachedImageUrl}" directly to 'media_video_generate'. Describe the person/subject, appearance, lighting, and realistic movement matching the photo faithfully.\n` : ""}Call 'media_video_generate' directly with:
-- prompt: ${
-  isExplicitCartoon
-    ? "Stylized description tailored to user request"
-    : attachedImageUrl
-      ? "Detailed lifelike visual description faithfully reflecting the subject, clothing, and atmosphere of the uploaded photo in coherent cinematic motion"
-      : "Photorealistic live-action visual description: natural lighting, lifelike textures, realistic anatomy, coherent cinematic motion"
-}
+- prompt: Detailed description preserving all user-requested subjects, brands, and dialogue: "${content.replace(/"/g, '\\"')}"
+- orientation: "${orientation || (dims.height > dims.width ? "vertical" : "horizontal")}"
 - negative_prompt: ${
   isExplicitCartoon
     ? "photorealistic, hyperrealistic, deformed, blurry"

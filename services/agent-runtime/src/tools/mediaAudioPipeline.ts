@@ -199,17 +199,46 @@ export interface FinalizeVideoOptions {
   fps: number;
   logoPath?: string | null;
   isSilent?: boolean;
+  targetWidth?: number;
+  targetHeight?: number;
+  isVertical?: boolean;
+}
+
+export interface FinalizeVideoResult {
+  outputPath: string;
+  hasAudio: boolean;
+  hasVoice: boolean;
+  voiceText?: string;
+  width: number;
+  height: number;
+  isVertical: boolean;
 }
 
 /**
- * Assembles and muxes the video with context-aware ambience, music, fades, and optional branding.
- * Ensures strict synchronization, zero audio clipping, and mobile-optimized MP4 delivery.
+ * Assembles and muxes the video with context-aware ambience, music, fades, dialogue voice synthesis, and optional branding.
+ * Enforces requested aspect ratio (e.g. 720x1280 9:16 vertical), strict synchronization, and mobile-optimized MP4 delivery.
  */
-export async function finalizeVideoWithAudio(options: FinalizeVideoOptions): Promise<void> {
-  const { videoPath, outputPath, prompt, duration, fps, logoPath, isSilent } = options;
+export async function finalizeVideoWithAudio(
+  options: FinalizeVideoOptions,
+): Promise<FinalizeVideoResult> {
+  const {
+    videoPath,
+    outputPath,
+    prompt,
+    duration,
+    fps,
+    logoPath,
+    isSilent,
+    targetWidth,
+    targetHeight,
+    isVertical,
+  } = options;
 
   const fadeOutStart = Math.max(0.5, duration - 1.5);
   const fadeOutDuration = Math.min(1.5, duration - fadeOutStart);
+
+  const effWidth = targetWidth || (isVertical ? 720 : 1280);
+  const effHeight = targetHeight || (isVertical ? 1280 : 720);
 
   // If user explicitly requested silent video
   if (isSilent) {
@@ -221,6 +250,14 @@ export async function finalizeVideoWithAudio(options: FinalizeVideoOptions): Pro
       videoPath,
       "-t",
       String(duration),
+    ];
+    if (effWidth && effHeight) {
+      ffmpegArgs.push(
+        "-vf",
+        `scale=${effWidth}:${effHeight}:force_original_aspect_ratio=decrease,pad=${effWidth}:${effHeight}:(ow-iw)/2:(oh-ih)/2:black,setsar=1`,
+      );
+    }
+    ffmpegArgs.push(
       "-c:v",
       "libx264",
       "-pix_fmt",
@@ -231,14 +268,48 @@ export async function finalizeVideoWithAudio(options: FinalizeVideoOptions): Pro
       "-movflags",
       "+faststart",
       outputPath,
-    ];
+    );
     await execFileAsync("ffmpeg", ffmpegArgs);
-    return;
+    return {
+      outputPath,
+      hasAudio: false,
+      hasVoice: false,
+      width: effWidth,
+      height: effHeight,
+      isVertical: effHeight > effWidth,
+    };
   }
 
   const profile = detectSceneAudioProfile(prompt);
   const inputs: string[] = ["-y", "-stream_loop", "-1", "-i", videoPath];
   let audioInputCount = 0;
+
+  // Check if dialogue/speech was requested in the prompt
+  const hasDialogueRequest =
+    /\b(?:saying|says|speaks?|said|talking|telling|shouting|whispering|que diga|diciendo|mit den worten)\b/i.test(
+      prompt,
+    ) || /["'“][^"'”]{2,150}["'”]/.test(prompt);
+
+  let tmpVoicePath: string | null = null;
+  let hasVoice = false;
+  let voiceText: string | undefined;
+
+  if (!isSilent && hasDialogueRequest) {
+    const narration = extractVoiceNarrationText(prompt);
+    if (narration?.text) {
+      voiceText = narration.text;
+      const tmpDir = path.dirname(outputPath);
+      tmpVoicePath = path.join(
+        tmpDir,
+        `voice_${Date.now()}_${Math.random().toString(36).slice(2)}.mp3`,
+      );
+      hasVoice = await synthesizeVoiceNarration(narration.text, tmpVoicePath, narration.lang);
+      if (hasVoice) {
+        inputs.push("-i", tmpVoicePath);
+        audioInputCount++;
+      }
+    }
+  }
 
   // 1. Add procedural ambience inputs
   if (profile.ambienceFilter && profile.ambienceFilter.length > 0) {
@@ -265,34 +336,20 @@ export async function finalizeVideoWithAudio(options: FinalizeVideoOptions): Pro
   // 4. Construct filter_complex
   const filterSteps: string[] = [];
 
-  // Smooth seamless video motion looping:
-  // When target duration is > 6s, construct a smooth ping-pong (forward-reverse) motion loop
-  // so the video displays continuous, uninterrupted motion without jarring cut jumps.
-  let currentVideoStream = "0:v";
+  // Enforce requested aspect ratio and target dimensions (e.g. 720x1280 9:16 vertical)
+  let currentVideoStream = "[v_scaled]";
+  filterSteps.push(
+    `[0:v]scale=${effWidth}:${effHeight}:force_original_aspect_ratio=decrease,pad=${effWidth}:${effHeight}:(ow-iw)/2:(oh-ih)/2:black,setsar=1[v_scaled]`,
+  );
+
+  // Smooth seamless video motion looping when target duration > 6s
   if (duration > 6) {
     filterSteps.push(
-      "[0:v]split=2[v_fwd][v_rev_in]",
+      `${currentVideoStream}split=2[v_fwd][v_rev_in]`,
       "[v_rev_in]reverse[v_rev]",
       "[v_fwd][v_rev]concat=n=2:v=1:a=0[v_loop]",
     );
     currentVideoStream = "[v_loop]";
-  }
-
-  // Audio mix & master:
-  // Normalize integrated loudness to broadcast standard -16 LUFS (Apple/YouTube/mobile standard)
-  // and True Peak to -1.5 dBTP with clean fade-in and fade-out.
-  if (audioInputCount > 1) {
-    const audioTags = Array.from({ length: audioInputCount }, (_, i) => `[${i + 1}:a]`).join("");
-    filterSteps.push(
-      `${audioTags}amix=inputs=${audioInputCount}:duration=first:dropout_transition=2[amixed]`,
-    );
-    filterSteps.push(
-      `[amixed]volume=2.2,loudnorm=I=-16:TP=-1.5:LRA=11,afade=t=in:ss=0:d=0.6,afade=t=out:st=${fadeOutStart}:d=${fadeOutDuration}[aout]`,
-    );
-  } else if (audioInputCount === 1) {
-    filterSteps.push(
-      `[1:a]volume=2.2,loudnorm=I=-16:TP=-1.5:LRA=11,afade=t=in:ss=0:d=0.6,afade=t=out:st=${fadeOutStart}:d=${fadeOutDuration}[aout]`,
-    );
   }
 
   // Video branding if logo is present
@@ -312,32 +369,99 @@ export async function finalizeVideoWithAudio(options: FinalizeVideoOptions): Pro
     currentVideoStream = "[vout]";
   }
 
+  // Audio mix & master
+  if (hasVoice && audioInputCount > 1) {
+    // Input 1 is voice, 2..audioInputCount are background audio
+    const bgTags = Array.from({ length: audioInputCount - 1 }, (_, i) => `[${i + 2}:a]`).join("");
+    if (audioInputCount - 1 > 1) {
+      filterSteps.push(
+        `${bgTags}amix=inputs=${audioInputCount - 1}:duration=first:dropout_transition=2[bg_mixed]`,
+        `[1:a]volume=2.2,speechnorm=e=4:r=0.0001:l=1[vocal]`,
+        `[bg_mixed]volume=0.25,afade=t=in:ss=0:d=0.5[bgpad]`,
+        `[vocal][bgpad]amix=inputs=2:duration=first:dropout_transition=2,loudnorm=I=-16:TP=-1.5:LRA=11,afade=t=in:ss=0:d=0.4,afade=t=out:st=${fadeOutStart}:d=${fadeOutDuration}[aout]`,
+      );
+    } else {
+      filterSteps.push(
+        `[1:a]volume=2.2,speechnorm=e=4:r=0.0001:l=1[vocal]`,
+        `[2:a]volume=0.25,afade=t=in:ss=0:d=0.5[bgpad]`,
+        `[vocal][bgpad]amix=inputs=2:duration=first:dropout_transition=2,loudnorm=I=-16:TP=-1.5:LRA=11,afade=t=in:ss=0:d=0.4,afade=t=out:st=${fadeOutStart}:d=${fadeOutDuration}[aout]`,
+      );
+    }
+  } else if (hasVoice) {
+    filterSteps.push(
+      `[1:a]volume=2.2,speechnorm=e=4:r=0.0001:l=1,loudnorm=I=-16:TP=-1.5:LRA=11,afade=t=in:ss=0:d=0.4,afade=t=out:st=${fadeOutStart}:d=${fadeOutDuration}[aout]`,
+    );
+  } else if (audioInputCount > 1) {
+    const audioTags = Array.from({ length: audioInputCount }, (_, i) => `[${i + 1}:a]`).join("");
+    filterSteps.push(
+      `${audioTags}amix=inputs=${audioInputCount}:duration=first:dropout_transition=2[amixed]`,
+      `[amixed]volume=2.2,loudnorm=I=-16:TP=-1.5:LRA=11,afade=t=in:ss=0:d=0.6,afade=t=out:st=${fadeOutStart}:d=${fadeOutDuration}[aout]`,
+    );
+  } else if (audioInputCount === 1) {
+    filterSteps.push(
+      `[1:a]volume=2.2,loudnorm=I=-16:TP=-1.5:LRA=11,afade=t=in:ss=0:d=0.6,afade=t=out:st=${fadeOutStart}:d=${fadeOutDuration}[aout]`,
+    );
+  }
+
   inputs.push("-filter_complex", filterSteps.join(";"));
   inputs.push("-map", currentVideoStream);
 
-  inputs.push(
-    "-map",
-    "[aout]",
-    "-t",
-    String(duration),
-    "-c:v",
-    "libx264",
-    "-pix_fmt",
-    "yuv420p",
-    "-r",
-    String(fps),
-    "-c:a",
-    "aac",
-    "-b:a",
-    "192k",
-    "-ar",
-    "44100",
-    "-movflags",
-    "+faststart",
-    outputPath,
-  );
+  if (audioInputCount > 0) {
+    inputs.push(
+      "-map",
+      "[aout]",
+      "-t",
+      String(duration),
+      "-c:v",
+      "libx264",
+      "-pix_fmt",
+      "yuv420p",
+      "-r",
+      String(fps),
+      "-c:a",
+      "aac",
+      "-b:a",
+      "192k",
+      "-ar",
+      "44100",
+      "-movflags",
+      "+faststart",
+      outputPath,
+    );
+  } else {
+    inputs.push(
+      "-t",
+      String(duration),
+      "-c:v",
+      "libx264",
+      "-pix_fmt",
+      "yuv420p",
+      "-r",
+      String(fps),
+      "-an",
+      "-movflags",
+      "+faststart",
+      outputPath,
+    );
+  }
 
-  await execFileAsync("ffmpeg", inputs);
+  try {
+    await execFileAsync("ffmpeg", inputs);
+  } finally {
+    if (tmpVoicePath) {
+      await fs.rm(tmpVoicePath, { force: true }).catch(() => {});
+    }
+  }
+
+  return {
+    outputPath,
+    hasAudio: audioInputCount > 0,
+    hasVoice,
+    voiceText,
+    width: effWidth,
+    height: effHeight,
+    isVertical: effHeight > effWidth,
+  };
 }
 
 /**

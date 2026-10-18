@@ -220,11 +220,25 @@ export default function WorkspacePage() {
     return () => window.removeEventListener("message", handleMsg);
   }, []);
 
+  const isNearBottomRef = useRef<boolean>(true);
+  const prevMessagesLengthRef = useRef(messages.length);
+
+  const handleScroll = useCallback(() => {
+    if (!scrollRef.current) return;
+    const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
+    isNearBottomRef.current = scrollHeight - scrollTop - clientHeight < 150;
+  }, []);
+
   useEffect(() => {
-    if (scrollRef.current) {
+    if (!scrollRef.current) return;
+    const isNewMessage = messages.length > prevMessagesLengthRef.current;
+    prevMessagesLengthRef.current = messages.length;
+
+    // Only auto-scroll when a new message is added or during active generation if the user hasn't scrolled up
+    if (isNewMessage || (isGenerating && isNearBottomRef.current)) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  });
+  }, [messages, isGenerating]);
 
   // Keyboard shortcut Ctrl+O for New chat
   useEffect(() => {
@@ -758,7 +772,7 @@ export default function WorkspacePage() {
         </div>
 
         {/* Messages Feed or Center Hero */}
-        <div ref={scrollRef} className="flex-1 overflow-y-auto p-3 sm:p-8">
+        <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-y-auto p-3 sm:p-8">
           {messages.length === 0 ? (
             <div className="flex flex-col items-center justify-center min-h-[75vh] max-w-2xl mx-auto text-center px-4">
               {/* Mascot Logo (Exact brand mascot circle) */}

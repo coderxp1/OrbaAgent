@@ -11,7 +11,10 @@ import {
   resolveWithinBase,
 } from "@orbaagent/shared";
 import type { ITool, ToolExecutionContext } from "./base.js";
-import { verifyDeliveredArtifact } from "./mediaVerification.js";
+import {
+  verifyDeliveredArtifact,
+  verifyDeliveredVideoArtifact,
+} from "./mediaVerification.js";
 import {
   FIRST_REQUEST_TIMEOUT_MS,
   type GpuWorkerHealth,
@@ -83,6 +86,11 @@ export class MediaVideoGenerateTool implements ITool {
           type: "string",
           description:
             "Optional URL or artifactId of an input image or photo to condition video generation on (Image-to-Video).",
+        },
+        orientation: {
+          type: "string",
+          description:
+            "Video orientation: 'vertical' (9:16 portrait, 720x1280) or 'horizontal' (16:9 landscape, 1280x720).",
         },
         silent: {
           type: "boolean",
@@ -465,13 +473,30 @@ export class MediaVideoGenerateTool implements ITool {
         orientation === "vertical" ||
         /\b(?:vertical|portrait|vertikal|hochformat|9:16|9\/16|tiktok|reels?|shorts?)\b/i.test(prompt);
       const requestedDuration = Math.min(30, Math.max(1, Number(args.duration_seconds) || 5));
-      const defaultWidth = isVertical ? 720 : 1280;
-      const defaultHeight = isVertical ? 1280 : 720;
-      const rawWidth = Number(args.width) || defaultWidth;
-      const rawHeight = Number(args.height) || defaultHeight;
-      // Guarantee strict divisibility by 16 to avoid diffusers pipeline errors
-      const width = Math.max(256, Math.min(1920, Math.round(rawWidth / 16) * 16));
-      const height = Math.max(256, Math.min(1920, Math.round(rawHeight / 16) * 16));
+
+      // Calculate target dimensions and worker model dimensions.
+      // For vertical 9:16 requests, target output is 720x1280.
+      // LTX-Video spatial constraint requires both dimensions to be divisible by 32:
+      // 704 = 22 * 32, 1280 = 40 * 32.
+      let targetWidth: number;
+      let targetHeight: number;
+      let width: number;
+      let height: number;
+
+      if (isVertical) {
+        targetWidth = 720;
+        targetHeight = 1280;
+        width = 704;
+        height = 1280;
+      } else {
+        const rawWidth = Number(args.width) || 1280;
+        const rawHeight = Number(args.height) || 720;
+        targetWidth = Math.max(256, Math.min(1920, Math.round(rawWidth / 16) * 16));
+        targetHeight = Math.max(256, Math.min(1920, Math.round(rawHeight / 16) * 16));
+        width = Math.max(256, Math.min(1920, Math.round(rawWidth / 32) * 32));
+        height = Math.max(256, Math.min(1920, Math.round(rawHeight / 32) * 32));
+      }
+
       const fps = Number(args.fps) || 16;
       const isCartoonPrompt = /\b(?:cartoon|dibujo|dibujos\s+animados|animaci[oó]n|anime|manga|pixar|doodle|sketch)\b/i.test(
         prompt,
@@ -609,7 +634,7 @@ export class MediaVideoGenerateTool implements ITool {
               : null;
             const tmpFinalized = path.join(tmpDir, "finalized_video.mp4");
 
-            await finalizeVideoWithAudio({
+            const finalizeRes = await finalizeVideoWithAudio({
               videoPath: resolvedVid,
               outputPath: tmpFinalized,
               prompt,
@@ -617,6 +642,9 @@ export class MediaVideoGenerateTool implements ITool {
               fps,
               logoPath: tmpResolvedLogo,
               isSilent,
+              targetWidth,
+              targetHeight,
+              isVertical,
             });
 
             const baseDir = process.env.ORBA_UPLOAD_DIR || path.join(process.cwd(), ".uploads");
@@ -638,12 +666,18 @@ export class MediaVideoGenerateTool implements ITool {
             rawResultMetadata = {
               ...rawResultMetadata,
               audiovisualFinalized: true,
-              hasAudio: !isSilent,
+              hasAudio: finalizeRes.hasAudio,
+              hasVoice: finalizeRes.hasVoice,
+              voiceText: finalizeRes.voiceText,
               targetDuration: requestedDuration,
               logoApplied: Boolean(tmpResolvedLogo),
+              targetWidth,
+              targetHeight,
+              isVertical,
+              aspectRatio: isVertical ? "9:16" : `${targetWidth}:${targetHeight}`,
             };
             console.log(
-              `[MEDIA VIDEO GENERATE] Finalized complete audiovisual delivery (hasAudio=${!isSilent}, duration=${requestedDuration}s): ${finalArtifactUrl}`,
+              `[MEDIA VIDEO GENERATE] Finalized complete audiovisual delivery (hasAudio=${finalizeRes.hasAudio}, hasVoice=${finalizeRes.hasVoice}, dimensions=${targetWidth}x${targetHeight}): ${finalArtifactUrl}`,
             );
           } catch (finalizeErr) {
             console.warn(
@@ -657,11 +691,18 @@ export class MediaVideoGenerateTool implements ITool {
 
         const durationMs = Date.now() - startTime;
 
-      // Post-generation verification: ensure the delivered artifact actually exists and is valid
-      const verification = await verifyDeliveredArtifact(
+      const hasDialogueRequest =
+        /\b(?:saying|says|speaks?|said|talking|telling)\b/i.test(prompt) ||
+        /["'“][^"'”]{2,150}["'”]/.test(prompt);
+
+      // Post-generation verification: ensure the delivered artifact actually exists, is 9:16 if vertical, and has audio if requested
+      const verification = await verifyDeliveredVideoArtifact(
         finalArtifactUrl,
-        "video/mp4",
-        finalSha256,
+        {
+          expectedSha256: finalSha256,
+          expectedVertical: isVertical,
+          expectedAudio: hasDialogueRequest || !isSilent,
+        },
       );
       if (
         !verification.verified &&
@@ -682,6 +723,15 @@ export class MediaVideoGenerateTool implements ITool {
         };
       }
 
+      let speechSummary: string | undefined;
+      if (hasDialogueRequest) {
+        if (rawResultMetadata?.hasVoice) {
+          speechSummary = `Audible dialogue synthesized into audio track: "${rawResultMetadata.voiceText}". (Note: LTX-Video generates visual motion; phoneme-level lip synchronization is not natively supported by the video diffusion model.)`;
+        } else {
+          speechSummary = `Dialogue requested ("${prompt}"), but could not be synthesized into the audio stream.`;
+        }
+      }
+
       return {
         toolCallId,
         name: this.definition.name,
@@ -693,8 +743,12 @@ export class MediaVideoGenerateTool implements ITool {
             artifactUrl: finalArtifactUrl,
             markdown: finalArtifactUrl ? `[View Generated Video](${finalArtifactUrl})` : undefined,
             duration: requestedDuration,
-            resolution: `${width}x${height}`,
+            resolution: `${targetWidth}x${targetHeight}`,
+            aspectRatio: isVertical ? "9:16" : `${targetWidth}:${targetHeight}`,
+            orientation: isVertical ? "vertical" : "horizontal",
             delivered: true,
+            hasAudio: Boolean(rawResultMetadata?.hasAudio),
+            speechSummary,
           },
           null,
           2,
@@ -703,7 +757,12 @@ export class MediaVideoGenerateTool implements ITool {
           status: "COMPLETED",
           artifactUrl: finalArtifactUrl,
           duration: requestedDuration,
+          resolution: `${targetWidth}x${targetHeight}`,
+          aspectRatio: isVertical ? "9:16" : `${targetWidth}:${targetHeight}`,
+          isVertical,
           verification,
+          hasAudio: Boolean(rawResultMetadata?.hasAudio),
+          speechSummary,
         },
         executionTimeMs: durationMs,
       };
