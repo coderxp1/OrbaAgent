@@ -448,7 +448,7 @@ export class MediaVideoGenerateTool implements ITool {
         };
       }
 
-      const requestTimeout = lazyLoadPending ? FIRST_REQUEST_TIMEOUT_MS : 300_000;
+      const requestTimeout = lazyLoadPending ? FIRST_REQUEST_TIMEOUT_MS : 600_000;
       const requestedDuration = Math.min(30, Math.max(1, Number(args.duration_seconds) || 5));
       const rawWidth = Number(args.width) || 1280;
       const rawHeight = Number(args.height) || 720;
