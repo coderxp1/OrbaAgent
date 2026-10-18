@@ -8,7 +8,7 @@ import { cookies } from "next/headers";
 // Shared orchestrator instance inside server runtime
 const orchestrator = new AgentOrchestrator();
 
-export const maxDuration = 300;
+export const maxDuration = 600;
 
 export async function POST(request: Request) {
   try {
