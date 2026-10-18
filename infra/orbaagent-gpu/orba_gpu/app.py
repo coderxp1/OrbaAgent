@@ -228,6 +228,7 @@ def create_app(
         try:
             outcome = generate_video(
                 prompt=str(payload.get("prompt", "")),
+                image_data=payload.get("image_data") or payload.get("image"),
                 manager=model_manager,
                 limiter=generation_limiter,
                 negative_prompt=payload.get("negative_prompt"),

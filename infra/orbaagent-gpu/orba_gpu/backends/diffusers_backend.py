@@ -113,7 +113,7 @@ def run_image_inference(
 
 
 def load_video_pipeline(model_path: str):
-    """Load a text-to-video diffusion pipeline (Kandinsky 6.0, Prism, or foundation DiT)."""
+    """Load a video diffusion pipeline (Wan-AI/Wan2.1-T2V-1.3B, Lightricks/LTX-Video, etc.)."""
     import torch
     from diffusers import DiffusionPipeline
 
@@ -123,8 +123,19 @@ def load_video_pipeline(model_path: str):
     pipeline = None
     import diffusers
 
+    # LTX-Video pipeline loader (Diffusers LTXImageToVideoPipeline or LTXPipeline)
+    if "ltx" in model_path.lower():
+        ltx_i2v_cls = getattr(diffusers, "LTXImageToVideoPipeline", None)
+        if ltx_i2v_cls is not None:
+            try:
+                pipeline = ltx_i2v_cls.from_pretrained(
+                    model_path, torch_dtype=dtype, local_files_only=True
+                )
+            except Exception:
+                pipeline = None
+
     kandinsky_cls = getattr(diffusers, "Kandinsky6TI2VAPipeline", None)
-    if kandinsky_cls is not None and "kandinsky" in model_path.lower():
+    if pipeline is None and kandinsky_cls is not None and "kandinsky" in model_path.lower():
         try:
             pipeline = kandinsky_cls.from_pretrained(
                 model_path, torch_dtype=dtype, local_files_only=True
@@ -150,19 +161,20 @@ def run_video_inference(
     *,
     pipeline,
     prompt: str,
-    negative_prompt: Optional[str],
-    duration_seconds: int,
-    fps: int,
-    width: int,
-    height: int,
+    negative_prompt: Optional[str] = None,
+    duration_seconds: int = 4,
+    fps: int = 16,
+    width: int = 768,
+    height: int = 768,
     output_path: Path,
+    image: Any = None,
     ffmpeg_path: str = "ffmpeg",
     progress_callback: Optional[Callable[[int, int], None]] = None,
 ) -> None:
     """Run video generation and encode the frames and audio to an MP4.
 
-    Supports native joint video-audio models (Kandinsky 6.0, Prism) and muxes
-    synchronized audio tracks into the final MP4 container.
+    Supports native joint video-audio models (Kandinsky 6.0, Prism), pure text-to-video (Wan 2.1),
+    and genuine image-conditioned video generation (Lightricks LTX-Video).
     """
     import tempfile
 
@@ -175,10 +187,21 @@ def run_video_inference(
     from diffusers.utils import export_to_video
 
     pipeline_class = getattr(pipeline, "_class_name", "") or pipeline.__class__.__name__
+    is_ltx = "LTX" in pipeline_class
     is_kandinsky = "Kandinsky" in pipeline_class
     is_wan = "Wan" in pipeline_class or hasattr(pipeline, "vae_scale_factor_temporal")
 
-    if is_kandinsky:
+    if is_ltx:
+        effective_fps = 24
+        # LTX-Video frame count rule: num_frames must equal k * 8 + 1
+        target_frames = max(9, int(round(duration_seconds * effective_fps)))
+        rem = (target_frames - 1) % 8
+        if rem != 0:
+            target_frames = (target_frames - 1 + (8 - rem)) + 1
+        # LTX-Video spatial rule: dimensions must be divisible by 32
+        width = max(256, (width // 32) * 32)
+        height = max(256, (height // 32) * 32)
+    elif is_kandinsky:
         target_frames = 121
         effective_fps = 24
     elif is_wan:
@@ -200,7 +223,17 @@ def run_video_inference(
         "num_frames": target_frames,
     }
 
-    if is_kandinsky:
+    if is_ltx:
+        kwargs["num_inference_steps"] = 30
+        kwargs["guidance_scale"] = 3.0
+        if image is not None:
+            if hasattr(image, "resize"):
+                kwargs["image"] = image.resize((width, height))
+            else:
+                kwargs["image"] = image
+        if negative_prompt:
+            kwargs["negative_prompt"] = negative_prompt
+    elif is_kandinsky:
         kwargs["num_inference_steps"] = 10
         kwargs["guidance_scale"] = 1.0
         if negative_prompt:

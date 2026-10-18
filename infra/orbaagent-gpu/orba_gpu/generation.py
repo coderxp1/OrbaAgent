@@ -387,6 +387,7 @@ def generate_video(
     manager: ModelManager,
     limiter: GenerationLimiter,
     *,
+    image_data: Optional[str] = None,
     negative_prompt: Optional[str] = None,
     duration_seconds: int = 4,
     fps: int = 16,
@@ -396,7 +397,7 @@ def generate_video(
     infer: Optional[Callable[..., Any]] = None,
     ffprobe_path: str = "ffprobe",
 ) -> GenerationOutcome:
-    """Generate and validate a video."""
+    """Generate and validate a video (supporting Text-to-Video and Image-to-Video)."""
     started = time.time()
     prompt = (prompt or "").strip()
     if not prompt:
@@ -406,10 +407,26 @@ def generate_video(
         duration_seconds, fps, width, height
     )
 
+    pil_image = None
+    if image_data:
+        import base64
+        import io
+        from PIL import Image
+        try:
+            raw_b64 = image_data.split(",", 1)[-1] if "," in image_data else image_data
+            img_bytes = base64.b64decode(raw_b64)
+            pil_image = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+        except Exception as exc:
+            raise ValidationError(f"Invalid image_data provided for video conditioning: {exc}") from exc
+
+    effective_model = model
+    if not effective_model:
+        effective_model = "Lightricks/LTX-Video" if pil_image is not None else manager.video_model_id
+
     job_id = _new_job_id("vid")
     with limiter.slot(job_id=job_id, kind="video"):
         limiter.record_progress(job_id, stage="loading_model")
-        pipeline = manager.load_video()
+        pipeline = manager.load_video(effective_model)
         limiter.record_progress(job_id, stage="inference")
         output_dir = Path(manager.output_dir)
         os.makedirs(output_dir, exist_ok=True)
@@ -425,6 +442,7 @@ def generate_video(
                 fps=eff_fps,
                 width=eff_width,
                 height=eff_height,
+                image=pil_image,
                 target=target,
                 limiter=limiter,
                 job_id=job_id,
@@ -468,7 +486,7 @@ def generate_video(
                 size_bytes=target.stat().st_size,
                 sha256=sha256_of(target),
                 duration_ms=int((time.time() - started) * 1000),
-                model=model or manager.video_model_id,
+                model=effective_model,
                 parameters={
                     "prompt": prompt,
                     "negative_prompt": negative_prompt,
@@ -497,6 +515,7 @@ def _run_video_inference(
     width: int,
     height: int,
     target: Path,
+    image: Any = None,
     limiter: Optional[GenerationLimiter] = None,
     job_id: str = "",
 ) -> None:
@@ -507,16 +526,21 @@ def _run_video_inference(
             limiter.record_progress(job_id, stage="inference", step=step, total_steps=total_steps)
 
     if infer is not None:
-        infer(
-            pipeline=pipeline,
-            prompt=prompt,
-            negative_prompt=negative_prompt,
-            duration_seconds=duration_seconds,
-            fps=fps,
-            width=width,
-            height=height,
-            output_path=target,
-        )
+        import inspect
+        sig = inspect.signature(infer)
+        infer_kwargs: dict[str, Any] = {
+            "pipeline": pipeline,
+            "prompt": prompt,
+            "negative_prompt": negative_prompt,
+            "duration_seconds": duration_seconds,
+            "fps": fps,
+            "width": width,
+            "height": height,
+            "output_path": target,
+        }
+        if "image" in sig.parameters:
+            infer_kwargs["image"] = image
+        infer(**infer_kwargs)
         return
 
     if hasattr(pipeline, "generate_video"):
@@ -545,6 +569,7 @@ def _run_video_inference(
         fps=fps,
         width=width,
         height=height,
+        image=image,
         output_path=target,
         progress_callback=progress_callback,
     )

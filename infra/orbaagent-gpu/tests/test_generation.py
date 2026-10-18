@@ -36,6 +36,9 @@ def make_manager(tmp_path, *, image_loader=None, video_loader=None):
     vid_dir = models_dir / "Wan-AI" / "Wan2.1-T2V-1.3B"
     vid_dir.mkdir(parents=True, exist_ok=True)
     (vid_dir / "config.json").write_text("{}")
+    ltx_dir = models_dir / "Lightricks" / "LTX-Video"
+    ltx_dir.mkdir(parents=True, exist_ok=True)
+    (ltx_dir / "config.json").write_text("{}")
 
     return ModelManager(
         models_dir=str(models_dir),
@@ -248,6 +251,55 @@ class TestVideoPaths:
         assert outcome.content_type == "video/mp4"
         assert outcome.path.exists()
         assert outcome.size_bytes > 0
+        assert outcome.parameters["duration_seconds"] == 2
+        assert outcome.parameters["fps"] == 16
+        assert outcome.parameters["width"] == 256
+        assert outcome.parameters["height"] == 256
+        assert outcome.model == "Wan-AI/Wan2.1-T2V-1.3B"
+
+    def test_image_to_video_with_base64_routes_to_ltx_and_passes_image(self, tmp_path):
+        manager = make_manager(tmp_path)
+        captured = {}
+
+        # 1x1 red PNG base64
+        import base64
+        tiny_png = base64.b64encode(
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\xcf\xc0\x00\x00\x03\x01\x01\x00\x18\xdd\x8d\xb0\x00\x00\x00\x00IEND\xaeB`\x82"
+        ).decode("ascii")
+
+        def infer(*, duration_seconds, fps, width, height, output_path, image=None, **kw):
+            captured["image"] = image
+            captured["width"] = width
+            captured["height"] = height
+            write_mp4(output_path, width, height, fps, duration_seconds)
+
+        outcome = generate_video(
+            "a person smiling and turning head",
+            manager,
+            GenerationLimiter(1),
+            image_data=f"data:image/png;base64,{tiny_png}",
+            duration_seconds=2,
+            fps=16,
+            width=256,
+            height=256,
+            infer=infer,
+        )
+
+        assert outcome.kind == "video"
+        assert outcome.path.exists()
+        assert outcome.model == "Lightricks/LTX-Video"
+        assert captured.get("image") is not None
+        assert hasattr(captured["image"], "size")
+
+    def test_invalid_image_data_rejected(self, tmp_path):
+        manager = make_manager(tmp_path)
+        with pytest.raises(ValidationError, match="Invalid image_data"):
+            generate_video(
+                "animate this",
+                manager,
+                GenerationLimiter(1),
+                image_data="not-a-valid-base64-image-string",
+            )
 
     def test_missing_video_output_is_a_failure(self, tmp_path):
         with pytest.raises(GenerationFailedError, match="validation failed"):

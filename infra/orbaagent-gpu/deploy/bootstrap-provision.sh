@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-DEFAULT_EXPECTED_SHA256="80f019f13fd1fb2345be6cfccbb806c2c6012dc2a4b6e0af8149934552e24dba"
+DEFAULT_EXPECTED_SHA256="232974bafdb5c3f5df13e4bfe79aa3488202469b80bfaec3632fe00c66515ecf"
 # Whitelist: allowed exact paths or allowed subtrees
 export ALLOWED_EXACT="Dockerfile
 Dockerfile.comfyui

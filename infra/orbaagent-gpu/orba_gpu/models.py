@@ -221,14 +221,20 @@ class ModelManager:
                 ) from exc
             return self._image_pipeline
 
-    def load_video(self) -> Any:
-        """Load (or return the cached) video pipeline."""
+    def load_video(self, model_id: Optional[str] = None) -> Any:
+        """Load (or return the cached) video pipeline for the requested model."""
+        target_model = model_id or self._video_model_id
         with self._lock:
-            if self._video_pipeline is not None:
+            if not hasattr(self, "_video_pipelines"):
+                self._video_pipelines = {}
+            if target_model in self._video_pipelines:
+                return self._video_pipelines[target_model]
+            if self._video_pipeline is not None and target_model == self._video_model_id:
                 return self._video_pipeline
             if self._backend == "comfyui":
                 from .backends.comfyui_backend import ComfyUIBackend
                 self._video_pipeline = ComfyUIBackend(self._models_dir)
+                self._video_pipelines[target_model] = self._video_pipeline
                 self._video_error = None
                 return self._video_pipeline
             if self._backend != "diffusers":
@@ -237,18 +243,23 @@ class ModelManager:
                 )
             loader = self._resolve_loader("video")
             try:
-                model_path = resolve_model_path(self._models_dir, self._video_model_id)
-                self._video_pipeline = loader(model_path)
+                model_path = resolve_model_path(self._models_dir, target_model)
+                pipeline = loader(model_path)
+                self._video_pipelines[target_model] = pipeline
+                if target_model == self._video_model_id:
+                    self._video_pipeline = pipeline
                 self._video_error = None
+                return pipeline
             except Exception as exc:
                 self._video_error = str(exc)
                 raise ModelUnavailableError(
-                    f"failed to load video model '{self._video_model_id}': {exc}"
+                    f"failed to load video model '{target_model}': {exc}"
                 ) from exc
-            return self._video_pipeline
 
     def unload_all(self) -> None:
         """Drop cached pipelines (used by tests and for VRAM reclamation)."""
         with self._lock:
             self._image_pipeline = None
             self._video_pipeline = None
+            if hasattr(self, "_video_pipelines"):
+                self._video_pipelines.clear()

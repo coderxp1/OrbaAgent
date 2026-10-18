@@ -23,6 +23,7 @@ RUN pip install --no-cache-dir \
     diffusers \
     transformers \
     accelerate \
+    torchvision \
     safetensors \
     sentencepiece \
     imageio \

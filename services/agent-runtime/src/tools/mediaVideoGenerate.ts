@@ -22,7 +22,6 @@ import {
 import {
   finalizeVideoWithAudio,
   isExplicitlySilent,
-  renderImageConditionedVideo,
 } from "./mediaAudioPipeline.js";
 
 const execFileAsync = promisify(execFile);
@@ -122,6 +121,7 @@ export class MediaVideoGenerateTool implements ITool {
       height: number;
       model?: string;
       image_url?: string;
+      image_data?: string;
     },
   ): Promise<ClipGenerationResult> {
     const maxAttempts = 60;
@@ -154,7 +154,8 @@ export class MediaVideoGenerateTool implements ITool {
             fps: current.fps,
             width: current.width,
             height: current.height,
-            model: current.model || (current.image_url ? "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers" : "kandinsky-6.0"),
+            model: current.model || (current.image_data || current.image_url ? "Lightricks/LTX-Video" : "Wan-AI/Wan2.1-T2V-1.3B"),
+            ...(current.image_data ? { image_data: current.image_data } : {}),
             ...(current.image_url ? { image_url: current.image_url } : {}),
           }),
           signal: AbortSignal.timeout(requestTimeout),
@@ -528,102 +529,79 @@ export class MediaVideoGenerateTool implements ITool {
 
       const isSilent = isExplicitlySilent(prompt, args);
 
-      // Branch 1: Image-Conditioned Video Animation (100% Identity Preservation)
-      if (inputImageUrl) {
-        console.log(
-          `[MEDIA VIDEO GENERATE] Image conditioning active. Resolving source photograph for exact identity preservation: ${inputImageUrl}`,
-        );
-        const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "orba-photo-vid-"));
-        try {
-          const tmpImg = path.join(tmpDir, "source_photo.png");
+      let inputImageData: string | undefined;
+      const tmpImgDir = await fs.mkdtemp(path.join(os.tmpdir(), "orba-photo-i2v-"));
+      try {
+        if (inputImageUrl) {
+          const tmpImg = path.join(tmpImgDir, "source_photo.png");
           const resolvedImg = await this.resolveOrDownloadArtifact(inputImageUrl, tmpImg);
-          const tmpResolvedLogo = logoArtifactUrl
-            ? await this.resolveOrDownloadArtifact(logoArtifactUrl, path.join(tmpDir, "logo.png"))
-            : null;
-          const tmpFinalized = path.join(tmpDir, "finalized_video.mp4");
-
+          const imgBuf = await fs.readFile(resolvedImg);
+          inputImageData = imgBuf.toString("base64");
           console.log(
-            `[MEDIA VIDEO GENERATE] Rendering photo-conditioned video animation (${requestedDuration}s, ${width}x${height}, silent=${isSilent})...`,
+            `[MEDIA VIDEO GENERATE] Image conditioning active. Loaded source photograph (${imgBuf.length} bytes) for genuine neural Image-to-Video generation: ${inputImageUrl}`,
           );
-          await renderImageConditionedVideo({
-            imagePath: resolvedImg,
-            outputPath: tmpFinalized,
-            prompt,
-            duration: requestedDuration,
-            fps,
-            width,
-            height,
-            logoPath: tmpResolvedLogo,
-            isSilent,
-          });
-
-          const baseDir = process.env.ORBA_UPLOAD_DIR || path.join(process.cwd(), ".uploads");
-          const workspace = process.env.ORBA_TENANT_ID || "default-tenant";
-          const bundle = `vid_${Date.now().toString(36)}`;
-          const filename = `${crypto.randomUUID()}.mp4`;
-          const targetDir = path.join(baseDir, workspace, bundle);
-          await fs.mkdir(targetDir, { recursive: true });
-          const targetPath = path.join(targetDir, filename);
-
-          await fs.copyFile(tmpFinalized, targetPath);
-
-          const finalBytes = await fs.readFile(targetPath);
-          finalSha256 = crypto.createHash("sha256").update(finalBytes).digest("hex");
-          finalArtifactUrl = `/api/artifacts/${encodeURIComponent(workspace)}/${encodeURIComponent(
-            bundle,
-          )}/${encodeURIComponent(filename)}`;
-
-          rawResultMetadata = {
-            model: "image-conditioned-cinematic",
-            identityPreserved: true,
-            hasAudio: !isSilent,
-            targetDuration: requestedDuration,
-            width,
-            height,
-            logoApplied: Boolean(tmpResolvedLogo),
-          };
-          console.log(
-            `[MEDIA VIDEO GENERATE] Generated photo-conditioned video with 100% identity preservation: ${finalArtifactUrl}`,
-          );
-        } finally {
-          await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
         }
-      } else {
-        // Branch 2: Pure Text-To-Video Diffusion Pipeline
-        const baseDuration = Math.min(requestedDuration, 5);
-        console.log(
-          `[MEDIA VIDEO GENERATE] Generating visual clip (${baseDuration}s base, target: ${requestedDuration}s, silent: ${isSilent})...`,
-        );
+      } catch (imgErr: any) {
+        await fs.rm(tmpImgDir, { recursive: true, force: true }).catch(() => {});
+        return {
+          toolCallId,
+          name: this.definition.name,
+          success: false,
+          output: "",
+          error: `Failed to resolve uploaded source image for video conditioning: ${imgErr.message || imgErr}`,
+          metadata: { status: "FAILED" },
+          executionTimeMs: Date.now() - startTime,
+        };
+      } finally {
+        await fs.rm(tmpImgDir, { recursive: true, force: true }).catch(() => {});
+      }
 
-        const clip = await this.submitClip(workerUrl, workerToken, requestTimeout, {
-          prompt,
-          negative_prompt,
-          duration_seconds: baseDuration,
-          fps,
-          width,
-          height,
-          model,
-        });
+      const isImageToVideo = Boolean(inputImageData);
+      const chosenModel = isImageToVideo
+        ? (model && model !== "kandinsky-6.0" ? model : "Lightricks/LTX-Video")
+        : (model && model !== "kandinsky-6.0" ? model : "Wan-AI/Wan2.1-T2V-1.3B");
 
-        if (!clip.success) {
-          return {
-            toolCallId,
-            name: this.definition.name,
-            success: false,
-            output: "",
-            error: clip.error || "Video generation failed",
-            metadata: clip.rawResult || {},
-            executionTimeMs: Date.now() - startTime,
-          };
-        }
+      const baseDuration = Math.min(requestedDuration, 5);
+      console.log(
+        `[MEDIA VIDEO GENERATE] Dispatching genuine ${isImageToVideo ? "Image-to-Video" : "Text-to-Video"} inference (model: ${chosenModel}, duration: ${baseDuration}s, ${width}x${height}, silent: ${isSilent})...`,
+      );
 
-        jobId = clip.rawResult?.jobId || jobId;
-        finalArtifactUrl = clip.artifactUrl || "";
-        finalSha256 = clip.sha256;
-        rawResultMetadata = clip.rawResult || {};
+      const clip = await this.submitClip(workerUrl, workerToken, requestTimeout, {
+        prompt,
+        negative_prompt,
+        duration_seconds: baseDuration,
+        fps,
+        width,
+        height,
+        model: chosenModel,
+        image_url: inputImageUrl,
+        image_data: inputImageData,
+      });
 
-        // Complete audiovisual assembly (environmental ambience, cinematic music, branding, duration synchronization)
-        if (clip.artifactUrl) {
+      if (!clip.success) {
+        return {
+          toolCallId,
+          name: this.definition.name,
+          success: false,
+          output: "",
+          error: clip.error || "Video generation failed",
+          metadata: clip.rawResult || {},
+          executionTimeMs: Date.now() - startTime,
+        };
+      }
+
+      jobId = clip.rawResult?.jobId || jobId;
+      finalArtifactUrl = clip.artifactUrl || "";
+      finalSha256 = clip.sha256;
+      rawResultMetadata = {
+        ...(clip.rawResult || {}),
+        mode: isImageToVideo ? "image-to-video" : "text-to-video",
+        model: chosenModel,
+        identityPreserved: isImageToVideo,
+      };
+
+      // Complete audiovisual assembly (environmental ambience, cinematic music, branding, duration synchronization)
+      if (clip.artifactUrl) {
           const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "orba-vid-final-"));
           try {
             const tmpVid = path.join(tmpDir, "raw_clip.mp4");
