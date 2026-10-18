@@ -487,13 +487,13 @@ Do NOT execute any tools or task plans for this capability inquiry.`,
     let dims = extractDimensions(content);
     if (!dims) {
       if (orientation === "vertical") {
-        dims = { width: 480, height: 848 }; // 9:16 portrait (480%16=0, 848%16=0)
+        dims = { width: 720, height: 1280 }; // 9:16 portrait (720%16=0, 1280%16=0)
       } else if (orientation === "horizontal") {
-        dims = { width: 848, height: 480 }; // 16:9 landscape (848%16=0, 480%16=0)
+        dims = { width: 1280, height: 720 }; // 16:9 landscape (1280%16=0, 720%16=0)
       } else if (orientation === "square") {
-        dims = { width: 480, height: 480 }; // 1:1 square (480%16=0)
+        dims = { width: 720, height: 720 }; // 1:1 square (720%16=0)
       } else {
-        dims = { width: 848, height: 480 }; // Default 16:9 landscape
+        dims = { width: 1280, height: 720 }; // Default 16:9 landscape
       }
     } else {
       // Enforce strict divisibility by 16 on any explicitly extracted dimensions

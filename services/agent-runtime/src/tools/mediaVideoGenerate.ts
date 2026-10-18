@@ -19,6 +19,7 @@ import {
   isLazyLoadAllowed,
   unavailableMediaResult,
 } from "./mediaWorkerConfig.js";
+import { finalizeVideoWithAudio, isExplicitlySilent } from "./mediaAudioPipeline.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -52,7 +53,7 @@ export class MediaVideoGenerateTool implements ITool {
         },
         duration_seconds: {
           type: "number",
-          description: "Target video duration in seconds (e.g. 2, 4, 8, 15). Default is 4.",
+          description: "Target video duration in seconds (e.g. 2, 4, 8, 10, 15). Default is 4.",
         },
         fps: {
           type: "number",
@@ -79,6 +80,10 @@ export class MediaVideoGenerateTool implements ITool {
           type: "string",
           description:
             "Optional URL or artifactId of an input image or photo to condition video generation on (Image-to-Video).",
+        },
+        silent: {
+          type: "boolean",
+          description: "Optional flag to produce a silent video without background ambience or music.",
         },
       },
       required: ["prompt"],
@@ -376,111 +381,7 @@ export class MediaVideoGenerateTool implements ITool {
     return tmpDest;
   }
 
-  /**
-   * Finalizes commercial video with:
-   * 1. Rich upbeat modern corporate tech electronic audio track (synthesized chords, bassline, rhythmic pulse, smooth fade-in/out).
-   * 2. Preserved, crisp company branding: subtle translucent watermark during the clip, plus a cinematic brand outro end-card with original un-hallucinated logo centered.
-   * 3. H.264 + AAC audio + faststart for instant streaming playback on mobile Safari and desktop browsers.
-   */
-  private async finalizeCommercialVideo(
-    videoPath: string,
-    logoPath: string | null,
-    outputPath: string,
-    fps: number,
-    duration: number,
-  ): Promise<void> {
-    const audioExpr =
-      "sin(2*PI*130.81*t)*0.13*exp(-2.5*mod(t\\,1.0)) + " +
-      "sin(2*PI*164.81*t)*0.10*exp(-2.5*mod(t\\,1.0)) + " +
-      "sin(2*PI*196.00*t)*0.10*exp(-2.5*mod(t\\,1.0)) + " +
-      "sin(2*PI*261.63*t)*0.08*exp(-3.0*mod(t\\,0.5)) + " +
-      "sin(2*PI*329.63*t)*0.06*exp(-3.0*mod(t\\,0.5))";
 
-    const fadeOutStart = Math.max(0.5, duration - 1.0);
-
-    if (logoPath) {
-      const outroStart = Math.max(1.0, duration - 2.5);
-      const filterComplex = [
-        "[1:v]split=2[wm_in][brand_in]",
-        "[wm_in]scale=90:-1,format=rgba,colorchannelmixer=aa=0.85[wm]",
-        `[0:v][wm]overlay=main_w-overlay_w-16:16:shortest=1:enable='between(t,0,${outroStart})'[vmid]`,
-        `[brand_in]scale=220:-1,format=rgba,fade=t=in:st=${outroStart}:d=0.6:alpha=1[brand]`,
-        `[vmid][brand]overlay=(main_w-overlay_w)/2:(main_h-overlay_h)/2:shortest=1:enable='gte(t,${outroStart})'[vout]`,
-        `[2:a]afade=t=in:ss=0:d=0.5,afade=t=out:st=${fadeOutStart}:d=1.0[aout]`,
-      ].join(";");
-
-      await execFileAsync("ffmpeg", [
-        "-y",
-        "-stream_loop",
-        "-1",
-        "-i",
-        videoPath,
-        "-loop",
-        "1",
-        "-i",
-        logoPath,
-        "-f",
-        "lavfi",
-        "-i",
-        `aevalsrc=${audioExpr}:s=44100`,
-        "-filter_complex",
-        filterComplex,
-        "-map",
-        "[vout]",
-        "-map",
-        "[aout]",
-        "-t",
-        String(duration),
-        "-c:v",
-        "libx264",
-        "-pix_fmt",
-        "yuv420p",
-        "-r",
-        String(fps),
-        "-c:a",
-        "aac",
-        "-b:a",
-        "192k",
-        "-movflags",
-        "+faststart",
-        outputPath,
-      ]);
-    } else {
-      const filterComplex = `[1:a]afade=t=in:ss=0:d=0.5,afade=t=out:st=${fadeOutStart}:d=1.0[aout]`;
-      await execFileAsync("ffmpeg", [
-        "-y",
-        "-stream_loop",
-        "-1",
-        "-i",
-        videoPath,
-        "-f",
-        "lavfi",
-        "-i",
-        `aevalsrc=${audioExpr}:s=44100`,
-        "-filter_complex",
-        filterComplex,
-        "-map",
-        "0:v",
-        "-map",
-        "[aout]",
-        "-t",
-        String(duration),
-        "-c:v",
-        "libx264",
-        "-pix_fmt",
-        "yuv420p",
-        "-r",
-        String(fps),
-        "-c:a",
-        "aac",
-        "-b:a",
-        "192k",
-        "-movflags",
-        "+faststart",
-        outputPath,
-      ]);
-    }
-  }
 
   async execute(
     args: Record<string, unknown>,
@@ -609,65 +510,76 @@ export class MediaVideoGenerateTool implements ITool {
         }
       }
 
-      if (requestedDuration > 8 && requestedDuration <= 20) {
-        // Extended commercial generation pipeline: generate dynamic hero scene and finalize with audio/branding
-        console.log(
-          `[MEDIA COMMERCIAL] Generating commercial video (${requestedDuration}s target) via hero clip & branding pipeline...`,
-        );
+      const isSilent = isExplicitlySilent(prompt, args);
 
-        const heroClip = await this.submitClip(workerUrl, workerToken, requestTimeout, {
-          prompt,
-          negative_prompt,
-          duration_seconds: 5,
-          fps,
-          width,
-          height,
-          model: args.model
-            ? String(args.model)
-            : inputImageUrl
-              ? "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers"
-              : model,
-          image_url: inputImageUrl,
-        });
+      // Generate the base visual clip (5s for longer videos, or exact requested duration up to 8s)
+      const baseDuration = requestedDuration > 8 ? 5 : requestedDuration;
+      console.log(
+        `[MEDIA VIDEO GENERATE] Generating visual clip (${baseDuration}s base, target: ${requestedDuration}s, silent: ${isSilent})...`,
+      );
 
-        if (!heroClip.success || !heroClip.artifactUrl) {
-          throw new Error(heroClip.error || "Failed to generate video sequence");
-        }
+      const clip = await this.submitClip(workerUrl, workerToken, requestTimeout, {
+        prompt,
+        negative_prompt,
+        duration_seconds: baseDuration,
+        fps,
+        width,
+        height,
+        model: args.model
+          ? String(args.model)
+          : inputImageUrl
+            ? "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers"
+            : model,
+        image_url: inputImageUrl,
+      });
 
-        jobId = heroClip.rawResult?.jobId || jobId;
+      if (!clip.success) {
+        return {
+          toolCallId,
+          name: this.definition.name,
+          success: false,
+          output: "",
+          error: clip.error || "Video generation failed",
+          metadata: clip.rawResult || {},
+          executionTimeMs: Date.now() - startTime,
+        };
+      }
 
-        const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "orba-vid-comm-"));
-        const tmpHero = path.join(tmpDir, "hero.mp4");
-        const tmpCommercial = path.join(tmpDir, "commercial_final.mp4");
+      jobId = clip.rawResult?.jobId || jobId;
+      finalArtifactUrl = clip.artifactUrl || "";
+      finalSha256 = clip.sha256;
+      rawResultMetadata = clip.rawResult || {};
 
+      // Complete audiovisual assembly (environmental ambience, cinematic music, branding, duration synchronization)
+      if (clip.artifactUrl) {
+        const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "orba-vid-final-"));
         try {
-          const heroPath = await this.resolveOrDownloadArtifact(heroClip.artifactUrl, tmpHero);
+          const tmpVid = path.join(tmpDir, "raw_clip.mp4");
+          const resolvedVid = await this.resolveOrDownloadArtifact(clip.artifactUrl, tmpVid);
           const tmpResolvedLogo = logoArtifactUrl
             ? await this.resolveOrDownloadArtifact(logoArtifactUrl, path.join(tmpDir, "logo.png"))
             : null;
+          const tmpFinalized = path.join(tmpDir, "finalized_video.mp4");
 
-          await this.finalizeCommercialVideo(
-            heroPath,
-            tmpResolvedLogo,
-            tmpCommercial,
+          await finalizeVideoWithAudio({
+            videoPath: resolvedVid,
+            outputPath: tmpFinalized,
+            prompt,
+            duration: requestedDuration,
             fps,
-            requestedDuration,
-          );
-
-          const finalVideoPath = tmpCommercial;
-          console.log(
-            `[MEDIA VIDEO GENERATE] Finalized commercial with soundtrack and branding: ${finalVideoPath}`,
-          );
+            logoPath: tmpResolvedLogo,
+            isSilent,
+          });
 
           const baseDir = process.env.ORBA_UPLOAD_DIR || path.join(process.cwd(), ".uploads");
           const workspace = process.env.ORBA_TENANT_ID || "default-tenant";
-          const bundle = heroClip.bundle || `vid_${Date.now().toString(36)}`;
+          const bundle = clip.bundle || `vid_${Date.now().toString(36)}`;
           const filename = `${crypto.randomUUID()}.mp4`;
           const targetDir = path.join(baseDir, workspace, bundle);
           await fs.mkdir(targetDir, { recursive: true });
           const targetPath = path.join(targetDir, filename);
 
-          await fs.copyFile(finalVideoPath, targetPath);
+          await fs.copyFile(tmpFinalized, targetPath);
 
           const finalBytes = await fs.readFile(targetPath);
           finalSha256 = crypto.createHash("sha256").update(finalBytes).digest("hex");
@@ -676,91 +588,22 @@ export class MediaVideoGenerateTool implements ITool {
           )}/${encodeURIComponent(filename)}`;
 
           rawResultMetadata = {
-            commercial: true,
-            heroClip: heroClip.artifactUrl,
+            ...rawResultMetadata,
+            audiovisualFinalized: true,
+            hasAudio: !isSilent,
             targetDuration: requestedDuration,
-            logoApplied: Boolean(logoArtifactUrl),
+            logoApplied: Boolean(tmpResolvedLogo),
           };
+          console.log(
+            `[MEDIA VIDEO GENERATE] Finalized complete audiovisual delivery (hasAudio=${!isSilent}, duration=${requestedDuration}s): ${finalArtifactUrl}`,
+          );
+        } catch (finalizeErr) {
+          console.warn(
+            "[MEDIA VIDEO GENERATE] Audiovisual finalization warning, delivering raw clip:",
+            finalizeErr,
+          );
         } finally {
           await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
-        }
-      } else {
-        // Single-segment generation (<= 8 seconds or extreme duration fallback)
-        const clip = await this.submitClip(workerUrl, workerToken, requestTimeout, {
-          prompt,
-          negative_prompt,
-          duration_seconds: requestedDuration,
-          fps,
-          width,
-          height,
-          model: args.model
-            ? String(args.model)
-            : inputImageUrl
-              ? "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers"
-              : model,
-          image_url: inputImageUrl,
-        });
-
-        if (!clip.success) {
-          return {
-            toolCallId,
-            name: this.definition.name,
-            success: false,
-            output: "",
-            error: clip.error || "Video generation failed",
-            metadata: clip.rawResult || {},
-            executionTimeMs: Date.now() - startTime,
-          };
-        }
-
-        jobId = clip.rawResult?.jobId || jobId;
-        finalArtifactUrl = clip.artifactUrl || "";
-        finalSha256 = clip.sha256;
-        rawResultMetadata = clip.rawResult || {};
-
-        if (clip.artifactUrl && logoArtifactUrl) {
-          const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "orba-vid-single-"));
-          try {
-            const tmpVid = path.join(tmpDir, "clip.mp4");
-            const resolvedVid = await this.resolveOrDownloadArtifact(clip.artifactUrl, tmpVid);
-            const tmpResolvedLogo = logoArtifactUrl
-              ? await this.resolveOrDownloadArtifact(logoArtifactUrl, path.join(tmpDir, "logo.png"))
-              : null;
-            const tmpCommercial = path.join(tmpDir, "commercial_final.mp4");
-            await this.finalizeCommercialVideo(
-              resolvedVid,
-              tmpResolvedLogo,
-              tmpCommercial,
-              fps,
-              requestedDuration,
-            );
-
-            const baseDir = process.env.ORBA_UPLOAD_DIR || path.join(process.cwd(), ".uploads");
-            const workspace = process.env.ORBA_TENANT_ID || "default-tenant";
-            const bundle = clip.bundle || `vid_${Date.now().toString(36)}`;
-            const filename = `${crypto.randomUUID()}.mp4`;
-            const targetDir = path.join(baseDir, workspace, bundle);
-            await fs.mkdir(targetDir, { recursive: true });
-            const targetPath = path.join(targetDir, filename);
-
-            await fs.copyFile(tmpCommercial, targetPath);
-
-            const finalBytes = await fs.readFile(targetPath);
-            finalSha256 = crypto.createHash("sha256").update(finalBytes).digest("hex");
-            finalArtifactUrl = `/api/artifacts/${encodeURIComponent(workspace)}/${encodeURIComponent(
-              bundle,
-            )}/${encodeURIComponent(filename)}`;
-            rawResultMetadata.commercialFinalized = true;
-            rawResultMetadata.hasAudio = true;
-            rawResultMetadata.logoApplied = Boolean(tmpResolvedLogo);
-            console.log(
-              `[MEDIA VIDEO GENERATE] Finalized single-clip commercial with soundtrack and branding: ${finalArtifactUrl}`,
-            );
-          } catch (err) {
-            console.warn("[MEDIA VIDEO GENERATE] Single clip finalization warning:", err);
-          } finally {
-            await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
-          }
         }
       }
 

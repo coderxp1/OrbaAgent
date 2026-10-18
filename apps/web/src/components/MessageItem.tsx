@@ -27,6 +27,7 @@ import {
   Sparkles,
   ThumbsDown,
   ThumbsUp,
+  Upload,
   User,
   Volume2,
   VolumeX,
@@ -1271,26 +1272,8 @@ function MediaToolItem({
       );
     }
 
-    // Image generation in-progress
-    return (
-      <div className="my-2.5 rounded-2xl border border-zinc-800 bg-[#1e1e20] p-3.5 shadow-lg backdrop-blur-xs max-w-lg">
-        <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-violet-600/20 border border-violet-500/30 text-violet-400">
-            <ImageIcon className="h-5 w-5 animate-pulse" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
-              <span className="font-semibold text-xs text-zinc-200">Creating your image…</span>
-              <span className="inline-flex items-center gap-1 rounded-full bg-zinc-800 px-2 py-0.5 text-[10px] font-medium text-zinc-300 border border-zinc-700">
-                <Loader2 className="h-2.5 w-2.5 animate-spin text-blue-400" />
-                {elapsed}s
-              </span>
-            </div>
-            <p className="mt-1 truncate text-xs text-zinc-400 italic">&ldquo;{prompt}&rdquo;</p>
-          </div>
-        </div>
-      </div>
-    );
+    // Image generation in-progress: ChatGPT blue particle dot-matrix animation
+    return <DotMatrixProgressCanvas elapsed={elapsed} prompt={prompt} />;
   }
 
   // 2. Failed state
@@ -1343,42 +1326,216 @@ function MediaToolItem({
     );
   }
 
+  if (artifactUrl && !contentHasArtifact) {
+    return <ImageResultCard artifactUrl={artifactUrl} prompt={prompt} onReply={onReply} />;
+  }
+
+  return null;
+}
+
+/**
+ * Animated Dot-Matrix Canvas reproducing ChatGPT DALL-E / FLUX progressive generation.
+ * Features undulating cyan-blue waves across a matrix of particles with real stage progression.
+ */
+function DotMatrixProgressCanvas({ elapsed, prompt }: { elapsed: number; prompt: string }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  // Progressive realistic progress: starts at 15%, climbs smoothly to ~92% over typical generation time
+  const progress = Math.min(95, Math.round(15 + 78 * (1 - Math.exp(-elapsed / 3.0))));
+
+  const stageLabel =
+    progress < 55
+      ? "Making the first draft"
+      : progress < 88
+        ? "Polishing details"
+        : "Finishing touches";
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    let animId: number;
+    const startTime = performance.now();
+
+    const cols = 17;
+    const rows = 25;
+    const spacingX = canvas.width / (cols + 1);
+    const spacingY = canvas.height / (rows + 1);
+
+    const render = (now: number) => {
+      const t = (now - startTime) / 1000;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          const x = (c + 1) * spacingX;
+          const y = (r + 1) * spacingY;
+
+          // Wave equation radiating diagonally
+          const wave = Math.sin((c * 0.32 + r * 0.32) - t * 2.8);
+          const intensity = Math.pow(Math.max(0, (wave + 1) / 2), 2.5);
+          const alpha = 0.12 + 0.85 * intensity;
+
+          ctx.beginPath();
+          ctx.arc(x, y, 1.75, 0, Math.PI * 2);
+          if (intensity > 0.6) {
+            ctx.fillStyle = `rgba(147, 197, 253, ${alpha})`;
+            ctx.shadowColor = "#3b82f6";
+            ctx.shadowBlur = 5;
+          } else {
+            ctx.fillStyle = `rgba(59, 130, 246, ${alpha})`;
+            ctx.shadowBlur = 0;
+          }
+          ctx.fill();
+        }
+      }
+
+      animId = requestAnimationFrame(render);
+    };
+
+    animId = requestAnimationFrame(render);
+    return () => cancelAnimationFrame(animId);
+  }, []);
+
   return (
-    <div className="my-2.5 flex flex-col gap-2 max-w-xl">
-      {!contentHasArtifact && artifactUrl && (
-        <div className="rounded-2xl overflow-hidden border border-zinc-800/90 bg-[#121214] shadow-2xl">
-          <a
-            href={artifactUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="block relative group/preview cursor-pointer overflow-hidden bg-black/40"
-          >
+    <div className="my-3 flex flex-col gap-2 max-w-sm sm:max-w-md select-none">
+      <div className="text-zinc-200 font-medium text-base tracking-tight mb-1">
+        {stageLabel}
+      </div>
+
+      <div className="relative rounded-3xl overflow-hidden border border-zinc-800/80 bg-[#0a0a0c] shadow-2xl flex items-center justify-center p-3">
+        <canvas
+          ref={canvasRef}
+          width={320}
+          height={420}
+          className="w-full max-h-[420px] aspect-[3/4] object-contain"
+        />
+
+        {/* Floating Percentage Badge in Bottom-Right (matching user screenshot) */}
+        <div className="absolute bottom-5 right-5 px-3.5 py-1 rounded-full bg-zinc-800/80 hover:bg-zinc-800 backdrop-blur-md border border-white/10 text-white font-mono text-xs font-semibold shadow-xl transition-all">
+          {progress} %
+        </div>
+      </div>
+
+      <div className="text-[11px] text-zinc-400 pl-1 font-sans">
+        Suggested based on your interests
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Polished, high-resolution Image Presentation matching ChatGPT reference screenshot.
+ * Preserves aspect ratio, provides instant full-resolution viewing, sharing, download, and feedback.
+ */
+function ImageResultCard({
+  artifactUrl,
+  prompt,
+  onReply,
+}: {
+  artifactUrl: string;
+  prompt: string;
+  onReply?: (text: string) => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  const [feedback, setFeedback] = useState<"up" | "down" | null>(null);
+  const [showLightbox, setShowLightbox] = useState(false);
+
+  const handleCopyLink = () => {
+    const fullUrl = artifactUrl.startsWith("http")
+      ? artifactUrl
+      : window.location.origin + artifactUrl;
+    navigator.clipboard.writeText(fullUrl);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="my-3 flex flex-col gap-2.5 max-w-xl">
+      {/* Main Image Container */}
+      <div className="relative group/imgcard rounded-3xl overflow-hidden border border-zinc-800/80 bg-black shadow-2xl transition-all">
+        <img
+          src={artifactUrl}
+          alt={prompt}
+          onClick={() => setShowLightbox(true)}
+          className="w-full h-auto max-h-[580px] object-contain rounded-3xl cursor-zoom-in transition-transform duration-300 hover:scale-[1.01]"
+          loading="eager"
+        />
+
+        {/* Bottom-right translucent action button (matching screenshot 3) */}
+        <button
+          type="button"
+          onClick={handleCopyLink}
+          className="absolute bottom-4 right-4 w-9 h-9 rounded-full bg-black/60 hover:bg-black/90 backdrop-blur-md border border-white/15 text-white/90 hover:text-white flex items-center justify-center transition-all shadow-xl hover:scale-105 cursor-pointer z-10"
+          title={copied ? "Link Copied!" : "Share / Copy Link"}
+        >
+          {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Upload className="w-4 h-4" />}
+        </button>
+      </div>
+
+      {/* Action Row below image (matching screenshot 3) */}
+      <div className="flex items-center gap-2 px-1 text-zinc-400 text-xs">
+        <button
+          type="button"
+          onClick={handleCopyLink}
+          className="p-1.5 rounded-lg hover:text-zinc-200 hover:bg-zinc-800/60 transition-colors"
+          title={copied ? "Copied!" : "Copy link"}
+        >
+          {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+        </button>
+        <button
+          type="button"
+          onClick={() => setFeedback(feedback === "up" ? null : "up")}
+          className={`p-1.5 rounded-lg hover:text-zinc-200 hover:bg-zinc-800/60 transition-colors ${
+            feedback === "up" ? "text-emerald-400" : ""
+          }`}
+          title="Good response"
+        >
+          <ThumbsUp className="w-4 h-4" />
+        </button>
+        <button
+          type="button"
+          onClick={() => setFeedback(feedback === "down" ? null : "down")}
+          className={`p-1.5 rounded-lg hover:text-zinc-200 hover:bg-zinc-800/60 transition-colors ${
+            feedback === "down" ? "text-rose-400" : ""
+          }`}
+          title="Poor response"
+        >
+          <ThumbsDown className="w-4 h-4" />
+        </button>
+        <a
+          href={artifactUrl}
+          download
+          target="_blank"
+          rel="noopener noreferrer"
+          className="p-1.5 rounded-lg hover:text-zinc-200 hover:bg-zinc-800/60 transition-colors inline-flex items-center gap-1 text-[11px]"
+          title="Download original full-resolution image"
+        >
+          <Download className="w-4 h-4" />
+        </a>
+      </div>
+
+      {/* Full Resolution Lightbox Modal */}
+      {showLightbox && (
+        <div
+          className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-4 cursor-zoom-out"
+          onClick={() => setShowLightbox(false)}
+        >
+          <div className="relative max-w-5xl max-h-[90vh] flex flex-col items-center">
             <img
               src={artifactUrl}
               alt={prompt}
-              className="w-full max-h-[480px] object-contain rounded-t-2xl transition-transform duration-300 group-hover/preview:scale-[1.015]"
-              loading="lazy"
+              className="max-w-full max-h-[85vh] object-contain rounded-2xl shadow-2xl"
             />
-            <span className="absolute inset-0 bg-black/30 opacity-0 group-hover/preview:opacity-100 transition-opacity flex items-center justify-center text-white text-xs font-medium backdrop-blur-xs">
-              Click to open full size ↗
-            </span>
-          </a>
-          <div className="px-4 py-2.5 flex items-center justify-between border-t border-zinc-800/80 bg-zinc-900/90 text-xs text-zinc-400">
-            <span className="truncate max-w-[320px] text-zinc-300 font-medium text-[11px]">
+            <div className="mt-3 text-xs text-zinc-300 font-medium truncate max-w-lg">
               {prompt}
-            </span>
-            <a
-              href={artifactUrl}
-              download
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-zinc-200 hover:text-white inline-flex items-center gap-1 text-[11px] bg-zinc-800/80 hover:bg-zinc-700/80 px-2.5 py-1 rounded-md border border-zinc-700/60 transition-colors"
-            >
-              Download <Download className="h-3 w-3" />
-            </a>
+            </div>
           </div>
         </div>
       )}
     </div>
   );
 }
+
