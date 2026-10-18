@@ -469,10 +469,16 @@ Do NOT execute any tools or task plans for this capability inquiry.`,
     /\b(?:camera\s+movement|camera\s+motion|tracking\s+camera|tracking\s+shot|dolly\s+shot|dolly\s+zoom|panning\s+shot|pan\s+across|camera\s+move|cinematic\s+shot)\b/,
   ];
 
+  const isExplicitImageWord =
+    /\b(?:image|photo|photograph|picture|illustration|painting|drawing|wallpaper)\b/i.test(lower);
+  const isExplicitVideoWord =
+    /\b(?:video|clip|animation|footage|v[ií]deo|kurzfilm|spot|animaci[oó]n|commercial\s+video)\b/i.test(lower);
+
   const isVideoIntent =
     !isMediaCapabilityQuery &&
     !isSoftwareVideoTask &&
     !isPlanningOrDiagramTask &&
+    (!isExplicitImageWord || isExplicitVideoWord) &&
     videoPatterns.some((pattern) => pattern.test(lower));
 
   if (isVideoIntent) {
