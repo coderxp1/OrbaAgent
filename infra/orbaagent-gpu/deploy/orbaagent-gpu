@@ -178,7 +178,8 @@ case "${1:-}" in
         docker_compose logs --tail "$lines" || exit $?
         ;;
     build)
-        docker_compose build || exit $?
+        # Narrowly scoped: builds ONLY orbaagent-gpu-worker without building ComfyUI or other services
+        docker_compose build orbaagent-gpu-worker || exit $?
         validate_isolation || exit $?
         ;;
     validate)

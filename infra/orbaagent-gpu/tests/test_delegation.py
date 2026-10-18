@@ -274,6 +274,15 @@ class TestWrapperScript:
         assert "ollama" not in code
         assert "comfyui" not in code
 
+    def test_build_targets_only_worker_container(self, text):
+        """build must target only orbaagent-gpu-worker without building ComfyUI or other services."""
+        build_block = text.split("    build)", 1)[1].split(";;", 1)[0]
+        code = "\n".join(line.split("#", 1)[0] for line in build_block.splitlines())
+        assert "build orbaagent-gpu-worker" in code
+        assert "validate_isolation" in code
+        assert "ollama" not in code
+        assert "comfyui" not in code
+
     def test_uses_a_literal_compose_path(self, text):
         assert 'COMPOSE_FILE="/etc/orbaagent/gpu-worker/compose.yaml"' in text
 
