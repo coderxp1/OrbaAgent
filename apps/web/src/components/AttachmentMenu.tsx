@@ -6,14 +6,15 @@ import {
   Code,
   FileCode,
   FileText,
-  FolderUp,
   HardDrive,
   Image,
   ImagePlus,
+  Mic,
   MoreHorizontal,
   Paperclip,
   Plus,
   Video,
+  Volume2,
 } from "lucide-react";
 import type React from "react";
 import { useEffect, useRef, useState } from "react";
@@ -41,6 +42,7 @@ export function AttachmentMenu({ onAttachFiles, onInsertSnippet }: AttachmentMen
   const folderInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
+  const audioInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -194,6 +196,14 @@ export function AttachmentMenu({ onAttachFiles, onInsertSnippet }: AttachmentMen
         className="hidden"
         onChange={handleFileChange}
       />
+      <input
+        ref={audioInputRef}
+        type="file"
+        accept="audio/*,.mp3,.wav,.m4a,.ogg,.aac,.flac"
+        multiple
+        className="hidden"
+        onChange={handleFileChange}
+      />
 
       {/* Trigger Button */}
       <button
@@ -217,6 +227,15 @@ export function AttachmentMenu({ onAttachFiles, onInsertSnippet }: AttachmentMen
           >
             <Paperclip className="w-4 h-4 text-blue-400" />
             <span>Upload files</span>
+          </button>
+
+          <button
+            onClick={() => audioInputRef.current?.click()}
+            type="button"
+            className="flex items-center gap-2.5 px-3 py-2 text-sm text-zinc-200 hover:text-white hover:bg-[#252529] transition-colors text-left"
+          >
+            <Volume2 className="w-4 h-4 text-amber-400" />
+            <span>Audio / Voice note</span>
           </button>
 
           <button

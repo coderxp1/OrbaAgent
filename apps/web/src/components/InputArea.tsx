@@ -1,7 +1,7 @@
 "use client";
 
-import { FileText, Send, Square, X } from "lucide-react";
-import { type KeyboardEvent, useRef, useState } from "react";
+import { FileText, Mic, MicOff, Send, Square, Volume2, X } from "lucide-react";
+import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { type AttachedFile, AttachmentMenu } from "./AttachmentMenu";
 
 interface InputAreaProps {
@@ -13,12 +13,75 @@ interface InputAreaProps {
 export function InputArea({ onSendMessage, isGenerating, onCancelGeneration }: InputAreaProps) {
   const [text, setText] = useState<string>("");
   const [attachments, setAttachments] = useState<AttachedFile[]>([]);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, []);
+
+  const handleToggleRecord = async () => {
+    if (isRecording) {
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+        mediaRecorderRef.current.stop();
+      }
+      setIsRecording(false);
+      if (timerRef.current) clearInterval(timerRef.current);
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioChunksRef.current = [];
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm")
+        ? "audio/webm"
+        : MediaRecorder.isTypeSupported("audio/mp4")
+          ? "audio/mp4"
+          : "";
+      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+      mediaRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+
+      recorder.onstop = () => {
+        stream.getTracks().forEach((track) => track.stop());
+        const blob = new Blob(audioChunksRef.current, { type: recorder.mimeType || "audio/webm" });
+        const ext = recorder.mimeType.includes("mp4") ? "m4a" : "webm";
+        const file = new File([blob], `voice_note_${Date.now()}.${ext}`, {
+          type: blob.type,
+        });
+        const attached: AttachedFile = {
+          id: `voice_${Date.now()}`,
+          name: file.name,
+          size: file.size,
+          type: file.type,
+          file,
+        };
+        setAttachments((prev) => [...prev, attached]);
+      };
+
+      recorder.start(250);
+      setIsRecording(true);
+      setRecordingSeconds(0);
+      timerRef.current = setInterval(() => {
+        setRecordingSeconds((prev) => prev + 1);
+      }, 1000);
+    } catch {
+      alert("Microphone permission was not granted or audio recording is unavailable.");
+    }
+  };
 
   const handleSend = async () => {
     if ((!text.trim() && attachments.length === 0) || isGenerating) return;
     const content = text;
-    const uploaded = attachments;
     // Upload files if present
     const filesToUpload = attachments.filter((a) => a.file).map((a) => a);
     if (filesToUpload.length > 0) {
@@ -27,14 +90,12 @@ export function InputArea({ onSendMessage, isGenerating, onCancelGeneration }: I
       form.set("bundle", bundle);
       for (const att of filesToUpload) {
         const f = att.file as File;
-        // Preserve relative path when available by renaming the File with path; browsers ignore path but server relies on webkitRelativePath sent by the browser
         form.append("files", f);
       }
       try {
         const res = await fetch("/api/uploads", { method: "POST", body: form });
         if (res.ok) {
           const data = await res.json();
-          const urls: string[] = (data.artifacts || []).map((a: any) => a.url);
           const structured = (data.artifacts || []).map((a: any, idx: number) => ({
             artifactId: a.id,
             name: a.name,
@@ -45,7 +106,6 @@ export function InputArea({ onSendMessage, isGenerating, onCancelGeneration }: I
             file: filesToUpload[idx]?.file,
             previewUrl: (filesToUpload[idx] as any)?.previewUrl || a.url,
           }));
-          // Send structured attachments to /api/chat WITHOUT prepending raw prefix to content
           onSendMessage(content, structured);
           setText("");
           setAttachments([]);
@@ -55,7 +115,7 @@ export function InputArea({ onSendMessage, isGenerating, onCancelGeneration }: I
           return;
         }
       } catch {
-        // If upload fails, send without URLs (agent will lack artifact access)
+        // If upload fails, send without URLs
       }
     }
     onSendMessage(content, undefined);
@@ -97,12 +157,34 @@ export function InputArea({ onSendMessage, isGenerating, onCancelGeneration }: I
   return (
     <div className="border-t border-zinc-800 bg-zinc-950 p-4">
       <div className="mx-auto flex max-w-4xl flex-col gap-2">
+        {/* Live Voice Recording Indicator */}
+        {isRecording && (
+          <div className="flex items-center justify-between px-3.5 py-2 rounded-xl bg-rose-950/70 border border-rose-800/80 text-rose-200 text-xs shadow-lg animate-in fade-in duration-200">
+            <div className="flex items-center gap-2.5">
+              <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping" />
+              <span className="font-semibold text-rose-100">Recording voice note...</span>
+              <span className="font-mono text-rose-300 bg-rose-900/60 px-2 py-0.5 rounded-md text-[11px]">
+                {Math.floor(recordingSeconds / 60)}:{(recordingSeconds % 60).toString().padStart(2, "0")}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={handleToggleRecord}
+              className="text-xs font-semibold px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-500 text-white transition-colors cursor-pointer"
+            >
+              Done
+            </button>
+          </div>
+        )}
+
         {/* Attachment Previews */}
         {attachments.length > 0 && (
           <div className="flex flex-wrap gap-2.5 px-1 pb-1">
             {attachments.map((att) => {
               const isImg =
                 att.type?.startsWith("image/") || /\.(png|jpe?g|webp|gif|svg)$/i.test(att.name);
+              const isAudio =
+                att.type?.startsWith("audio/") || /\.(mp3|wav|m4a|ogg|webm|flac)$/i.test(att.name);
               const previewSrc =
                 att.previewUrl || (att.file ? URL.createObjectURL(att.file) : null);
 
@@ -114,6 +196,10 @@ export function InputArea({ onSendMessage, isGenerating, onCancelGeneration }: I
                   {isImg && previewSrc ? (
                     <div className="relative w-11 h-11 rounded-lg overflow-hidden bg-black/40 border border-zinc-700/40 shrink-0">
                       <img src={previewSrc} alt={att.name} className="w-full h-full object-cover" />
+                    </div>
+                  ) : isAudio ? (
+                    <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-zinc-900 border border-amber-600/50 text-amber-400 shrink-0">
+                      <Volume2 className="w-4 h-4" />
                     </div>
                   ) : (
                     <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-zinc-900 border border-zinc-700/50 text-blue-400 shrink-0">
@@ -166,10 +252,24 @@ export function InputArea({ onSendMessage, isGenerating, onCancelGeneration }: I
             value={text}
             onChange={handleTextChange}
             onKeyDown={handleKeyDown}
-            placeholder="Ask OrbaAgent anything or issue a goal..."
+            placeholder={isRecording ? "Recording voice note..." : "Ask OrbaAgent anything or issue a goal..."}
             rows={1}
             className="max-h-48 min-h-[40px] flex-1 resize-none bg-transparent px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 outline-none"
           />
+
+          {/* Microphone Recording Button */}
+          <button
+            onClick={handleToggleRecord}
+            type="button"
+            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-all mr-1.5 ${
+              isRecording
+                ? "bg-rose-600 text-white animate-pulse shadow-lg shadow-rose-950"
+                : "text-zinc-400 hover:text-white hover:bg-zinc-800"
+            }`}
+            title={isRecording ? "Stop recording voice note" : "Record voice note"}
+          >
+            {isRecording ? <Square className="h-4 w-4 fill-white" /> : <Mic className="h-4 w-4" />}
+          </button>
 
           {isGenerating ? (
             <button
@@ -199,7 +299,7 @@ export function InputArea({ onSendMessage, isGenerating, onCancelGeneration }: I
             <kbd className="rounded bg-zinc-800 px-1 text-zinc-400">Shift + Enter</kbd> for line
             break
           </span>
-          <span>OrbaAgent Phase 1 — Powered by Model Gateway</span>
+          <span>OrbaAgent Phase 1 & 2 — Powered by Model Gateway</span>
         </div>
       </div>
     </div>

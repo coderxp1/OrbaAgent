@@ -262,18 +262,33 @@ export async function finalizeVideoWithAudio(options: FinalizeVideoOptions): Pro
   // 4. Construct filter_complex
   const filterSteps: string[] = [];
 
-  // Audio mix & master
+  // Smooth seamless video motion looping:
+  // When target duration is > 6s, construct a smooth ping-pong (forward-reverse) motion loop
+  // so the video displays continuous, uninterrupted motion without jarring cut jumps.
+  let currentVideoStream = "0:v";
+  if (duration > 6) {
+    filterSteps.push(
+      "[0:v]split=2[v_fwd][v_rev_in]",
+      "[v_rev_in]reverse[v_rev]",
+      "[v_fwd][v_rev]concat=n=2:v=1:a=0[v_loop]",
+    );
+    currentVideoStream = "[v_loop]";
+  }
+
+  // Audio mix & master:
+  // Normalize integrated loudness to broadcast standard -16 LUFS (Apple/YouTube/mobile standard)
+  // and True Peak to -1.5 dBTP with clean fade-in and fade-out.
   if (audioInputCount > 1) {
     const audioTags = Array.from({ length: audioInputCount }, (_, i) => `[${i + 1}:a]`).join("");
     filterSteps.push(
       `${audioTags}amix=inputs=${audioInputCount}:duration=first:dropout_transition=2[amixed]`,
     );
     filterSteps.push(
-      `[amixed]afade=t=in:ss=0:d=0.8,afade=t=out:st=${fadeOutStart}:d=${fadeOutDuration},alimiter=limit=0.92:attack=5:release=50[aout]`,
+      `[amixed]volume=2.2,loudnorm=I=-16:TP=-1.5:LRA=11,afade=t=in:ss=0:d=0.6,afade=t=out:st=${fadeOutStart}:d=${fadeOutDuration}[aout]`,
     );
   } else if (audioInputCount === 1) {
     filterSteps.push(
-      `[1:a]afade=t=in:ss=0:d=0.8,afade=t=out:st=${fadeOutStart}:d=${fadeOutDuration},alimiter=limit=0.92:attack=5:release=50[aout]`,
+      `[1:a]volume=2.2,loudnorm=I=-16:TP=-1.5:LRA=11,afade=t=in:ss=0:d=0.6,afade=t=out:st=${fadeOutStart}:d=${fadeOutDuration}[aout]`,
     );
   }
 
@@ -283,7 +298,7 @@ export async function finalizeVideoWithAudio(options: FinalizeVideoOptions): Pro
     filterSteps.push(`[${logoInputIndex}:v]split=2[wm_in][brand_in]`);
     filterSteps.push("[wm_in]scale=90:-1,format=rgba,colorchannelmixer=aa=0.85[wm]");
     filterSteps.push(
-      `[0:v][wm]overlay=main_w-overlay_w-16:16:shortest=1:enable='between(t,0,${outroStart})'[vmid]`,
+      `${currentVideoStream}[wm]overlay=main_w-overlay_w-16:16:shortest=1:enable='between(t,0,${outroStart})'[vmid]`,
     );
     filterSteps.push(
       `[brand_in]scale=220:-1,format=rgba,fade=t=in:st=${outroStart}:d=0.6:alpha=1[brand]`,
@@ -291,15 +306,11 @@ export async function finalizeVideoWithAudio(options: FinalizeVideoOptions): Pro
     filterSteps.push(
       `[vmid][brand]overlay=(main_w-overlay_w)/2:(main_h-overlay_h)/2:shortest=1:enable='gte(t,${outroStart})'[vout]`,
     );
+    currentVideoStream = "[vout]";
   }
 
   inputs.push("-filter_complex", filterSteps.join(";"));
-
-  if (logoPath && logoInputIndex > 0) {
-    inputs.push("-map", "[vout]");
-  } else {
-    inputs.push("-map", "0:v");
-  }
+  inputs.push("-map", currentVideoStream);
 
   inputs.push(
     "-map",

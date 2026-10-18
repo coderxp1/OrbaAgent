@@ -1,4 +1,12 @@
-import type { ToolDefinition, ToolExecutionResult, ToolMetadata } from "@orbaagent/shared";
+import { execFile } from "node:child_process";
+import * as path from "node:path";
+import { promisify } from "node:util";
+import {
+  type ToolDefinition,
+  type ToolExecutionResult,
+  type ToolMetadata,
+  resolveWithinBase,
+} from "@orbaagent/shared";
 import type { ITool, ToolExecutionContext } from "./base.js";
 import { verifyDeliveredArtifact } from "./mediaVerification.js";
 import {
@@ -8,6 +16,8 @@ import {
   isLazyLoadAllowed,
   unavailableMediaResult,
 } from "./mediaWorkerConfig.js";
+
+const execFileAsync = promisify(execFile);
 
 export class MediaImageGenerateTool implements ITool {
   public readonly definition: ToolDefinition = {
@@ -281,6 +291,57 @@ export class MediaImageGenerateTool implements ITool {
         };
       }
 
+      let finalArtifactUrl = artifactUrl;
+      let finalVerification = verification;
+
+      // High-resolution workflow: if caller explicitly requests 4K or ultra-high resolution,
+      // apply high-fidelity Lanczos 2x upscaling with subtle texture unsharp enhancement.
+      const wantsHighRes = /\b(?:4k|uhd|3840|ultra\s+high\s+res|upscale|high\s+resolution\s+4k)\b/i.test(prompt);
+      if (wantsHighRes && verification.verified && verification.width && verification.width <= 1024) {
+        try {
+          const prefix = "/api/artifacts/";
+          if (artifactUrl.startsWith(prefix)) {
+            const rawPath = artifactUrl.slice(prefix.length);
+            const segments = rawPath.split("/").map((s: string) => decodeURIComponent(s));
+            const baseDir = process.env.ORBA_UPLOAD_DIR || path.join(process.cwd(), ".uploads");
+            const localPath = resolveWithinBase(baseDir, segments);
+            const ext = path.extname(localPath);
+            const dir = path.dirname(localPath);
+            const basename = path.basename(localPath, ext);
+            const upscaledPath = path.join(dir, `${basename}_2k${ext}`);
+
+            await execFileAsync("ffmpeg", [
+              "-y",
+              "-i",
+              localPath,
+              "-vf",
+              "scale=iw*2:ih*2:flags=lanczos,unsharp=5:5:0.6:3:3:0.3",
+              "-compression_level",
+              "3",
+              upscaledPath,
+            ]);
+
+            const upscaledSegments = [...segments.slice(0, -1), `${basename}_2k${ext}`];
+            const upscaledUrl = `/api/artifacts/${upscaledSegments.map((s: string) => encodeURIComponent(s)).join("/")}`;
+            const recheck = await verifyDeliveredArtifact(upscaledUrl, "image/png");
+            if (recheck.verified) {
+              finalArtifactUrl = upscaledUrl;
+              finalVerification = recheck;
+              console.log(
+                `[MEDIA IMAGE GENERATE] Applied high-resolution Lanczos upscaling: ${finalVerification.width}x${finalVerification.height} at ${finalArtifactUrl}`,
+              );
+            }
+          }
+        } catch (upscaleErr) {
+          console.warn("[MEDIA IMAGE GENERATE] High-res upscaling skipped, keeping native output:", upscaleErr);
+        }
+      }
+
+      const actualDimensions =
+        finalVerification.width && finalVerification.height
+          ? `${finalVerification.width}x${finalVerification.height}`
+          : `${currentArgs.width || 1024}x${currentArgs.height || 1024}`;
+
       return {
         toolCallId,
         name: this.definition.name,
@@ -288,15 +349,15 @@ export class MediaImageGenerateTool implements ITool {
         output: JSON.stringify(
           {
             status: "COMPLETED",
-            artifactUrl,
-            markdown: artifactUrl ? `![Generated Image: ${prompt}](${artifactUrl})` : undefined,
-            dimensions: `${currentArgs.width || 1024}x${currentArgs.height || 1024}`,
+            artifactUrl: finalArtifactUrl,
+            markdown: finalArtifactUrl ? `![Generated Image: ${prompt}](${finalArtifactUrl})` : undefined,
+            dimensions: actualDimensions,
             delivered: result.delivered !== false,
           },
           null,
           2,
         ),
-        metadata: { ...result, verification },
+        metadata: { ...result, verification: finalVerification, dimensions: actualDimensions },
         executionTimeMs: durationMs,
       };
     } catch (err: any) {

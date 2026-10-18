@@ -10,6 +10,8 @@ export interface ArtifactVerificationResult {
   sha256?: string;
   sha256Match?: boolean;
   contentType?: string;
+  width?: number;
+  height?: number;
   error?: string;
 }
 
@@ -109,10 +111,13 @@ export async function verifyDeliveredArtifact(
     try {
       const st = await fs.stat(localPath);
       if (st.isFile() && st.size > 0) {
+        let probedWidth: number | undefined;
+        let probedHeight: number | undefined;
+
         const fileHandle = await fs.open(localPath, "r");
         try {
-          const header = Buffer.alloc(16);
-          await fileHandle.read(header, 0, 16, 0);
+          const header = Buffer.alloc(32);
+          await fileHandle.read(header, 0, 32, 0);
           const magicValid = verifyMediaMagicBytes(header, expectedType);
           if (!magicValid) {
             return {
@@ -121,6 +126,10 @@ export async function verifyDeliveredArtifact(
               sizeBytes: st.size,
               error: `Invalid magic bytes for expected type ${expectedType}`,
             };
+          }
+          if (expectedType === "image/png" && header.length >= 24) {
+            probedWidth = header.readUInt32BE(16);
+            probedHeight = header.readUInt32BE(20);
           }
         } finally {
           await fileHandle.close();
@@ -140,6 +149,8 @@ export async function verifyDeliveredArtifact(
               sizeBytes: st.size,
               sha256: actualSha256,
               sha256Match: false,
+              width: probedWidth,
+              height: probedHeight,
               error: `SHA-256 integrity mismatch: expected ${expectedSha256}, got ${actualSha256}`,
             };
           }
@@ -152,6 +163,8 @@ export async function verifyDeliveredArtifact(
           sha256: actualSha256 || expectedSha256,
           sha256Match,
           contentType: expectedType,
+          width: probedWidth,
+          height: probedHeight,
         };
       }
     } catch {
@@ -200,6 +213,13 @@ export async function verifyDeliveredArtifact(
       };
     }
 
+    let probedWidth: number | undefined;
+    let probedHeight: number | undefined;
+    if (expectedType === "image/png" && buf.length >= 24) {
+      probedWidth = buf.readUInt32BE(16);
+      probedHeight = buf.readUInt32BE(20);
+    }
+
     let sha256Match = true;
     let actualSha256: string | undefined;
     if (expectedSha256) {
@@ -212,6 +232,8 @@ export async function verifyDeliveredArtifact(
           sizeBytes: buf.length,
           sha256: actualSha256,
           sha256Match: false,
+          width: probedWidth,
+          height: probedHeight,
           error: `SHA-256 mismatch: expected ${expectedSha256}, got ${actualSha256}`,
         };
       }
@@ -224,6 +246,8 @@ export async function verifyDeliveredArtifact(
       sha256: actualSha256 || expectedSha256,
       sha256Match,
       contentType: contentType || expectedType,
+      width: probedWidth,
+      height: probedHeight,
     };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);

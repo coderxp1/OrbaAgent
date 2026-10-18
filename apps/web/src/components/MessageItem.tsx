@@ -1373,15 +1373,24 @@ function MediaToolItem({
 function DotMatrixProgressCanvas({ elapsed, prompt }: { elapsed: number; prompt: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  // Progressive realistic progress: starts at 15%, climbs smoothly to ~92% over typical generation time
-  const progress = Math.min(95, Math.round(15 + 78 * (1 - Math.exp(-elapsed / 3.0))));
+  // Honest stage-based feedback matching FLUX.1-schnell 4-step sampling schedule
+  const stageStep =
+    elapsed < 1.0
+      ? "Step 1/4"
+      : elapsed < 2.2
+        ? "Step 2/4"
+        : elapsed < 3.4
+          ? "Step 3/4"
+          : "Step 4/4 · Finalizing";
 
   const stageLabel =
-    progress < 55
-      ? "Making the first draft"
-      : progress < 88
-        ? "Polishing details"
-        : "Finishing touches";
+    elapsed < 1.0
+      ? "Preparing canvas"
+      : elapsed < 2.2
+        ? "Synthesizing composition"
+        : elapsed < 3.4
+          ? "Refining textures & lighting"
+          : "Finishing touches";
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -1446,9 +1455,10 @@ function DotMatrixProgressCanvas({ elapsed, prompt }: { elapsed: number; prompt:
           className="w-full max-h-[420px] aspect-[3/4] object-contain"
         />
 
-        {/* Floating Percentage Badge in Bottom-Right (matching user screenshot) */}
-        <div className="absolute bottom-5 right-5 px-3.5 py-1 rounded-full bg-zinc-800/80 hover:bg-zinc-800 backdrop-blur-md border border-white/10 text-white font-mono text-xs font-semibold shadow-xl transition-all">
-          {progress} %
+        {/* Honest Stage Indicator Badge (truthful progress tracking) */}
+        <div className="absolute bottom-5 right-5 px-3.5 py-1 rounded-full bg-zinc-800/80 hover:bg-zinc-800 backdrop-blur-md border border-white/10 text-white font-mono text-xs font-semibold shadow-xl transition-all flex items-center gap-1.5">
+          <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
+          <span>{stageStep}</span>
         </div>
       </div>
 

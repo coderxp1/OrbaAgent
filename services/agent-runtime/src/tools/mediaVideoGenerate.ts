@@ -512,8 +512,8 @@ export class MediaVideoGenerateTool implements ITool {
 
       const isSilent = isExplicitlySilent(prompt, args);
 
-      // Generate the base visual clip (3s for 10s video, 5s for other long videos, or exact requested duration)
-      const baseDuration = requestedDuration === 10 ? 3 : (requestedDuration > 8 ? 5 : requestedDuration);
+      // Generate a rich 5s base visual clip for long videos (81 frames @ 16fps) to ensure continuous, coherent motion
+      const baseDuration = Math.min(requestedDuration, 5);
       console.log(
         `[MEDIA VIDEO GENERATE] Generating visual clip (${baseDuration}s base, target: ${requestedDuration}s, silent: ${isSilent})...`,
       );
