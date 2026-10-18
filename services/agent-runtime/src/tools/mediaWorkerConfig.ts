@@ -159,4 +159,4 @@ export function unavailableMediaResult(
  * model weights into GPU memory. FLUX schnell loads in ~20-30s on a 3090;
  * Wan2.1-1.3B takes ~40-60s. 300s provides ample margin.
  */
-export const FIRST_REQUEST_TIMEOUT_MS = 300_000;
+export const FIRST_REQUEST_TIMEOUT_MS = 600_000;

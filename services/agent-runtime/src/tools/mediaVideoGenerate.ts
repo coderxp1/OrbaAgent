@@ -120,7 +120,7 @@ export class MediaVideoGenerateTool implements ITool {
       image_url?: string;
     },
   ): Promise<ClipGenerationResult> {
-    const maxAttempts = 10;
+    const maxAttempts = 60;
     let attempts = 0;
     let jobRes: Response | null = null;
 
@@ -184,7 +184,7 @@ export class MediaVideoGenerateTool implements ITool {
           } catch (hErr) {
             console.warn("[MEDIA RECOVERY] Health inspection failed during busy retry:", hErr);
           }
-          await new Promise((r) => setTimeout(r, 4000));
+          await new Promise((r) => setTimeout(r, 5000));
           continue;
         }
 
