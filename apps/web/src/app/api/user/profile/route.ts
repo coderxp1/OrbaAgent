@@ -1,6 +1,7 @@
-import { type NextRequest, NextResponse } from "next/server";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import { resolveRequestIdentity } from "@/lib/auth/guard";
+import { type NextRequest, NextResponse } from "next/server";
 
 interface UserProfile {
   id: string;
@@ -24,13 +25,13 @@ const PROFILE_FILE_PATH = path.join(
   "user_profile.json",
 );
 
-async function getStoredProfile(): Promise<UserProfile> {
+async function getStoredProfile(userId: string): Promise<UserProfile> {
   try {
     const raw = await fs.readFile(PROFILE_FILE_PATH, "utf-8");
     return JSON.parse(raw);
   } catch {
     const defaultProfile: UserProfile = {
-      id: process.env.ORBA_USER_ID || "authenticated-user",
+      id: userId,
       email: process.env.ORBA_USER_EMAIL || "hartmann@orbaagent.dev",
       displayName: "Hartmann",
       role: "owner",
@@ -48,21 +49,30 @@ async function getStoredProfile(): Promise<UserProfile> {
   }
 }
 
-export async function GET() {
-  const profile = await getStoredProfile();
+export async function GET(req: Request) {
+  const { identity } = await resolveRequestIdentity(req);
+  const profile = await getStoredProfile(identity.userId);
   return NextResponse.json(profile);
 }
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const current = await getStoredProfile();
+    const { identity } = await resolveRequestIdentity(req);
+    const current = await getStoredProfile(identity.userId);
 
     const updated: UserProfile = {
       ...current,
-      displayName: typeof body.displayName === "string" && body.displayName.trim() ? body.displayName.trim() : current.displayName,
-      email: typeof body.email === "string" && body.email.trim() ? body.email.trim() : current.email,
-      workspaceName: typeof body.workspaceName === "string" && body.workspaceName.trim() ? body.workspaceName.trim() : current.workspaceName,
+      displayName:
+        typeof body.displayName === "string" && body.displayName.trim()
+          ? body.displayName.trim()
+          : current.displayName,
+      email:
+        typeof body.email === "string" && body.email.trim() ? body.email.trim() : current.email,
+      workspaceName:
+        typeof body.workspaceName === "string" && body.workspaceName.trim()
+          ? body.workspaceName.trim()
+          : current.workspaceName,
       preferences: {
         ...current.preferences,
         ...(body.preferences || {}),

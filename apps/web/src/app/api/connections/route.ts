@@ -1,9 +1,11 @@
+import { resolveRequestIdentity } from "@/lib/auth/guard";
 import { IntegrationsManager } from "@orbaagent/agent-runtime";
 import type { IntegrationStatus } from "@orbaagent/shared";
 import { cookies } from "next/headers";
 
-export async function GET() {
-  const verifiedUserId = process.env.ORBA_USER_ID || "authenticated-user";
+export async function GET(req: Request) {
+  const { identity } = await resolveRequestIdentity(req);
+  const verifiedUserId = identity.userId;
   const manager = IntegrationsManager.getInstance();
 
   // Check if session has GitHub OAuth token cookie
@@ -39,7 +41,8 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const verifiedUserId = process.env.ORBA_USER_ID || "authenticated-user";
+    const { identity } = await resolveRequestIdentity(request);
+    const verifiedUserId = identity.userId;
     const body = (await request.json()) as {
       status: IntegrationStatus;
       token?: string;

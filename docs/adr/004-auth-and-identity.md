@@ -184,3 +184,24 @@ The deployed environment holds no credentials, so the derived mode is
 `permissive` and the current single-tenant behaviour is preserved. Activating
 the boundary requires provisioning `ORBA_API_KEYS` (or sessions) in the
 deployment, which is an operational change that has not been made.
+
+**Increment 3 (landed): every remaining call site resolves its identity.**
+The routes that still faked a "verified" user - `/api/connections`,
+`/api/connections/verify`, `/api/user/profile` and the GitHub connect and
+disconnect callbacks - now resolve the caller through the same seam, so no
+route can name a tenant or a user that the server did not resolve. The web
+client no longer sends `tenantId`/`userId` in the request trace: the server is
+the only authority for tenancy, and a client-supplied value is not needed and
+must not be trusted.
+
+Remaining known gaps in the boundary, tracked in ADR-004:
+
+- The media ingest route still writes into the deployment workspace, so an
+  artifact generated for one tenant would be ingested for another. The worker
+  already accepts a workspace in its ingest payload, so the fix is to thread
+  the caller's tenant through the generation job and to have the ingest route
+  accept exactly that tenant.
+- The credential store is still the environment-backed one; Better Auth with
+  Drizzle remains the target.
+- Enforcement is implemented and tested but not yet activated in production,
+  because the deployed environment holds no credentials.

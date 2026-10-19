@@ -102,7 +102,9 @@ export function useAgentChat() {
 
               let imgUrl: string | null = null;
               if (att.url) {
-                imgUrl = att.url.startsWith("http") ? att.url : `${window.location.origin}${att.url}`;
+                imgUrl = att.url.startsWith("http")
+                  ? att.url
+                  : `${window.location.origin}${att.url}`;
               } else if (att.file && att.file.size < 500 * 1024) {
                 // Only fallback to small data URL if not yet uploaded and < 500KB
                 try {
@@ -152,8 +154,6 @@ export function useAgentChat() {
                 : undefined,
             trace: {
               traceId,
-              tenantId: "default-tenant",
-              userId: "default-user",
               conversationId: "default-conv",
               agentRunId: `run_${Date.now()}`,
             },

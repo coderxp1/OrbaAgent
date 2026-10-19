@@ -1,10 +1,12 @@
+import { resolveRequestIdentity } from "@/lib/auth/guard";
 import { IntegrationsManager } from "@orbaagent/agent-runtime";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
-export async function POST() {
+export async function POST(req: Request) {
   try {
-    const verifiedUserId = process.env.ORBA_USER_ID || "authenticated-user";
+    const { identity } = await resolveRequestIdentity(req);
+    const verifiedUserId = identity.userId;
     const manager = IntegrationsManager.getInstance();
 
     manager.setIntegrationStatus(verifiedUserId, {
@@ -27,7 +29,7 @@ export async function POST() {
 
 export async function GET(request: Request) {
   // Support GET redirect disconnect for convenience
-  await POST();
+  await POST(request);
   const url = new URL(request.url);
   const redirect = url.searchParams.get("redirect") || "/app";
   return NextResponse.redirect(new URL(redirect, url.origin));

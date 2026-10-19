@@ -1,4 +1,5 @@
-﻿import { IntegrationsManager } from "@orbaagent/agent-runtime";
+import { resolveRequestIdentity } from "@/lib/auth/guard";
+import { IntegrationsManager } from "@orbaagent/agent-runtime";
 import { NextResponse } from "next/server";
 
 export async function handleGitHubCallback(request: Request) {
@@ -116,7 +117,8 @@ export async function handleGitHubCallback(request: Request) {
     }
 
     // 3. Register connected status with IntegrationsManager
-    const verifiedUserId = process.env.ORBA_USER_ID || "authenticated-user";
+    const { identity } = await resolveRequestIdentity(request);
+    const verifiedUserId = identity.userId;
     const manager = IntegrationsManager.getInstance();
     manager.setIntegrationStatus(verifiedUserId, {
       name: "github",

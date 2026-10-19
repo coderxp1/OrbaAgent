@@ -1,10 +1,12 @@
-import { type NextRequest, NextResponse } from "next/server";
+import { resolveRequestIdentity } from "@/lib/auth/guard";
 import { IntegrationsManager } from "@orbaagent/agent-runtime";
+import { type NextRequest, NextResponse } from "next/server";
 
 export async function POST(req: NextRequest) {
   try {
     const { provider } = await req.json();
-    const verifiedUserId = process.env.ORBA_USER_ID || "authenticated-user";
+    const { identity } = await resolveRequestIdentity(req);
+    const verifiedUserId = identity.userId;
     const manager = IntegrationsManager.getInstance();
     const current = manager.getIntegrations(verifiedUserId).find((i) => i.name === provider);
 
@@ -39,13 +41,12 @@ export async function POST(req: NextRequest) {
           accountName: ghData.login,
           message: `Authenticated as ${ghData.login} (${ghData.public_repos} public repos). Read/write verified.`,
         });
-      } else {
-        return NextResponse.json({
-          success: false,
-          status: "AUTH_FAILED",
-          message: `GitHub verification failed: HTTP ${ghRes.status}`,
-        });
       }
+      return NextResponse.json({
+        success: false,
+        status: "AUTH_FAILED",
+        message: `GitHub verification failed: HTTP ${ghRes.status}`,
+      });
     }
 
     // Google Services (Calendar, Gmail, Google Drive)
@@ -103,7 +104,8 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({
           success: false,
           status: "CONFIG_REQUIRED",
-          message: "Linear API key required (LINEAR_API_KEY). Please supply token in workspace credentials.",
+          message:
+            "Linear API key required (LINEAR_API_KEY). Please supply token in workspace credentials.",
         });
       }
       const lRes = await fetch("https://api.linear.app/graphql", {
@@ -157,4 +159,3 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: false, error: msg }, { status: 500 });
   }
 }
-
