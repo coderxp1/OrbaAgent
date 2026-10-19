@@ -265,4 +265,82 @@ describe("activation acceptance", () => {
     );
     expect(res.status).toBe(401);
   });
+
+  it("rejects a cookie-authenticated state-changing request from an untrusted origin", async () => {
+    const token = signSessionToken(SECRET, {
+      tenantId: TENANT,
+      userId: "u-activation",
+      expiresAt: Math.floor(Date.now() / 1000) + 3600,
+    });
+    cookieJar.set("orba_session", token as string);
+
+    const form = new FormData();
+    form.append("files", new File([new Uint8Array([1])], "a.txt", { type: "text/plain" }));
+    const res = await uploadPost(
+      new Request("https://orbaagent.dev/api/uploads", {
+        method: "POST",
+        body: form,
+        headers: { origin: "https://evil.example" },
+      }),
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("accepts a cookie-authenticated state-changing request from a trusted origin", async () => {
+    const token = signSessionToken(SECRET, {
+      tenantId: TENANT,
+      userId: "u-activation",
+      expiresAt: Math.floor(Date.now() / 1000) + 3600,
+    });
+    cookieJar.set("orba_session", token as string);
+
+    const form = new FormData();
+    form.append("files", new File([new Uint8Array([1])], "a.txt", { type: "text/plain" }));
+    const res = await uploadPost(
+      new Request("https://orbaagent.dev/api/uploads", {
+        method: "POST",
+        body: form,
+        headers: { origin: "https://orbaagent.dev" },
+      }),
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it("issues the __Host- prefixed cookie in production", async () => {
+    const env = process.env as Record<string, string | undefined>;
+    const savedNodeEnv = env.NODE_ENV;
+    env.NODE_ENV = "production";
+    try {
+      const exchange = await sessionPost(
+        new Request("https://orbaagent.dev/api/auth/session", {
+          method: "POST",
+          body: JSON.stringify({ credential: API_KEY }),
+          headers: { "content-type": "application/json" },
+        }),
+      );
+      const setCookie = exchange.headers.get("set-cookie") || "";
+      expect(setCookie).toContain("__Host-orba_session=");
+      expect(setCookie).toContain("Secure");
+    } finally {
+      if (savedNodeEnv === undefined) delete env.NODE_ENV;
+      else env.NODE_ENV = savedNodeEnv;
+    }
+  });
+
+  it("rejects a GitHub OAuth callback whose state does not match the browser", async () => {
+    const token = signSessionToken(SECRET, {
+      tenantId: TENANT,
+      userId: "u-activation",
+      expiresAt: Math.floor(Date.now() / 1000) + 3600,
+    });
+    cookieJar.set("orba_session", token as string);
+    cookieJar.set("orba_github_state", "the-expected-state");
+
+    const res = await githubCallbackGet(
+      new Request(
+        "https://orbaagent.dev/api/auth/github/callback?code=abc&state=a-different-state",
+      ) as never,
+    );
+    expect(res.status).toBe(400);
+  });
 });

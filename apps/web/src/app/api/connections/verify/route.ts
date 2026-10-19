@@ -6,7 +6,7 @@ export async function POST(req: NextRequest) {
   try {
     const { provider } = await req.json();
     const { identity, mode } = await resolveRequestIdentity(req);
-    const unauthenticated = authorize(identity, mode);
+    const unauthenticated = authorize(identity, mode, req);
     if (unauthenticated) return unauthenticated;
     const verifiedUserId = identity.userId;
     const manager = IntegrationsManager.getInstance();

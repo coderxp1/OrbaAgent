@@ -1,6 +1,8 @@
 "use client";
 
-import { Bot, Cpu, Trash2 } from "lucide-react";
+import { Bot, Cpu, LogOut, Trash2 } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
 
 interface HeaderProps {
   activeTraceId: string | null;
@@ -8,6 +10,23 @@ interface HeaderProps {
 }
 
 export function Header({ activeTraceId, onClearChat }: HeaderProps) {
+  const router = useRouter();
+  const [signingOut, setSigningOut] = useState(false);
+
+  async function signOut() {
+    if (signingOut) return;
+    setSigningOut(true);
+    try {
+      // The server clears the session cookie; the browser then holds no
+      // credential at all.
+      await fetch("/api/auth/session", { method: "DELETE" });
+    } finally {
+      setSigningOut(false);
+      router.replace("/login");
+      router.refresh();
+    }
+  }
+
   return (
     <header className="flex flex-wrap items-center justify-between gap-4 border-b border-zinc-800 bg-zinc-950 px-6 py-4 text-zinc-100">
       <div className="flex items-center gap-3">
@@ -58,6 +77,17 @@ export function Header({ activeTraceId, onClearChat }: HeaderProps) {
         >
           <Trash2 className="h-3.5 w-3.5" />
           Clear
+        </button>
+
+        <button
+          onClick={signOut}
+          type="button"
+          disabled={signingOut}
+          className="flex items-center gap-1.5 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-400 hover:border-zinc-700 hover:text-zinc-200 transition-colors disabled:opacity-50"
+          title="Sign out and clear the session cookie"
+        >
+          <LogOut className="h-3.5 w-3.5" />
+          Sign out
         </button>
       </div>
     </header>

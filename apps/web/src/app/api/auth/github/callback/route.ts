@@ -9,7 +9,7 @@ export async function handleGitHubCallback(request: Request) {
   // the caller, so it is a protected endpoint like the others: in required
   // mode only an authenticated caller may complete a flow.
   const { identity, mode } = await resolveRequestIdentity(request);
-  const unauthenticated = authorize(identity, mode);
+  const unauthenticated = authorize(identity, mode, request);
   if (unauthenticated) return unauthenticated;
 
   const { searchParams } = new URL(request.url);

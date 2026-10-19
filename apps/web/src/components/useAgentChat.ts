@@ -161,6 +161,11 @@ export function useAgentChat() {
         });
 
         if (!response.ok) {
+          if (response.status === 401) {
+            // The session is missing or expired: send the operator to the
+            // sign-in screen rather than showing a broken conversation.
+            window.location.assign("/login");
+          }
           const errData = await response.json().catch(() => ({}));
           const details = errData?.error ? `: ${errData.error}` : "";
           throw new Error(`HTTP ${response.status}${details}`);

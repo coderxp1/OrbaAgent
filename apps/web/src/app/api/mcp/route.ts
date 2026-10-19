@@ -67,7 +67,7 @@ export async function GET(req: NextRequest) {
   // MCP exposes the tool surface and can invoke generation tools, so it is a
   // protected endpoint like the others.
   const { identity, mode } = await resolveRequestIdentity(req);
-  const unauthenticated = authorize(identity, mode);
+  const unauthenticated = authorize(identity, mode, req);
   if (unauthenticated) return unauthenticated;
 
   // Return MCP Discovery & Server Metadata
@@ -97,7 +97,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const { identity, mode } = await resolveRequestIdentity(req);
-    const unauthenticated = authorize(identity, mode);
+    const unauthenticated = authorize(identity, mode, req);
     if (unauthenticated) return unauthenticated;
 
     const body = (await req.json()) as JsonRpcRequest;

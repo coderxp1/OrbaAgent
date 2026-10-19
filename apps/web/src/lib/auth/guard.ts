@@ -4,6 +4,7 @@ import {
   type CookieReader,
   type CredentialStore,
   type HeaderReader,
+  type SessionIdentity,
   canAccessTenant,
   deploymentIdentityFromEnv,
   readAuthMode,
@@ -14,6 +15,7 @@ import {
 } from "@orbaagent/shared";
 import { cookies } from "next/headers";
 import { getCredentialStore } from "./credentials";
+import { isTrustedOrigin, sessionCookieNames } from "./session-cookie";
 
 /**
  * Request-scoped identity resolution and route authorization.
@@ -49,8 +51,15 @@ export async function resolveIdentityFromSources(
   const presentedApiKey = readPresentedApiKey(sources.headers);
   const apiKey = presentedApiKey ? await store.findApiKey(presentedApiKey) : null;
 
-  const presentedSession = readPresentedSession(sources.cookies);
-  const session = presentedSession ? await store.findSession(presentedSession) : null;
+  // The session cookie may be presented under any of the accepted names
+  // (the __Host- prefixed one in production, the plain one elsewhere).
+  let session: SessionIdentity | null = null;
+  for (const name of sessionCookieNames(env)) {
+    const presented = readPresentedSession(sources.cookies, name);
+    if (!presented) continue;
+    session = await store.findSession(presented);
+    if (session) break;
+  }
 
   const identity = resolveCallerIdentity({
     session,
@@ -110,11 +119,24 @@ export function forbiddenResponse(): Response {
 /**
  * Apply the deployment's authentication policy.
  *
+ * When the caller was authenticated by a session cookie, a state-changing
+ * request must also come from a trusted origin. A request authenticated by an
+ * API key is not CSRF-able - the browser never attaches an Authorization
+ * header on its own - so the origin check does not apply to it.
+ *
  * @returns `null` when the request may proceed, otherwise the rejection.
  */
-export function authorize(identity: CallerIdentity, mode: AuthMode): Response | null {
+export function authorize(
+  identity: CallerIdentity,
+  mode: AuthMode,
+  request?: Request,
+  env: Record<string, string | undefined> = process.env,
+): Response | null {
   if (mode === "required" && !identity.authenticated) {
     return unauthorizedResponse();
+  }
+  if (request && identity.source === "session" && !isTrustedOrigin(request, env)) {
+    return forbiddenResponse();
   }
   return null;
 }

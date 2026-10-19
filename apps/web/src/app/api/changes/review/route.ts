@@ -5,7 +5,7 @@ import { NextResponse } from "next/server";
 export async function GET(request: Request) {
   try {
     const { identity, mode } = await resolveRequestIdentity(request);
-    const unauthenticated = authorize(identity, mode);
+    const unauthenticated = authorize(identity, mode, request);
     if (unauthenticated) return unauthenticated;
     const { searchParams } = new URL(request.url);
     const agentRunId = searchParams.get("agentRunId") || undefined;
@@ -21,7 +21,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const { identity, mode } = await resolveRequestIdentity(request);
-    const unauthenticated = authorize(identity, mode);
+    const unauthenticated = authorize(identity, mode, request);
     if (unauthenticated) return unauthenticated;
     const body = (await request.json()) as {
       action: "accept" | "reject" | "accept_all" | "reject_all";

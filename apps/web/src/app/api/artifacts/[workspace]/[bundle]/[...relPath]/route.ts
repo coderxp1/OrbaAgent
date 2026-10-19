@@ -23,7 +23,7 @@ export async function GET(
   // Authentication: the deployment policy decides whether an anonymous caller
   // is acceptable at all.
   const { identity, mode } = await resolveRequestIdentity(req);
-  const unauthenticated = authorize(identity, mode);
+  const unauthenticated = authorize(identity, mode, req);
   if (unauthenticated) return unauthenticated;
 
   // Authorization: an artifact may only be read from the tenant this request

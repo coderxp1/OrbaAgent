@@ -6,7 +6,7 @@ import { NextResponse } from "next/server";
 export async function POST(req: Request) {
   try {
     const { identity, mode } = await resolveRequestIdentity(req);
-    const unauthenticated = authorize(identity, mode);
+    const unauthenticated = authorize(identity, mode, req);
     if (unauthenticated) return unauthenticated;
     const verifiedUserId = identity.userId;
     const manager = IntegrationsManager.getInstance();

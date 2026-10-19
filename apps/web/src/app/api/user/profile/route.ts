@@ -51,7 +51,7 @@ async function getStoredProfile(userId: string): Promise<UserProfile> {
 
 export async function GET(req: Request) {
   const { identity, mode } = await resolveRequestIdentity(req);
-  const unauthenticated = authorize(identity, mode);
+  const unauthenticated = authorize(identity, mode, req);
   if (unauthenticated) return unauthenticated;
   const profile = await getStoredProfile(identity.userId);
   return NextResponse.json(profile);
@@ -61,7 +61,7 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const { identity, mode } = await resolveRequestIdentity(req);
-    const unauthenticated = authorize(identity, mode);
+    const unauthenticated = authorize(identity, mode, req);
     if (unauthenticated) return unauthenticated;
     const current = await getStoredProfile(identity.userId);
 

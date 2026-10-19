@@ -1,0 +1,201 @@
+# Authentication Activation Runbook
+
+**Scope:** activating the OrbaAgent API authentication boundary (ADR-004) on the
+production deployment. This runbook changes **only** the `orba-web` container's
+environment and a restart of that container. It does not touch the GPU worker,
+GPU 0, Wan, FLUX, LTX, ComfyUI, Ollama, WireGuard, the firewall, the upload
+volume, or any existing secret.
+
+**Do not run any step of this runbook without an explicit authorisation.**
+
+---
+
+## 0. What activating means
+
+| | Before | After |
+|---|---|---|
+| `ORBA_AUTH_MODE` | unset (derived) | `required` |
+| Anonymous `POST /api/chat` | 200 (generates media) | **401** |
+| Anonymous `GET /api/artifacts/...` | 200 | **401** |
+| Valid session cookie | n/a | 200, scoped to the caller's tenant |
+| Cross-tenant artifact read | n/a | **403** |
+| Worker → API artifact ingest | ingest token | ingest token (unchanged) |
+| GPU worker, models, GPU 0 | — | **unchanged** |
+
+The boundary is *implemented* in `cc6ac94` and later commits and is inert
+until a credential is configured. Activating it is exactly the env change in
+step 2 plus the container recreate in step 4.
+
+---
+
+## 1. Generate the secrets (nothing is printed)
+
+Run on the production host as root. **No secret is echoed to stdout, a log, CI
+output, or a chat transcript.**
+
+```bash
+# 1a. the tenant this deployment serves. It must match ORBA_TENANT_ID, or be
+#     listed in ORBA_TENANTS. "default-tenant" is the default when unset.
+TENANT="default-tenant"
+
+umask 077
+
+# 1b. generate. The values only ever exist in this shell's variables.
+API_KEY="$(openssl rand -base64 32 | tr -dc 'A-Za-z0-9' | head -c 40)"
+SESSION_SECRET="$(openssl rand -base64 48 | tr -dc 'A-Za-z0-9' | head -c 64)"
+API_KEY_SHA="$(printf '%s' "$API_KEY" | sha256sum | cut -d' ' -f1)"
+
+# 1c. hand the RAW key to the operator exactly once, in a root-only file.
+#     Only the digest is ever written into the deployment configuration.
+install -m 0600 -o root -g root /dev/null /root/.orba_owner_key
+printf '%s' "$API_KEY" > /root/.orba_owner_key
+chmod 0600 /root/.orba_owner_key
+
+# 1d. the plaintext leaves the shell here.
+unset API_KEY SESSION_SECRET
+```
+
+## 2. Write the deployment environment (digests only)
+
+```bash
+install -m 0600 -o root -g root /dev/null /etc/orbaagent/prod.env
+{
+  printf 'ORBA_AUTH_MODE=required\n'
+  printf 'ORBA_SESSION_SECRET=%s\n' "$SESSION_SECRET"
+  printf 'ORBA_API_KEYS=%s\n' "{\"$API_KEY_SHA\":{\"tenantId\":\"$TENANT\",\"userId\":\"owner\"}}"
+  printf 'ORBA_TENANTS=%s\n' "$TENANT"
+} >> /etc/orbaagent/prod.env
+unset SESSION_SECRET API_KEY_SHA
+```
+
+`ORBA_API_KEYS` stores only the **SHA-256 digest** of the key. `ORBA_SESSION_SECRET`
+signs the session cookies and must never leave the server.
+
+## 3. Preflight checks (read-only, before any restart)
+
+```bash
+# 3a. the configuration is present and well-formed
+python3 - <<'PY'
+import json, re
+env = dict(re.findall(r'^([A-Z_]+)=(.*)$', open('/etc/orbaagent/prod.env').read(), re.M))
+keys = json.loads(env['ORBA_API_KEYS'])
+tenants = {rec['tenantId'] for rec in keys.values()}
+served = {t.strip() for t in env.get('ORBA_TENANTS', '').split(',') if t.strip()}
+served |= {(env.get('ORBA_TENANT_ID') or '').strip() or 'default-tenant'}
+print('credentials      :', len(keys))
+print('credential tenant:', sorted(tenants))
+print('served tenants   :', sorted(served))
+assert tenants <= served, 'FAIL: the credential names a tenant this deployment does not serve'
+assert env.get('ORBA_AUTH_MODE') == 'required'
+assert len(env.get('ORBA_SESSION_SECRET', '')) >= 16
+print('OK: the configured tenant is served and the mode is required')
+PY
+
+# 3b. the raw key is still retrievable exactly once, for the operator
+sudo test -s /root/.orba_owner_key && echo "raw key present (read it once, then shred)"
+
+# 3c. the compose file passes the new variables to orba-web
+cd /opt/orbaagent
+docker compose -f docker-compose.prod.yml config | grep -E 'ORBA_(AUTH_MODE|API_KEYS|SESSION_SECRET|TENANTS)'
+```
+
+## 4. Apply (recreates the web container only)
+
+```bash
+cd /opt/orbaagent
+docker compose -f docker-compose.prod.yml up -d orba-web
+```
+
+This recreates **only** `orba-web`. The GPU worker, ComfyUI, Ollama and the
+GPU are not touched.
+
+## 5. Post-deployment acceptance
+
+```bash
+# 5a. the boundary is live: anonymous is refused
+curl -sS -o /dev/null -w '%{http_code}\n' https://orbaagent.dev/api/user/profile   # expect 401
+
+# 5b. an authorised caller is served
+curl -sS -X POST https://orbaagent.dev/api/auth/session \
+  -H 'content-type: application/json' \
+  --data "{\"credential\":\"$(sudo cat /root/.orba_owner_key)\"}" -c /tmp/orba.cookies
+curl -sS -b /tmp/orba.cookies https://orbaagent.dev/api/user/profile             # expect 200
+
+# 5c. the media path still works for the authorised caller
+curl -sS -b /tmp/orba.cookies -X POST https://orbaagent.dev/api/chat \
+  -H 'content-type: application/json' \
+  --data '{"messages":[{"role":"user","content":"Generate an image of a red apple on a white table"}]}' \
+  | head -c 400
+
+# 5d. the GPU side is untouched
+sudo orbaagent-gpu health          # expect healthy, Wan + FLUX loaded
+nvidia-smi --query-gpu=index,uuid,memory.used --format=csv   # GPU 0 unchanged
+```
+
+In the browser: open `https://orbaagent.dev/login`, paste the credential, and
+confirm the redirect into the application, that a refresh keeps the session,
+and that **Sign out** in the header clears it.
+
+## 6. Recovery
+
+**Recovery must not silently reopen anonymous access.** The boundary stays on;
+what is restored is *authorised* access.
+
+```bash
+# 6a. the login flow is broken but the deployment is fine: mint a new key
+#     and add its digest to ORBA_API_KEYS. The operator exchanges it for a
+#     session exactly as before.
+NEW_KEY="$(openssl rand -base64 32 | tr -dc 'A-Za-z0-9' | head -c 40)"
+NEW_SHA="$(printf '%s' "$NEW_KEY" | sha256sum | cut -d' ' -f1)"
+install -m 0600 -o root -g root /dev/null /root/.orba_owner_key
+printf '%s' "$NEW_KEY" > /root/.orba_owner_key && chmod 0600 /root/.orba_owner_key
+python3 - "$NEW_SHA" <<'PY'
+import json, re, sys
+path = '/etc/orbaagent/prod.env'
+env = dict(re.findall(r'^([A-Z_]+)=(.*)$', open(path).read(), re.M))
+keys = json.loads(env['ORBA_API_KEYS'])
+keys[sys.argv[1]] = {"tenantId": "default-tenant", "userId": "owner"}
+lines = [f"{k}={v}" for k, v in env.items() if k != 'ORBA_API_KEYS']
+lines.append('ORBA_API_KEYS=' + json.dumps(keys))
+open(path, 'w').write('\n'.join(lines) + '\n')
+PY
+unset NEW_KEY NEW_SHA
+cd /opt/orbaagent && docker compose -f docker-compose.prod.yml up -d orba-web
+
+# 6b. only the session cookie is stale: re-exchange the existing key
+curl -sS -X POST https://orbaagent.dev/api/auth/session \
+  -H 'content-type: application/json' \
+  --data "{\"credential\":\"$(sudo cat /root/.orba_owner_key)\"}" -c /tmp/orba.cookies
+
+# 6c. standing the boundary down is an explicit, audited decision. It reopens
+#     anonymous access to media generation and artifact reads, so it needs the
+#     owner's sign-off, and it must remove the credentials as well - otherwise
+#     the derived mode would stay "required" and lock everyone out.
+#     sed -i 's/^ORBA_AUTH_MODE=.*/ORBA_AUTH_MODE=permissive/' /etc/orbaagent/prod.env
+#     sed -i '/^ORBA_API_KEYS=/d' /etc/orbaagent/prod.env
+#     cd /opt/orbaagent && docker compose -f docker-compose.prod.yml up -d orba-web
+```
+
+Rolling the **code** back is `git revert` of the activation commits followed by
+`docker compose -f docker-compose.prod.yml up -d orba-web`. There is no
+database migration, no schema change, and no model to restore.
+
+## 7. After the operator has stored the key
+
+```bash
+sudo rm -f /root/.orba_owner_key   # the raw key now lives only in the password manager
+```
+
+## Notes and known limitations
+
+* A session is a **stateless signed cookie**. Logout clears the browser
+  cookie, but the token itself remains valid until it expires (one hour).
+  Server-side revocation arrives with the stateful session store (ADR-004).
+* A cookie-authenticated state-changing request must carry an `Origin` header.
+  Browsers always send it; non-browser clients must use the API key path.
+* The GitHub OAuth callback now requires an authenticated caller and a
+  browser-bound `state`. The live GitHub round trip has not been exercised in a
+  non-production environment; the first production use of the connector
+  exercises it.
+* The desktop client and any scripted caller must use the API key path, not
+  the session cookie.
