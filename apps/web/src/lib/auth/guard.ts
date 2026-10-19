@@ -6,6 +6,7 @@ import {
   type HeaderReader,
   canAccessTenant,
   deploymentIdentityFromEnv,
+  readAuthMode,
   readPresentedApiKey,
   readPresentedSession,
   resolveAuthMode,
@@ -57,7 +58,15 @@ export async function resolveIdentityFromSources(
     deployment: deploymentIdentityFromEnv(env),
   });
 
-  return { identity, mode: resolveAuthMode({ hasCredentials: store.hasCredentials() }) };
+  return {
+    identity,
+    mode: resolveAuthMode({
+      // An explicit ORBA_AUTH_MODE wins; otherwise the mode is derived, and
+      // the presence of any credential makes authentication mandatory.
+      mode: readAuthMode(env.ORBA_AUTH_MODE),
+      hasCredentials: store.hasCredentials(),
+    }),
+  };
 }
 
 /**

@@ -132,6 +132,25 @@ services:
       # Workspace identity for upload/artifact paths. Optional; the application
       # defaults to "default-tenant" when unset.
       ORBA_TENANT_ID: ${ORBA_TENANT_ID:-}
+      # Additional tenants this deployment serves, comma separated. Artifacts
+      # may only be ingested into, and read from, a workspace in this set.
+      ORBA_TENANTS: ${ORBA_TENANTS:-}
+      # Authentication boundary. "required" rejects anonymous callers on the
+      # protected API routes; "permissive" keeps the single-tenant behaviour.
+      # When unset the mode is derived: any configured credential makes it
+      # "required", so a half-configured deployment cannot silently accept
+      # anonymous traffic.
+      ORBA_AUTH_MODE: ${ORBA_AUTH_MODE:-}
+      # Credentials, as JSON maps keyed by the SHA-256 hex digest of the
+      # credential. The raw secret is never written to the process
+      # configuration. ORBA_API_KEYS holds programmatic API keys,
+      # ORBA_SESSIONS holds pre-registered session tokens.
+      ORBA_API_KEYS: ${ORBA_API_KEYS:-}
+      ORBA_SESSIONS: ${ORBA_SESSIONS:-}
+      # Server-side secret used to sign stateless session cookies. A browser
+      # exchanges a credential for a signed, HttpOnly cookie once and never
+      # holds a reusable secret. This value must never leave the server.
+      ORBA_SESSION_SECRET: ${ORBA_SESSION_SECRET:-}
       # Dedicated ingest secret for GPU worker artifact delivery
       ORBA_INTERNAL_INGEST_TOKEN: ${ORBA_INTERNAL_INGEST_TOKEN}
     volumes:

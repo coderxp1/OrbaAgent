@@ -1,8 +1,12 @@
+import { authorize, resolveRequestIdentity } from "@/lib/auth/guard";
 import { ChangeReviewManager } from "@orbaagent/agent-runtime";
 import { NextResponse } from "next/server";
 
 export async function GET(request: Request) {
   try {
+    const { identity, mode } = await resolveRequestIdentity(request);
+    const unauthenticated = authorize(identity, mode);
+    if (unauthenticated) return unauthenticated;
     const { searchParams } = new URL(request.url);
     const agentRunId = searchParams.get("agentRunId") || undefined;
     const manager = ChangeReviewManager.getInstance();
@@ -16,6 +20,9 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
+    const { identity, mode } = await resolveRequestIdentity(request);
+    const unauthenticated = authorize(identity, mode);
+    if (unauthenticated) return unauthenticated;
     const body = (await request.json()) as {
       action: "accept" | "reject" | "accept_all" | "reject_all";
       changeId?: string;

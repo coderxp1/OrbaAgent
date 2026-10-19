@@ -505,6 +505,7 @@ export {
   deploymentIdentityFromEnv,
   readPresentedApiKey,
   readPresentedSession,
+  readAuthMode,
   resolveAuthMode,
   resolveCallerIdentity,
 } from "./lib/identity.js";

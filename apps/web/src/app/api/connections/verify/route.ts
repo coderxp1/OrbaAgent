@@ -1,11 +1,13 @@
-import { resolveRequestIdentity } from "@/lib/auth/guard";
+import { authorize, resolveRequestIdentity } from "@/lib/auth/guard";
 import { IntegrationsManager } from "@orbaagent/agent-runtime";
 import { type NextRequest, NextResponse } from "next/server";
 
 export async function POST(req: NextRequest) {
   try {
     const { provider } = await req.json();
-    const { identity } = await resolveRequestIdentity(req);
+    const { identity, mode } = await resolveRequestIdentity(req);
+    const unauthenticated = authorize(identity, mode);
+    if (unauthenticated) return unauthenticated;
     const verifiedUserId = identity.userId;
     const manager = IntegrationsManager.getInstance();
     const current = manager.getIntegrations(verifiedUserId).find((i) => i.name === provider);

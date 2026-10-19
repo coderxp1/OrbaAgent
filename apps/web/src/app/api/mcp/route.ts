@@ -1,3 +1,4 @@
+import { authorize, resolveRequestIdentity } from "@/lib/auth/guard";
 import { type NextRequest, NextResponse } from "next/server";
 
 // Standard MCP (Model Context Protocol - spec 2024-11-05) JSON-RPC 2.0 implementation
@@ -63,6 +64,12 @@ const REGISTERED_TOOLS = [
 ];
 
 export async function GET(req: NextRequest) {
+  // MCP exposes the tool surface and can invoke generation tools, so it is a
+  // protected endpoint like the others.
+  const { identity, mode } = await resolveRequestIdentity(req);
+  const unauthenticated = authorize(identity, mode);
+  if (unauthenticated) return unauthenticated;
+
   // Return MCP Discovery & Server Metadata
   return NextResponse.json({
     name: "OrbaAgent MCP Server",
@@ -89,6 +96,10 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    const { identity, mode } = await resolveRequestIdentity(req);
+    const unauthenticated = authorize(identity, mode);
+    if (unauthenticated) return unauthenticated;
+
     const body = (await req.json()) as JsonRpcRequest;
 
     if (!body || body.jsonrpc !== "2.0" || !body.method) {

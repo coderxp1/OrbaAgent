@@ -1,5 +1,6 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import type { ApiKeyIdentity, CredentialStore, SessionIdentity } from "@orbaagent/shared";
+import { verifySessionToken } from "./session";
 
 /**
  * Environment-backed credential store.
@@ -85,6 +86,10 @@ export function createEnvCredentialStore(
 ): CredentialStore {
   const sessions = parseMap(env.ORBA_SESSIONS);
   const apiKeys = parseMap(env.ORBA_API_KEYS);
+  // When configured, the deployment also accepts stateless signed session
+  // cookies, so a browser can hold a signed assertion instead of a reusable
+  // API key. The signing secret never leaves the server.
+  const sessionSecret = (env.ORBA_SESSION_SECRET || "").trim();
 
   const lookup = async (map: CredentialMap, presented: string) => {
     const record = findByDigest(map, presented);
@@ -94,13 +99,22 @@ export function createEnvCredentialStore(
 
   return {
     async findSession(presented: string): Promise<SessionIdentity | null> {
-      return lookup(sessions, presented);
+      const record = await lookup(sessions, presented);
+      if (record) return record;
+      if (!sessionSecret) return null;
+      const signed = verifySessionToken(sessionSecret, presented, now());
+      if (!signed) return null;
+      return { tenantId: signed.tenantId, userId: signed.userId };
     },
     async findApiKey(presented: string): Promise<ApiKeyIdentity | null> {
       return lookup(apiKeys, presented);
     },
     hasCredentials(): boolean {
-      return Object.keys(sessions).length > 0 || Object.keys(apiKeys).length > 0;
+      return (
+        Object.keys(sessions).length > 0 ||
+        Object.keys(apiKeys).length > 0 ||
+        sessionSecret.length > 0
+      );
     },
   };
 }
@@ -114,7 +128,7 @@ let cachedStore: { key: string; store: CredentialStore } | null = null;
 export function getCredentialStore(
   env: Record<string, string | undefined> = process.env,
 ): CredentialStore {
-  const key = `${env.ORBA_SESSIONS || ""}::${env.ORBA_API_KEYS || ""}`;
+  const key = `${env.ORBA_SESSIONS || ""}::${env.ORBA_API_KEYS || ""}::${env.ORBA_SESSION_SECRET || ""}`;
   if (cachedStore && cachedStore.key === key) return cachedStore.store;
   const store = createEnvCredentialStore(env);
   cachedStore = { key, store };

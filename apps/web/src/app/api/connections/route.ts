@@ -1,10 +1,12 @@
-import { resolveRequestIdentity } from "@/lib/auth/guard";
+import { authorize, resolveRequestIdentity } from "@/lib/auth/guard";
 import { IntegrationsManager } from "@orbaagent/agent-runtime";
 import type { IntegrationStatus } from "@orbaagent/shared";
 import { cookies } from "next/headers";
 
 export async function GET(req: Request) {
-  const { identity } = await resolveRequestIdentity(req);
+  const { identity, mode } = await resolveRequestIdentity(req);
+  const unauthenticated = authorize(identity, mode);
+  if (unauthenticated) return unauthenticated;
   const verifiedUserId = identity.userId;
   const manager = IntegrationsManager.getInstance();
 
@@ -41,7 +43,9 @@ export async function GET(req: Request) {
 
 export async function POST(request: Request) {
   try {
-    const { identity } = await resolveRequestIdentity(request);
+    const { identity, mode } = await resolveRequestIdentity(request);
+    const unauthenticated = authorize(identity, mode);
+    if (unauthenticated) return unauthenticated;
     const verifiedUserId = identity.userId;
     const body = (await request.json()) as {
       status: IntegrationStatus;

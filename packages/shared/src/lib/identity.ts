@@ -213,6 +213,18 @@ export function deploymentIdentityFromEnv(
 }
 
 /**
+ * Read the authentication mode from configuration.
+ *
+ * @returns `"required"`, `"permissive"`, or `undefined` when unset, in which
+ *          case the mode is derived (credentials present means required).
+ */
+export function readAuthMode(value: string | undefined): AuthMode | undefined {
+  const normalized = (value || "").trim().toLowerCase();
+  if (normalized === "required" || normalized === "permissive") return normalized;
+  return undefined;
+}
+
+/**
  * Server-side store of credentials.
  *
  * The interface is intentionally narrow so that the environment-backed

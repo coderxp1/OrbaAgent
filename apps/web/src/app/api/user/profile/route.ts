@@ -1,6 +1,6 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { resolveRequestIdentity } from "@/lib/auth/guard";
+import { authorize, resolveRequestIdentity } from "@/lib/auth/guard";
 import { type NextRequest, NextResponse } from "next/server";
 
 interface UserProfile {
@@ -50,7 +50,9 @@ async function getStoredProfile(userId: string): Promise<UserProfile> {
 }
 
 export async function GET(req: Request) {
-  const { identity } = await resolveRequestIdentity(req);
+  const { identity, mode } = await resolveRequestIdentity(req);
+  const unauthenticated = authorize(identity, mode);
+  if (unauthenticated) return unauthenticated;
   const profile = await getStoredProfile(identity.userId);
   return NextResponse.json(profile);
 }
@@ -58,7 +60,9 @@ export async function GET(req: Request) {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { identity } = await resolveRequestIdentity(req);
+    const { identity, mode } = await resolveRequestIdentity(req);
+    const unauthenticated = authorize(identity, mode);
+    if (unauthenticated) return unauthenticated;
     const current = await getStoredProfile(identity.userId);
 
     const updated: UserProfile = {
