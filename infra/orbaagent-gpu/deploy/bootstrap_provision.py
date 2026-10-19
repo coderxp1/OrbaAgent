@@ -28,7 +28,7 @@ import shutil
 from pathlib import Path
 from typing import Iterable
 
-EXPECTED_SHA256 = "0853e37ffb6becaad7be904e6a656cfe7404fc34d6c6f5f3f36733d2fcd610ae"
+EXPECTED_SHA256 = "71c8be66c069b1326280562176d06eb50662155c585116932bbc859ca310c0f9"
 
 # Exact file whitelist (relative paths inside archive)
 ALLOWED_EXACT: tuple[str, ...] = (
