@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { authorize, resolveRequestIdentity } from "@/lib/auth/guard";
 import { resolveWithinBase } from "@orbaagent/shared";
-import { deploymentIdentityFromEnv, resolveCallerIdentity } from "@orbaagent/shared";
 
 function safeJoin(base: string, rel: string) {
   // Containment via path.relative (see @orbaagent/shared). Rejects `../`
@@ -24,10 +24,11 @@ export async function POST(request: Request) {
     const baseDir =
       process.env.ORBA_UPLOAD_DIR || join(/* turbopackIgnore: true */ process.cwd(), ".uploads");
     // Tenant comes from the server-resolved caller identity only; it is never
-    // taken from client input (see @orbaagent/shared).
-    const workspace = resolveCallerIdentity({
-      deployment: deploymentIdentityFromEnv(),
-    }).tenantId;
+    // taken from client input (see @orbaagent/shared and ADR-004).
+    const { identity, mode } = await resolveRequestIdentity(request);
+    const unauthenticated = authorize(identity, mode);
+    if (unauthenticated) return unauthenticated;
+    const workspace = identity.tenantId;
     const uploadRoot = join(/* turbopackIgnore: true */ baseDir, workspace, bundle);
 
     const artifacts: Array<{

@@ -2,8 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_TENANT_ID,
   DEFAULT_USER_ID,
+  SESSION_COOKIE_NAME,
+  canAccessTenant,
   deploymentIdentityFromEnv,
   readPresentedApiKey,
+  readPresentedSession,
+  resolveAuthMode,
   resolveCallerIdentity,
 } from "./identity.js";
 
@@ -20,41 +24,25 @@ describe("resolveCallerIdentity", () => {
     });
   });
 
-  it("prefers the session over a presented API key and over deployment config", () => {
+  it("prefers the session over an API key and over deployment config", () => {
     const identity = resolveCallerIdentity({
       session: { tenantId: "acme", userId: "u1" },
-      presentedApiKey: "orba_sk_other",
-      lookupApiKey: () => ({ tenantId: "other", userId: "u2" }),
+      apiKey: { tenantId: "other", userId: "u2" },
       deployment: { tenantId: "deployment-tenant" },
     });
     expect(identity.tenantId).toBe("acme");
     expect(identity.source).toBe("session");
   });
 
-  it("takes the tenant from the API key RECORD, never from the presented token", () => {
+  it("uses the tenant from the API key RECORD, never from the presented token", () => {
     const identity = resolveCallerIdentity({
-      presentedApiKey: "orba_sk_tenant_evil",
-      lookupApiKey: (presented) =>
-        presented === "orba_sk_tenant_evil" ? null : { tenantId: "acme", userId: "u9" },
+      // The store resolved this to a record. The presented token itself is
+      // never an input to the resolver.
+      apiKey: { tenantId: "acme", userId: "u7" },
     });
-    // An unrecognised token must not be able to influence the tenant.
-    expect(identity.tenantId).toBe(DEFAULT_TENANT_ID);
-    expect(identity.authenticated).toBe(false);
-    expect(identity.source).toBe("anonymous");
-  });
-
-  it("authenticates a recognised API key using the record's tenant", () => {
-    const identity = resolveCallerIdentity({
-      presentedApiKey: "orba_sk_live_abc123",
-      lookupApiKey: (presented) =>
-        presented === "orba_sk_live_abc123" ? { tenantId: "acme", userId: "u7" } : null,
-    });
-    expect(identity).toEqual({
-      tenantId: "acme",
-      userId: "u7",
-      authenticated: true,
-      source: "api-key",
-    });
+    expect(identity.tenantId).toBe("acme");
+    expect(identity.authenticated).toBe(true);
+    expect(identity.source).toBe("api-key");
   });
 
   it("falls back to deployment configuration without claiming authentication", () => {
@@ -87,6 +75,46 @@ describe("resolveCallerIdentity", () => {
   });
 });
 
+describe("resolveAuthMode", () => {
+  it("honours an explicit required mode even without credentials", () => {
+    expect(resolveAuthMode({ mode: "required", hasCredentials: false })).toBe("required");
+  });
+
+  it("honours an explicit permissive mode even with credentials", () => {
+    expect(resolveAuthMode({ mode: "permissive", hasCredentials: true })).toBe("permissive");
+  });
+
+  it("fails closed: credentials present without an explicit mode means required", () => {
+    expect(resolveAuthMode({ hasCredentials: true })).toBe("required");
+  });
+
+  it("stays permissive when no credentials are configured", () => {
+    expect(resolveAuthMode({ hasCredentials: false })).toBe("permissive");
+  });
+});
+
+describe("canAccessTenant", () => {
+  const acme = resolveCallerIdentity({ session: { tenantId: "acme", userId: "u1" } });
+  const anon = resolveCallerIdentity();
+
+  it("allows a caller into its own tenant", () => {
+    expect(canAccessTenant(acme, "acme")).toBe(true);
+  });
+
+  it("denies a caller access to another tenant", () => {
+    expect(canAccessTenant(acme, "victim")).toBe(false);
+  });
+
+  it("denies the anonymous caller every tenant except the default one", () => {
+    expect(canAccessTenant(anon, DEFAULT_TENANT_ID)).toBe(true);
+    expect(canAccessTenant(anon, "victim")).toBe(false);
+  });
+
+  it("denies an empty tenant", () => {
+    expect(canAccessTenant(acme, "")).toBe(false);
+  });
+});
+
 describe("readPresentedApiKey", () => {
   const headers = (value: string | null) => ({
     get: (name: string) => (name.toLowerCase() === "authorization" ? value : null),
@@ -106,6 +134,20 @@ describe("readPresentedApiKey", () => {
 
   it("returns null when there is no authorization header", () => {
     expect(readPresentedApiKey(headers(null))).toBeNull();
+  });
+});
+
+describe("readPresentedSession", () => {
+  it("reads the session cookie", () => {
+    const cookies = {
+      get: (name: string) => (name === SESSION_COOKIE_NAME ? { value: "sess_1" } : undefined),
+    };
+    expect(readPresentedSession(cookies)).toBe("sess_1");
+  });
+
+  it("returns null when the cookie is absent", () => {
+    expect(readPresentedSession({ get: () => undefined })).toBeNull();
+    expect(readPresentedSession(undefined)).toBeNull();
   });
 });
 

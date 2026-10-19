@@ -500,13 +500,20 @@ export {
 export {
   DEFAULT_TENANT_ID,
   DEFAULT_USER_ID,
+  SESSION_COOKIE_NAME,
+  canAccessTenant,
   deploymentIdentityFromEnv,
   readPresentedApiKey,
+  readPresentedSession,
+  resolveAuthMode,
   resolveCallerIdentity,
 } from "./lib/identity.js";
 export type {
   ApiKeyIdentity,
+  AuthMode,
   CallerIdentity,
+  CookieReader,
+  CredentialStore,
   DeploymentIdentity,
   HeaderReader,
   IdentityResolutionInput,

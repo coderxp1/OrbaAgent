@@ -1,5 +1,5 @@
 /**
- * Caller identity and tenant resolution.
+ * Caller identity, tenant authorization and credential resolution.
  *
  * OrbaAgent stores every artifact under a tenant-scoped workspace, so the
  * tenant id is a *security boundary*, not a cosmetic label: it decides which
@@ -28,8 +28,14 @@ export const DEFAULT_TENANT_ID = "default-tenant";
 /** User id used when nothing else identifies a caller. */
 export const DEFAULT_USER_ID = "authenticated-user";
 
+/** Cookie carrying the session token for browser clients. */
+export const SESSION_COOKIE_NAME = "orba_session";
+
 /** How the caller's identity was established. */
 export type IdentitySource = "session" | "api-key" | "deployment" | "anonymous";
+
+/** Whether protected routes must reject unauthenticated callers. */
+export type AuthMode = "required" | "permissive";
 
 /** A server-validated session. */
 export interface SessionIdentity {
@@ -65,14 +71,8 @@ export interface DeploymentIdentity {
 export interface IdentityResolutionInput {
   /** Server-validated session for the request, if any. */
   session?: SessionIdentity | null;
-  /** The bearer token the caller presented, if any. */
-  presentedApiKey?: string | null;
-  /**
-   * Server-side lookup for a presented API key. MUST return `null` for
-   * unknown keys. The tenant always comes from the returned record, never
-   * from the presented token.
-   */
-  lookupApiKey?: ((presented: string) => ApiKeyIdentity | null) | undefined;
+  /** Server-validated API key record, if any. */
+  apiKey?: ApiKeyIdentity | null;
   /** Deployment-level identity from server configuration. */
   deployment?: DeploymentIdentity | undefined;
 }
@@ -86,7 +86,8 @@ export interface IdentityResolutionInput {
  *   3. deployment configuration (single-tenant deployment)
  *   4. the anonymous default tenant
  *
- * Only rules 1 and 2 produce an `authenticated` identity.
+ * Only rules 1 and 2 produce an `authenticated` identity. The resolver has no
+ * parameter through which a caller could nominate its own tenant.
  */
 export function resolveCallerIdentity(input: IdentityResolutionInput = {}): CallerIdentity {
   const session = input.session;
@@ -99,17 +100,14 @@ export function resolveCallerIdentity(input: IdentityResolutionInput = {}): Call
     };
   }
 
-  const presented = input.presentedApiKey;
-  if (presented && input.lookupApiKey) {
-    const record = input.lookupApiKey(presented);
-    if (record?.tenantId) {
-      return {
-        tenantId: record.tenantId,
-        userId: record.userId || record.tenantId,
-        authenticated: true,
-        source: "api-key",
-      };
-    }
+  const apiKey = input.apiKey;
+  if (apiKey?.tenantId) {
+    return {
+      tenantId: apiKey.tenantId,
+      userId: apiKey.userId || apiKey.tenantId,
+      authenticated: true,
+      source: "api-key",
+    };
   }
 
   const deployment = input.deployment;
@@ -130,6 +128,35 @@ export function resolveCallerIdentity(input: IdentityResolutionInput = {}): Call
   };
 }
 
+/**
+ * Decide whether protected routes must reject unauthenticated callers.
+ *
+ * An explicit mode always wins. Otherwise the mode is derived: as soon as the
+ * deployment holds any credential, authentication becomes mandatory. A
+ * half-configured deployment (credentials present but enforcement switched off)
+ * is not representable, so it cannot silently accept anonymous traffic.
+ */
+export function resolveAuthMode(input: {
+  mode?: AuthMode | undefined;
+  hasCredentials: boolean;
+}): AuthMode {
+  if (input.mode === "required" || input.mode === "permissive") return input.mode;
+  return input.hasCredentials ? "required" : "permissive";
+}
+
+/**
+ * Whether a caller may act inside a tenant.
+ *
+ * The rule is the same for every mode: a request may only touch the tenant
+ * that the caller's identity resolved to. In permissive mode that tenant is
+ * the deployment workspace, so single-tenant deployments keep working
+ * unchanged while cross-tenant reads are still refused.
+ */
+export function canAccessTenant(identity: CallerIdentity, tenantId: string): boolean {
+  if (!tenantId) return false;
+  return identity.tenantId === tenantId;
+}
+
 /** Minimal read-only view of a headers collection. */
 export interface HeaderReader {
   get(name: string): string | null;
@@ -139,8 +166,8 @@ export interface HeaderReader {
  * Read the bearer token the caller presented.
  *
  * The returned value is only an opaque lookup key. It never determines the
- * tenant on its own: {@link resolveCallerIdentity} uses the server-side
- * record that the key resolves to.
+ * tenant on its own: the server resolves it to a record, and the tenant comes
+ * from that record.
  *
  * @returns The presented token, or `null` when there is no bearer token.
  */
@@ -150,6 +177,24 @@ export function readPresentedApiKey(headers: HeaderReader): string | null {
   const match = /^Bearer\s+(.+)$/i.exec(raw.trim());
   const token = match?.[1]?.trim();
   return token ? token : null;
+}
+
+/** Minimal read-only view of a cookie collection. */
+export interface CookieReader {
+  get(name: string): { value: string } | undefined;
+}
+
+/**
+ * Read the session token the caller presented.
+ *
+ * @returns The presented session token, or `null` when there is none.
+ */
+export function readPresentedSession(
+  cookies: CookieReader | undefined,
+  name: string = SESSION_COOKIE_NAME,
+): string | null {
+  const value = cookies?.get(name)?.value;
+  return value ? value : null;
 }
 
 /**
@@ -165,4 +210,20 @@ export function deploymentIdentityFromEnv(
     tenantId: env.ORBA_TENANT_ID || undefined,
     userId: env.ORBA_USER_ID || undefined,
   };
+}
+
+/**
+ * Server-side store of credentials.
+ *
+ * The interface is intentionally narrow so that the environment-backed
+ * implementation can later be replaced by the Better Auth / Drizzle store
+ * described in ADR-004 without touching the routes.
+ */
+export interface CredentialStore {
+  /** Resolve a presented session token to its identity, or `null`. */
+  findSession(presented: string): Promise<SessionIdentity | null>;
+  /** Resolve a presented API key to its identity, or `null`. */
+  findApiKey(presented: string): Promise<ApiKeyIdentity | null>;
+  /** Whether the store holds any credentials at all. */
+  hasCredentials(): boolean;
 }

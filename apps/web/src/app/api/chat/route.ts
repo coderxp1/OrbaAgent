@@ -1,9 +1,9 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import { authorize, resolveRequestIdentity } from "@/lib/auth/guard";
 import { IntegrationsManager } from "@orbaagent/agent-runtime";
 import { AgentOrchestrator } from "@orbaagent/orchestrator";
 import type { ChatCompletionRequest } from "@orbaagent/shared";
-import { deploymentIdentityFromEnv, resolveCallerIdentity } from "@orbaagent/shared";
 import { cookies } from "next/headers";
 
 // Shared orchestrator instance inside server runtime
@@ -25,9 +25,9 @@ export async function POST(request: Request) {
     // Server-resolved caller identity. The tenant is derived ONLY from a
     // server-validated credential or deployment configuration, never from
     // client input (see @orbaagent/shared and docs/adr/004-auth-and-identity.md).
-    const identity = resolveCallerIdentity({
-      deployment: deploymentIdentityFromEnv(),
-    });
+    const { identity, mode } = await resolveRequestIdentity(request);
+    const unauthenticated = authorize(identity, mode);
+    if (unauthenticated) return unauthenticated;
     const verifiedTenantId = identity.tenantId;
     const verifiedUserId = identity.userId;
 

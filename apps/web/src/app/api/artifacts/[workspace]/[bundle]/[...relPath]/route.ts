@@ -1,35 +1,48 @@
 import { readFile, stat } from "node:fs/promises";
-import { currentWorkspace, inferContentType, uploadBaseDir } from "@/lib/media";
+import { join } from "node:path";
+import { authorize, authorizeTenant, resolveRequestIdentity } from "@/lib/auth/guard";
+import { inferContentType, uploadBaseDir } from "@/lib/media";
 import { PathContainmentError, resolveWithinBase } from "@orbaagent/shared";
 
 /**
  * Workspace identity used by the existing upload/artifact model.
  *
  * `POST /api/uploads` writes artifacts under `<ORBA_UPLOAD_DIR>/<workspace>/<bundle>/...`
- * where `workspace` is `ORBA_TENANT_ID || "default-tenant"`. This route reuses that
- * same server-side workspace identity rather than introducing a second auth system.
+ * where `workspace` is the tenant the caller's identity resolved to. This route
+ * resolves the SAME identity for the request and refuses any workspace that is
+ * not the caller's tenant, before touching the filesystem.
  */
 
 export async function GET(
-  _req: Request,
+  req: Request,
   ctx: { params: Promise<{ workspace: string; bundle: string; relPath: string[] }> },
 ) {
   // Next.js 16 passes route params as a Promise.
   const { workspace, bundle, relPath } = await ctx.params;
 
-  // Authorization: an artifact may only be read from the workspace this server is
-  // configured for. Attempts to read another workspace are rejected before any
-  // filesystem access, which prevents cross-workspace artifact disclosure.
-  if (workspace !== currentWorkspace()) {
-    return new Response("Forbidden", { status: 403 });
-  }
+  // Authentication: the deployment policy decides whether an anonymous caller
+  // is acceptable at all.
+  const { identity, mode } = await resolveRequestIdentity(req);
+  const unauthenticated = authorize(identity, mode);
+  if (unauthenticated) return unauthenticated;
+
+  // Authorization: an artifact may only be read from the tenant this request
+  // resolved to. Attempts to read another tenant's artifacts are rejected
+  // before any filesystem access, which prevents cross-tenant disclosure.
+  const crossTenant = authorizeTenant(identity, workspace);
+  if (crossTenant) return crossTenant;
 
   const baseDir = uploadBaseDir();
-  const segments = [workspace, bundle, ...(Array.isArray(relPath) ? relPath : [])];
+  // Containment is checked against the TENANT directory, not merely against
+  // the upload root. Resolving against the upload root alone would let
+  // `../../other-tenant/...` escape into another tenant's artifacts even
+  // though the URL segment named this caller's own tenant.
+  const tenantBase = join(baseDir, workspace);
+  const segments = [bundle, ...(Array.isArray(relPath) ? relPath : [])];
 
   let filePath: string;
   try {
-    filePath = resolveWithinBase(baseDir, segments);
+    filePath = resolveWithinBase(tenantBase, segments);
   } catch (err: unknown) {
     if (err instanceof PathContainmentError) {
       // Traversal, absolute escape, or sibling-prefix escape.

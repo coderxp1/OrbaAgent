@@ -150,3 +150,37 @@ Fastify identity provider, the Drizzle schema for `users` / `organizations` /
 `bearer` / `apiKey` plugins, OAuth2 social login, and enforcement of
 authenticated callers (currently any unauthenticated request is served in the
 `default-tenant` workspace).
+
+**Increment 2 (landed): credential validation and route enforcement.** The
+identity seam is now backed by real credentials and enforced on the protected
+routes:
+
+- `apps/web/src/lib/auth/credentials.ts` is an environment-backed credential
+  store. `ORBA_SESSIONS` and `ORBA_API_KEYS` are JSON maps keyed by the
+  SHA-256 hex digest of the credential, so the raw secret is never written to
+  the process configuration. A presented credential is hashed once and compared
+  against the stored digests in constant time. Records may carry `expiresAt`
+  and `revoked`.
+- `apps/web/src/lib/auth/guard.ts` resolves the caller from the request
+  (session cookie `orba_session`, or an `Authorization: Bearer` API key) and
+  applies the deployment policy: `ORBA_AUTH_MODE` may be `required` or
+  `permissive`, and when it is unset the mode is derived - the presence of any
+  credential makes authentication mandatory, so a half-configured deployment
+  cannot silently keep serving anonymous traffic.
+- `/api/chat`, `/api/uploads` and `/api/artifacts/...` now reject an
+  unauthenticated caller with 401 when the policy requires it, and refuse any
+  tenant that is not the caller's own with 403.
+- The artifact route resolves containment against the **tenant** directory
+  rather than the upload root. Resolving against the root alone let
+  `../../other-tenant/...` read another tenant's artifacts even though the URL
+  named the caller's own tenant; the traversal test in the artifact route test
+  now covers that.
+- The media ingest route still writes into the deployment workspace. Routing
+  ingested artifacts to the caller's tenant is the next step, together with
+  Better Auth.
+
+**Enforcement is implemented and tested but not yet activated in production.**
+The deployed environment holds no credentials, so the derived mode is
+`permissive` and the current single-tenant behaviour is preserved. Activating
+the boundary requires provisioning `ORBA_API_KEYS` (or sessions) in the
+deployment, which is an operational change that has not been made.
