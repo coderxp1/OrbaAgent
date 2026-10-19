@@ -205,3 +205,18 @@ Remaining known gaps in the boundary, tracked in ADR-004:
   Drizzle remains the target.
 - Enforcement is implemented and tested but not yet activated in production,
   because the deployed environment holds no credentials.
+
+**Increment 4 (landed): tenant-scoped media ingest.** The caller's tenant is
+now threaded through the whole delivery path: the image and video tools send
+the tenant the server resolved (the execution context's `tenantId`) in the
+generation job, the GPU worker validates that value before it becomes a path
+segment on the production host, and the ingest route serves the deployment's
+own workspace plus any tenants declared in `ORBA_TENANTS`. With no
+`ORBA_TENANTS` the served set is exactly `{currentWorkspace()}`, so the
+single-tenant behaviour and the existing "Workspace mismatch" rejection are
+unchanged, and the boundary is only widened by configuration.
+
+The two remaining gaps in the boundary are unchanged: the credential store is
+still the environment-backed one (Better Auth with Drizzle is the target), and
+enforcement is still not activated in production because the deployed
+environment holds no credentials.
