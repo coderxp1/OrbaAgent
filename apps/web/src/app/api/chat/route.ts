@@ -3,6 +3,7 @@ import * as path from "node:path";
 import { IntegrationsManager } from "@orbaagent/agent-runtime";
 import { AgentOrchestrator } from "@orbaagent/orchestrator";
 import type { ChatCompletionRequest } from "@orbaagent/shared";
+import { deploymentIdentityFromEnv, resolveCallerIdentity } from "@orbaagent/shared";
 import { cookies } from "next/headers";
 
 // Shared orchestrator instance inside server runtime
@@ -21,9 +22,14 @@ export async function POST(request: Request) {
     const traceId =
       body.trace?.traceId || `trace_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 
-    // Server-side verified context
-    const verifiedTenantId = process.env.ORBA_TENANT_ID || "default-tenant";
-    const verifiedUserId = process.env.ORBA_USER_ID || "authenticated-user";
+    // Server-resolved caller identity. The tenant is derived ONLY from a
+    // server-validated credential or deployment configuration, never from
+    // client input (see @orbaagent/shared and docs/adr/004-auth-and-identity.md).
+    const identity = resolveCallerIdentity({
+      deployment: deploymentIdentityFromEnv(),
+    });
+    const verifiedTenantId = identity.tenantId;
+    const verifiedUserId = identity.userId;
 
     // Read GitHub token from cookie, header, or environment
     let githubToken: string | undefined;

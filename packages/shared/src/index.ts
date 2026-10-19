@@ -496,3 +496,20 @@ export {
   resolveWithinBase,
   tryResolveWithinBase,
 } from "./lib/safePath.js";
+
+export {
+  DEFAULT_TENANT_ID,
+  DEFAULT_USER_ID,
+  deploymentIdentityFromEnv,
+  readPresentedApiKey,
+  resolveCallerIdentity,
+} from "./lib/identity.js";
+export type {
+  ApiKeyIdentity,
+  CallerIdentity,
+  DeploymentIdentity,
+  HeaderReader,
+  IdentityResolutionInput,
+  IdentitySource,
+  SessionIdentity,
+} from "./lib/identity.js";

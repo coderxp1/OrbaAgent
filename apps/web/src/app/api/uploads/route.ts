@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { resolveWithinBase } from "@orbaagent/shared";
+import { deploymentIdentityFromEnv, resolveCallerIdentity } from "@orbaagent/shared";
 
 function safeJoin(base: string, rel: string) {
   // Containment via path.relative (see @orbaagent/shared). Rejects `../`
@@ -22,7 +23,11 @@ export async function POST(request: Request) {
     // server output when it cannot statically scope this filesystem path.
     const baseDir =
       process.env.ORBA_UPLOAD_DIR || join(/* turbopackIgnore: true */ process.cwd(), ".uploads");
-    const workspace = process.env.ORBA_TENANT_ID || "default-tenant";
+    // Tenant comes from the server-resolved caller identity only; it is never
+    // taken from client input (see @orbaagent/shared).
+    const workspace = resolveCallerIdentity({
+      deployment: deploymentIdentityFromEnv(),
+    }).tenantId;
     const uploadRoot = join(/* turbopackIgnore: true */ baseDir, workspace, bundle);
 
     const artifacts: Array<{
