@@ -760,7 +760,10 @@ cp "$TMP_EXTRACT/Dockerfile" "$STAGE_CHECK_SRC/"
 cp -r "$TMP_EXTRACT/orba_gpu" "$STAGE_CHECK_SRC/"
 
 docker exec -i orbaagent-gpu-worker python3 - "${STAGE_CHECK_NAME}" << 'PY_CONTAINER_IMPORT_CHECK'
-import sys, os
+import ast
+import os
+import sys
+from pathlib import Path
 
 cand_rel = sys.argv[1]
 container_cand_path = os.path.join("/models", cand_rel)
@@ -770,6 +773,13 @@ if not os.path.isdir(container_cand_path):
     sys.exit(1)
 
 sys.path.insert(0, container_cand_path)
+
+# The symbol whose absence caused the original production failure. The guard
+# scans the CANDIDATE SOURCE TREE: the original error was a Python-level
+# `from orba_gpu.backends import get_backend`, which a grep of the
+# preparation script could never detect.
+BAD_SYMBOL = "get_backend"
+
 try:
     import orba_gpu
     from orba_gpu.app import create_app
@@ -782,6 +792,68 @@ try:
 except Exception as exc:
     print(f"FAIL: Worker container failed candidate source import check: {exc}", file=sys.stderr)
     sys.exit(1)
+
+# Guard 1: no candidate source file may reference the non-existent symbol.
+pkg_root = Path(orba_gpu.__file__).resolve().parent
+source_root = pkg_root.parent
+offenders = []
+py_files = sorted(pkg_root.rglob("*.py"))
+worker_py = source_root / "worker.py"
+if worker_py.is_file():
+    py_files.append(worker_py)
+for py in py_files:
+    try:
+        text = py.read_text(encoding="utf-8")
+    except Exception:
+        continue
+    for lineno, line in enumerate(text.splitlines(), 1):
+        if BAD_SYMBOL in line:
+            offenders.append(f"{py.relative_to(source_root)}:{lineno}: {line.strip()}")
+if offenders:
+    print(f"FAIL: candidate source references non-existent symbol '{BAD_SYMBOL}':", file=sys.stderr)
+    for offender in offenders:
+        print("   ", offender, file=sys.stderr)
+    sys.exit(1)
+print(f"[PASS] No candidate source file references '{BAD_SYMBOL}' ({len(py_files)} python files scanned).")
+
+# Guard 2: the bogus import must raise a clean ImportError naming the symbol.
+try:
+    from orba_gpu.backends import get_backend  # noqa: F401
+except ImportError as exc:
+    if BAD_SYMBOL not in str(exc):
+        print(f"FAIL: unexpected ImportError text for the bogus import: {exc}", file=sys.stderr)
+        sys.exit(1)
+    print(f"[PASS] 'from orba_gpu.backends import {BAD_SYMBOL}' raises a clean ImportError: {exc}")
+else:
+    print(f"FAIL: orba_gpu.backends.{BAD_SYMBOL} unexpectedly exists", file=sys.stderr)
+    sys.exit(1)
+
+# Guard 3: every backend symbol the PRODUCTION modules import must exist.
+backend_path = pkg_root / "backends" / "diffusers_backend.py"
+backend_tree = ast.parse(backend_path.read_text(encoding="utf-8"), filename=str(backend_path))
+defined = {n.name for n in backend_tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+for consumer in ("app.py", "generation.py"):
+    consumer_path = pkg_root / consumer
+    if not consumer_path.is_file():
+        continue
+    ctree = ast.parse(consumer_path.read_text(encoding="utf-8"), filename=str(consumer_path))
+    for node in ast.walk(ctree):
+        if not isinstance(node, ast.ImportFrom) or not node.module:
+            continue
+        mod = node.module
+        if not (mod.endswith("backends.diffusers_backend") or mod == "diffusers_backend"):
+            continue
+        for alias in node.names:
+            if alias.name == "*":
+                continue
+            if alias.name not in defined:
+                print(
+                    f"FAIL: {consumer} imports '{alias.name}' from {mod}, "
+                    f"which diffusers_backend does not define",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+print("[PASS] Every backend symbol imported by app.py / generation.py exists in diffusers_backend.")
 PY_CONTAINER_IMPORT_CHECK
 
 rm -rf "$STAGE_CHECK_SRC"

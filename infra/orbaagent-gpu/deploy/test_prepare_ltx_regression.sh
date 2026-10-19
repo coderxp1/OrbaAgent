@@ -784,12 +784,16 @@ echo "[PASS] Test 11: All docker exec heredoc invocations correctly use -i (inte
 # ------------------------------------------------------------------------------
 echo "--- [Test 12] Verify Candidate Source Package and Backend Interfaces ---"
 # Verifies that:
-# 1. Gate 8 does not attempt to import non-existent symbols like 'get_backend'.
-# 2. orba_gpu backend interfaces provide load_video_pipeline and run_video_inference.
-if grep -q "get_backend" "$PREPARE_SCRIPT"; then
-  echo "FAIL: prepare_ltx_model.sh contains reference to non-existent 'get_backend'!" >&2
-  exit 1
-fi
+# 1. No worker source file imports the non-existent symbol 'get_backend'.
+#    The guard MUST scan the worker source tree: the original production
+#    failure was a Python-level `from orba_gpu.backends import get_backend`,
+#    which a grep of the preparation shell script could never detect.
+# 2. That bogus import raises a clean ImportError naming the missing symbol.
+# 3. Every backend symbol the production modules import actually exists.
+# 4. orba_gpu backend interfaces provide load_video_pipeline and run_video_inference.
+#
+# NOTE: the source-tree scan lives inside the Python block below so that it
+# covers exactly the tree that is imported here.
 
 python3 - << 'PY_BACKEND_TEST'
 import ast
@@ -808,6 +812,9 @@ EXPECTED_INTERFACES = (
     "run_image_to_video_inference",
     "run_text_to_video_inference",
 )
+
+# The symbol whose absence caused the original production failure.
+BAD_SYMBOL = "get_backend"
 
 # Third-party modules that are legitimately absent on developer workstations but
 # present in the worker/CI image. A missing *project* module is still a failure.
@@ -845,8 +852,98 @@ if not found:
     print("FAIL: Could not locate orba_gpu package for backend test", file=sys.stderr)
     sys.exit(1)
 
+# Bind the package BEFORE the guards below: they must run in both the runtime
+# and the AST-fallback mode, and orba_gpu itself imports without torch.
 try:
     import orba_gpu
+except Exception as exc:
+    print(f"FAIL: could not import orba_gpu from the located tree: {exc}", file=sys.stderr)
+    sys.exit(1)
+
+# --------------------------------------------------------------------------- #
+# Guard 1: no worker source file may reference the non-existent symbol.
+# This replaces the previous guard, which grepped the preparation SCRIPT and
+# therefore could never detect a re-introduction in the Python source tree.
+# --------------------------------------------------------------------------- #
+pkg_root = Path(orba_gpu.__file__).resolve().parent
+source_root = pkg_root.parent
+
+offenders = []
+py_files = sorted(pkg_root.rglob("*.py"))
+worker_py = source_root / "worker.py"
+if worker_py.is_file():
+    py_files.append(worker_py)
+for py in py_files:
+    try:
+        text = py.read_text(encoding="utf-8")
+    except Exception:
+        continue
+    for lineno, line in enumerate(text.splitlines(), 1):
+        if BAD_SYMBOL in line:
+            offenders.append(f"{py.relative_to(source_root)}:{lineno}: {line.strip()}")
+if offenders:
+    print(
+        f"FAIL: worker source references non-existent symbol '{BAD_SYMBOL}':",
+        file=sys.stderr,
+    )
+    for offender in offenders:
+        print("   ", offender, file=sys.stderr)
+    sys.exit(1)
+print(f"[PASS] No worker source file references '{BAD_SYMBOL}' "
+      f"({len(py_files)} python files scanned).")
+
+# --------------------------------------------------------------------------- #
+# Guard 2: the bogus import must fail with a clean ImportError that names the
+# missing symbol. This is a RUNTIME check and needs no torch/fastapi.
+# --------------------------------------------------------------------------- #
+try:
+    from orba_gpu.backends import get_backend  # noqa: F401
+except ImportError as exc:
+    if BAD_SYMBOL not in str(exc):
+        print(f"FAIL: unexpected ImportError text for the bogus import: {exc}", file=sys.stderr)
+        sys.exit(1)
+    print(f"[PASS] 'from orba_gpu.backends import {BAD_SYMBOL}' raises a clean "
+          f"ImportError: {exc}")
+else:
+    print(f"FAIL: orba_gpu.backends.{BAD_SYMBOL} unexpectedly exists", file=sys.stderr)
+    sys.exit(1)
+
+# --------------------------------------------------------------------------- #
+# Guard 3: every backend symbol the PRODUCTION modules import must exist.
+# This is the general form of the original bug and works without fastapi.
+# --------------------------------------------------------------------------- #
+backend_path = pkg_root / "backends" / "diffusers_backend.py"
+if not backend_path.is_file():
+    print(f"FAIL: diffusers_backend.py not found at {backend_path}", file=sys.stderr)
+    sys.exit(1)
+backend_tree = ast.parse(backend_path.read_text(encoding="utf-8"), filename=str(backend_path))
+defined = {n.name for n in backend_tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+
+for consumer in ("app.py", "generation.py"):
+    consumer_path = pkg_root / consumer
+    if not consumer_path.is_file():
+        continue
+    ctree = ast.parse(consumer_path.read_text(encoding="utf-8"), filename=str(consumer_path))
+    for node in ast.walk(ctree):
+        if not isinstance(node, ast.ImportFrom) or not node.module:
+            continue
+        mod = node.module
+        if not (mod.endswith("backends.diffusers_backend") or mod == "diffusers_backend"):
+            continue
+        for alias in node.names:
+            if alias.name == "*":
+                continue
+            if alias.name not in defined:
+                print(
+                    f"FAIL: {consumer} imports '{alias.name}' from {mod}, "
+                    f"which diffusers_backend does not define",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+print("[PASS] Every backend symbol imported by app.py / generation.py exists "
+      "in diffusers_backend.")
+
+try:
     from orba_gpu.app import create_app
     from orba_gpu.config import Settings
     from orba_gpu import models, generation, ingest, secrets, validation
@@ -867,14 +964,10 @@ except ModuleNotFoundError as exc:
 
     # Static verification: parse the backend source and assert the public
     # interface exists without importing any runtime dependency.
-    pkg_root = Path(orba_gpu.__file__).resolve().parent
-    backend_path = pkg_root / "backends" / "diffusers_backend.py"
     if not backend_path.is_file():
         print(f"FAIL: diffusers_backend.py not found at {backend_path}", file=sys.stderr)
         sys.exit(1)
 
-    tree = ast.parse(backend_path.read_text(encoding="utf-8"), filename=str(backend_path))
-    defined = {n.name for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
     missing_interfaces = [name for name in EXPECTED_INTERFACES if name not in defined]
     if missing_interfaces:
         print(f"FAIL: Missing LTX-Video backend interfaces: {', '.join(missing_interfaces)}", file=sys.stderr)
@@ -882,7 +975,7 @@ except ModuleNotFoundError as exc:
 
     # The worker must stay importable without CUDA/torch at module import time.
     top_level_imports = set()
-    for node in tree.body:
+    for node in backend_tree.body:
         if isinstance(node, ast.Import):
             top_level_imports.update(alias.name.split(".")[0] for alias in node.names)
         elif isinstance(node, ast.ImportFrom) and node.module:
