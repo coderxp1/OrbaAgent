@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { servedWorkspaces } from "@/lib/auth/workspaces";
 import {
   currentWorkspace,
   encodeArtifactId,
@@ -95,11 +96,7 @@ export async function POST(request: Request) {
   // always served; additional tenants are declared with ORBA_TENANTS. With no
   // ORBA_TENANTS the served set is exactly {currentWorkspace()}, so the
   // behaviour is unchanged from before.
-  const allowedWorkspaces = new Set<string>([currentWorkspace()]);
-  for (const extra of (process.env.ORBA_TENANTS || "").split(",")) {
-    const name = extra.trim();
-    if (isSafeFilename(name)) allowedWorkspaces.add(name);
-  }
+  const allowedWorkspaces = servedWorkspaces(process.env);
 
   // The worker must target a workspace this deployment serves.
   const requestedWorkspace = String(form.get("workspace") || "").trim();

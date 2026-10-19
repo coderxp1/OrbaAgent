@@ -1,5 +1,6 @@
 import { getCredentialStore } from "@/lib/auth/credentials";
 import { signSessionToken } from "@/lib/auth/session";
+import { servedWorkspaces } from "@/lib/auth/workspaces";
 import { SESSION_COOKIE_NAME } from "@orbaagent/shared";
 import { NextResponse } from "next/server";
 
@@ -49,6 +50,13 @@ export async function POST(request: Request) {
         status: 401,
       },
     );
+  }
+
+  // A credential may only mint a session for a tenant this deployment
+  // actually serves. Without this check a key registered for an unknown
+  // workspace would still produce a usable session.
+  if (!servedWorkspaces(process.env).has(identity.tenantId)) {
+    return NextResponse.json({ error: "Tenant is not served by this deployment" }, { status: 403 });
   }
 
   const token = signSessionToken(secret, {

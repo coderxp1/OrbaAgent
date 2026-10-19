@@ -1,8 +1,17 @@
-import { resolveRequestIdentity } from "@/lib/auth/guard";
+import { authorize, resolveRequestIdentity } from "@/lib/auth/guard";
+import { GITHUB_STATE_COOKIE, statesMatch } from "@/lib/auth/oauth-state";
 import { IntegrationsManager } from "@orbaagent/agent-runtime";
+import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
 export async function handleGitHubCallback(request: Request) {
+  // This handler exchanges an authorization code and records an integration for
+  // the caller, so it is a protected endpoint like the others: in required
+  // mode only an authenticated caller may complete a flow.
+  const { identity, mode } = await resolveRequestIdentity(request);
+  const unauthenticated = authorize(identity, mode);
+  if (unauthenticated) return unauthenticated;
+
   const { searchParams } = new URL(request.url);
   const code = searchParams.get("code");
   const error = searchParams.get("error");
@@ -47,6 +56,25 @@ export async function handleGitHubCallback(request: Request) {
 
   const clientId = process.env.GITHUB_CLIENT_ID;
   const clientSecret = process.env.GITHUB_SECRET_ID;
+
+  // The state must match the cookie set when this browser started the flow,
+  // otherwise a third party could complete their own flow in this browser.
+  const cookieStore = await cookies();
+  const expectedState = cookieStore.get(GITHUB_STATE_COOKIE)?.value;
+  if (!statesMatch(searchParams.get("state"), expectedState)) {
+    return new NextResponse(
+      `<!DOCTYPE html>
+<html lang="en">
+<body style="background:#121212;color:#fff;font-family:sans-serif;text-align:center;padding:50px;">
+  <p>GitHub authorization could not be verified. Please start the connection again from OrbaAgent.</p>
+</body>
+</html>`,
+      {
+        status: 400,
+        headers: { "Content-Type": "text/html; charset=utf-8" },
+      },
+    );
+  }
 
   if (!clientId || !clientSecret) {
     return new NextResponse(
@@ -260,6 +288,15 @@ export async function handleGitHubCallback(request: Request) {
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
       maxAge: 60 * 60 * 24 * 30, // 30 days
+      path: "/",
+    });
+
+    // The state is single-use: clear it so it cannot be replayed.
+    response.cookies.set(GITHUB_STATE_COOKIE, "", {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: 0,
       path: "/",
     });
 

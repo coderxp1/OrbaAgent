@@ -31,7 +31,10 @@ const { GET: artifactGet } = await import(
 const { POST: uploadPost } = await import("../../app/api/uploads/route.js");
 const { GET: mcpGet } = await import("../../app/api/mcp/route.js");
 const { GET: profileGet } = await import("../../app/api/user/profile/route.js");
-const { POST: sessionPost } = await import("../../app/api/auth/session/route.js");
+const { GET: githubCallbackGet } = await import("../../app/api/auth/github/callback/route.js");
+const { POST: sessionPost, DELETE: sessionDelete } = await import(
+  "../../app/api/auth/session/route.js"
+);
 
 const API_KEY = "orba_sk_live_activation_test_key";
 const TENANT = "acme";
@@ -69,7 +72,8 @@ beforeEach(() => {
   process.env.ORBA_AUTH_MODE = "required";
   process.env.ORBA_SESSION_SECRET = SECRET;
   process.env.ORBA_TENANT_ID = "";
-  process.env.ORBA_TENANTS = "";
+  // The deployment serves the tenant the test credential belongs to.
+  process.env.ORBA_TENANTS = TENANT;
   process.env.ORBA_API_KEYS = JSON.stringify({
     [digest(API_KEY)]: { tenantId: TENANT, userId: "u-activation" },
   });
@@ -192,5 +196,73 @@ describe("activation acceptance", () => {
     );
     expect(exchange.status).toBe(401);
     expect(exchange.headers.get("set-cookie")).toBeNull();
+  });
+
+  it("resolves a signed session even though the static session map is empty", async () => {
+    // The static ORBA_SESSIONS map is empty, so resolution can only have come
+    // from the signed-cookie path.
+    expect(process.env.ORBA_SESSIONS ?? "").toBe("");
+    const token = signSessionToken(SECRET, {
+      tenantId: TENANT,
+      userId: "u-activation",
+      expiresAt: Math.floor(Date.now() / 1000) + 3600,
+    });
+    cookieJar.set("orba_session", token as string);
+    const res = await profileGet(authRequest("/api/user/profile") as never);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.id).toBe("u-activation");
+  });
+
+  it("rejects an expired signed session", async () => {
+    const token = signSessionToken(SECRET, {
+      tenantId: TENANT,
+      userId: "u-activation",
+      expiresAt: Math.floor(Date.now() / 1000) - 10,
+    });
+    cookieJar.set("orba_session", token as string);
+    const res = await uploadPost(uploadRequest());
+    expect(res.status).toBe(401);
+  });
+
+  it("rejects a malformed session cookie", async () => {
+    for (const malformed of ["", "garbage", "v1.only-two", "v1.a.b.c", `${SECRET}.x.y`]) {
+      cookieJar.set("orba_session", malformed);
+      const res = await uploadPost(uploadRequest());
+      expect(res.status).toBe(401);
+    }
+  });
+
+  it("invalidates the browser cookie on logout", async () => {
+    const res = await sessionDelete();
+    expect(res.status).toBe(200);
+    const setCookie = res.headers.get("set-cookie") || "";
+    expect(setCookie).toContain("orba_session=");
+    expect(setCookie).toContain("Max-Age=0");
+  });
+
+  it("refuses to mint a session for a tenant the deployment does not serve", async () => {
+    process.env.ORBA_TENANTS = "acme";
+    process.env.ORBA_API_KEYS = JSON.stringify({
+      [digest("orba_sk_other_tenant")]: { tenantId: "globex", userId: "u-globex" },
+    });
+    const exchange = await sessionPost(
+      new Request("https://orbaagent.dev/api/auth/session", {
+        method: "POST",
+        body: JSON.stringify({ credential: "orba_sk_other_tenant" }),
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    expect(exchange.status).toBe(403);
+    expect(exchange.headers.get("set-cookie")).toBeNull();
+  });
+
+  it("rejects an anonymous caller on the GitHub OAuth callback", async () => {
+    // The callback exchanges an authorization code and records an integration,
+    // so it must be refused before any outbound call is made.
+    const res = await githubCallbackGet(
+      new Request("https://orbaagent.dev/api/auth/github/callback?code=x&state=y") as never,
+    );
+    expect(res.status).toBe(401);
   });
 });
