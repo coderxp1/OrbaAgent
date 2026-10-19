@@ -130,6 +130,7 @@ export class MediaVideoGenerateTool implements ITool {
       model?: string;
       image_url?: string;
       image_data?: string;
+      workspace?: string;
     },
   ): Promise<ClipGenerationResult> {
     const maxAttempts = 60;
@@ -156,6 +157,9 @@ export class MediaVideoGenerateTool implements ITool {
             Authorization: `Bearer ${workerToken}`,
           },
           body: JSON.stringify({
+            // The tenant the server resolved for this caller. The worker
+            // ingests the artifact into that workspace.
+            workspace: current.workspace,
             prompt: current.prompt,
             negative_prompt: current.negative_prompt,
             duration_seconds: current.duration_seconds,
@@ -599,6 +603,9 @@ export class MediaVideoGenerateTool implements ITool {
         model: chosenModel,
         image_url: inputImageUrl,
         image_data: inputImageData,
+        // The tenant the server resolved for this caller. The worker ingests
+        // the artifact into that workspace.
+        workspace: context.tenantId,
       });
 
       if (!clip.success) {

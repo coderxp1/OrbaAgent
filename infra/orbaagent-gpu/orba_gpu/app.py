@@ -213,7 +213,7 @@ def create_app(
                 detail={"status": "GENERATION_FAILED", "message": redactor.redact(exc)},
             ) from exc
 
-        return _finalize(outcome, settings, redactor)
+        return _finalize(outcome, settings, redactor, _safe_workspace(payload))
 
     @app.post("/api/generate/video")
     def generate_video_endpoint(payload: dict, token: str = Depends(verify_auth)):
@@ -256,9 +256,9 @@ def create_app(
                 detail={"status": "GENERATION_FAILED", "message": redactor.redact(exc)},
             ) from exc
 
-        return _finalize(outcome, settings, redactor)
+        return _finalize(outcome, settings, redactor, _safe_workspace(payload))
 
-    def _finalize(outcome, cfg: Settings, red: Redactor) -> dict:
+    def _finalize(outcome, cfg: Settings, red: Redactor, workspace: str = "") -> dict:
         """Deliver the verified artifact to production, then report success.
 
         If ingest is not configured the artifact stays local and the response
@@ -276,7 +276,7 @@ def create_app(
                     ingest_token=cfg.ingest_token,
                     artifact_path=outcome.path,
                     content_type=outcome.content_type,
-                    workspace=_workspace_from_env(),
+                    workspace=workspace or _workspace_from_env(),
                     bundle=outcome.job_id,
                     filename=outcome.path.name,
                     metadata={
@@ -313,6 +313,22 @@ def create_app(
         }
 
     return app
+
+
+def _safe_workspace(payload: dict) -> str:
+    """Resolve the tenant workspace a job belongs to.
+
+    The API sends the tenant it resolved for the caller. The value becomes a
+    path segment on the production host, so it is validated here rather than
+    trusted: only a conservative character set is accepted, and anything else
+    falls back to the deployment workspace.
+    """
+    raw = str((payload or {}).get("workspace") or "").strip()
+    if not raw or len(raw) > 64 or raw in (".", ".."):
+        return _workspace_from_env()
+    if all(c.isascii() and (c.isalnum() or c in "._-") for c in raw):
+        return raw
+    return _workspace_from_env()
 
 
 def _workspace_from_env() -> str:

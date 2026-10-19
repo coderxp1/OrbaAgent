@@ -85,7 +85,7 @@ export class MediaImageGenerateTool implements ITool {
 
   async execute(
     args: Record<string, unknown>,
-    _context: ToolExecutionContext,
+    context: ToolExecutionContext,
   ): Promise<ToolExecutionResult> {
     const startTime = Date.now();
     const toolCallId = (args._toolCallId as string) || `tc_img_${Date.now()}`;
@@ -212,6 +212,9 @@ export class MediaImageGenerateTool implements ITool {
               Authorization: `Bearer ${workerToken}`,
             },
             body: JSON.stringify({
+              // The tenant the server resolved for this caller. The worker
+              // ingests the artifact into that workspace.
+              workspace: context.tenantId,
               prompt: effectivePrompt,
               negative_prompt: effectiveNegative,
               width: targetWidth,

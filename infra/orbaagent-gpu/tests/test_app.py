@@ -13,7 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from orba_gpu.app import create_app
+from orba_gpu.app import _safe_workspace, create_app
 from orba_gpu.config import Settings
 from orba_gpu.generation import GenerationLimiter
 from orba_gpu.gpu_info import GpuInfo
@@ -342,3 +342,17 @@ class TestSecretHygiene:
         assert r_resp.status_code == 200
         assert r_resp.json()["status"] == "RESET"
         assert r_resp.json()["active_generations"] == 0
+
+def test_safe_workspace_accepts_a_plain_tenant():
+    assert _safe_workspace({"workspace": "acme"}) == "acme"
+    assert _safe_workspace({"workspace": "tenant-1_2.3"}) == "tenant-1_2.3"
+
+
+def test_safe_workspace_rejects_unsafe_values_and_falls_back(monkeypatch):
+    monkeypatch.setenv("ORBA_TENANT_ID", "default-tenant")
+    assert _safe_workspace({"workspace": "../escape"}) == "default-tenant"
+    assert _safe_workspace({"workspace": "a/b"}) == "default-tenant"
+    assert _safe_workspace({"workspace": ".."}) == "default-tenant"
+    assert _safe_workspace({"workspace": ""}) == "default-tenant"
+    assert _safe_workspace({}) == "default-tenant"
+    assert _safe_workspace({"workspace": "x" * 65}) == "default-tenant"

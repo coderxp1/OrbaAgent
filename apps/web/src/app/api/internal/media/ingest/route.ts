@@ -91,11 +91,20 @@ export async function POST(request: Request) {
     );
   }
 
-  const workspace = currentWorkspace();
+  // Workspaces this deployment serves. The deployment's own workspace is
+  // always served; additional tenants are declared with ORBA_TENANTS. With no
+  // ORBA_TENANTS the served set is exactly {currentWorkspace()}, so the
+  // behaviour is unchanged from before.
+  const allowedWorkspaces = new Set<string>([currentWorkspace()]);
+  for (const extra of (process.env.ORBA_TENANTS || "").split(",")) {
+    const name = extra.trim();
+    if (isSafeFilename(name)) allowedWorkspaces.add(name);
+  }
 
-  // The worker must target the workspace this deployment serves.
+  // The worker must target a workspace this deployment serves.
   const requestedWorkspace = String(form.get("workspace") || "").trim();
-  if (requestedWorkspace && requestedWorkspace !== workspace) {
+  const workspace = requestedWorkspace || currentWorkspace();
+  if (!allowedWorkspaces.has(workspace)) {
     return Response.json({ error: "Workspace mismatch" }, { status: 403 });
   }
 

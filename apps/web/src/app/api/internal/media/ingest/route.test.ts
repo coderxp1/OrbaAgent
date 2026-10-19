@@ -21,6 +21,7 @@ const ENV_KEYS = [
   "ORBA_UPLOAD_DIR",
   "ORBA_INTERNAL_INGEST_TOKEN",
   "ORBA_TENANT_ID",
+  "ORBA_TENANTS",
   "ORBA_MAX_ARTIFACT_BYTES",
 ] as const;
 
@@ -281,6 +282,30 @@ describe("ingest workspace isolation", () => {
   it("refuses a request for a different workspace even when unset locally", async () => {
     process.env.ORBA_TENANT_ID = "";
     const res = await post(multipart(PNG_BYTES, { workspace: "someone-elses-tenant" }));
+    expect(res.status).toBe(403);
+  });
+
+  it("serves a tenant declared in ORBA_TENANTS and stores the artifact there", async () => {
+    process.env.ORBA_TENANT_ID = "default-tenant";
+    process.env.ORBA_TENANTS = "acme, globex";
+    const res = await post(multipart(PNG_BYTES, { workspace: "acme", bundle: "b3" }));
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.workspace).toBe("acme");
+    expect(existsSync(join(uploadDir, "acme", "b3"))).toBe(true);
+  });
+
+  it("still refuses a tenant that ORBA_TENANTS does not declare", async () => {
+    process.env.ORBA_TENANT_ID = "default-tenant";
+    process.env.ORBA_TENANTS = "acme";
+    const res = await post(multipart(PNG_BYTES, { workspace: "globex" }));
+    expect(res.status).toBe(403);
+  });
+
+  it("ignores an unsafe workspace in ORBA_TENANTS rather than trusting it", async () => {
+    process.env.ORBA_TENANT_ID = "default-tenant";
+    process.env.ORBA_TENANTS = "../escape";
+    const res = await post(multipart(PNG_BYTES, { workspace: "../escape" }));
     expect(res.status).toBe(403);
   });
 });
