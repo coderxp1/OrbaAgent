@@ -36,6 +36,7 @@ fi
 
 # 2. Build candidate in a tempfile on the exact same filesystem (guarantees atomic rename)
 TMP="$(mktemp "${ENV_FILE}.tmp.XXXXXX")"
+trap 'if [ -n "${TMP:-}" ] && [ -f "$TMP" ]; then rm -f "$TMP"; fi' EXIT
 chmod 0600 "$TMP"
 
 # Enforce candidate ownership matches destination, or root:root if new
@@ -136,6 +137,7 @@ fi
 #    ownership, rename(2) atomically swaps the destination inode without
 #    any permission exposure window or reliance on post-rename chmod.
 mv -f "$TMP" "$ENV_FILE"
+trap - EXIT
 
 # 5. Clear secret variables from shell memory immediately.
 unset SESSION_SECRET API_KEY_SHA

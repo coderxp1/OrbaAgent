@@ -87,6 +87,7 @@ fi
 #     Creating $TMP via mktemp in $ENV_FILE's directory guarantees the same
 #     filesystem, ensuring mv -f performs an atomic rename(2) system call.
 TMP="$(mktemp "${ENV_FILE}.tmp.XXXXXX")"
+trap 'if [ -n "${TMP:-}" ] && [ -f "$TMP" ]; then rm -f "$TMP"; fi' EXIT
 chmod 0600 "$TMP"
 
 # Enforce candidate ownership matches destination, or root:root if new. Do not ignore errors.
@@ -186,6 +187,7 @@ fi
 #     ownership, rename(2) atomically swaps the destination inode without
 #     any permission exposure window or reliance on post-rename chmod.
 mv -f "$TMP" "$ENV_FILE"
+trap - EXIT
 
 # 2e. Clear secret variables from shell memory immediately.
 unset SESSION_SECRET API_KEY_SHA
