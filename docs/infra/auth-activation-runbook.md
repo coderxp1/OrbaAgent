@@ -68,6 +68,10 @@ strictly validated before modifying or replacing `$ENV_FILE`. If any validation
 check fails, the candidate is discarded, execution aborts immediately, and the
 existing `$ENV_FILE` remains completely untouched.
 
+This procedure is also encapsulated in the canonical script
+`/opt/orbaagent/scripts/infra/update-auth-env.sh`. You can either run the script
+or execute the exact commands below:
+
 ```bash
 ENV_FILE="/etc/orbaagent/prod.env"
 
@@ -84,10 +88,22 @@ fi
 #     filesystem, ensuring mv -f performs an atomic rename(2) system call.
 TMP="$(mktemp "${ENV_FILE}.tmp.XXXXXX")"
 chmod 0600 "$TMP"
+
+# Enforce candidate ownership matches destination, or root:root if new. Do not ignore errors.
 if [ -f "$ENV_FILE" ]; then
-  chown --reference="$ENV_FILE" "$TMP" 2>/dev/null || true
+  if ! chown --reference="$ENV_FILE" "$TMP" 2>/dev/null; then
+    echo "FAIL: Could not set candidate ownership to match $ENV_FILE" >&2
+    echo "Recovery: Ensure this step is run as root or with permissions to match $ENV_FILE ownership." >&2
+    rm -f "$TMP"
+    exit 1
+  fi
 else
-  chown root:root "$TMP" 2>/dev/null || true
+  if ! chown root:root "$TMP" 2>/dev/null; then
+    echo "FAIL: Could not set candidate ownership to root:root" >&2
+    echo "Recovery: Ensure this step is run as root." >&2
+    rm -f "$TMP"
+    exit 1
+  fi
 fi
 
 # preserve every existing line except the four we are replacing
