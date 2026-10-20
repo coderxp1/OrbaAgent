@@ -26,7 +26,7 @@ export async function POST(request: Request) {
     // server-validated credential or deployment configuration, never from
     // client input (see @orbaagent/shared and docs/adr/004-auth-and-identity.md).
     const { identity, mode } = await resolveRequestIdentity(request);
-    const unauthenticated = authorize(identity, mode);
+    const unauthenticated = authorize(identity, mode, request);
     if (unauthenticated) return unauthenticated;
     const verifiedTenantId = identity.tenantId;
     const verifiedUserId = identity.userId;

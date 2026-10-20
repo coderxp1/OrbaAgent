@@ -26,7 +26,7 @@ export async function POST(request: Request) {
     // Tenant comes from the server-resolved caller identity only; it is never
     // taken from client input (see @orbaagent/shared and ADR-004).
     const { identity, mode } = await resolveRequestIdentity(request);
-    const unauthenticated = authorize(identity, mode);
+    const unauthenticated = authorize(identity, mode, request);
     if (unauthenticated) return unauthenticated;
     const workspace = identity.tenantId;
     const uploadRoot = join(/* turbopackIgnore: true */ baseDir, workspace, bundle);

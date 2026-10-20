@@ -122,3 +122,59 @@ describe("authorizeTenant", () => {
     expect(authorizeTenant(identity, "victim")?.status).toBe(403);
   });
 });
+
+describe("authorize CSRF and origin policy", () => {
+  const postReq = (origin?: string, url = "https://orbaagent.dev/api/chat") =>
+    new Request(url, {
+      method: "POST",
+      headers: origin ? { origin } : undefined,
+    });
+
+  it("allows API key callers regardless of Origin header (no CSRF check applied)", async () => {
+    const { identity, mode } = await resolveIdentityFromSources(
+      { headers: headers(`Bearer ${API_KEY}`) },
+      storeWithCredentials(),
+      {},
+    );
+    expect(identity.source).toBe("api-key");
+
+    // No Origin header (e.g. curl / CLI / desktop client)
+    expect(authorize(identity, mode, postReq())).toBeNull();
+
+    // External / custom Origin header
+    expect(authorize(identity, mode, postReq("https://custom-client.example"))).toBeNull();
+  });
+
+  it("enforces origin checks on session callers for state-changing requests", async () => {
+    const { identity, mode } = await resolveIdentityFromSources(
+      { headers: headers(), cookies: cookies(SESSION) },
+      storeWithCredentials(),
+      {},
+    );
+    expect(identity.source).toBe("session");
+
+    // Trusted origin matching deployment
+    const env = { ALLOWED_ORIGINS: "https://orbaagent.dev" };
+    expect(authorize(identity, mode, postReq("https://orbaagent.dev"), env)).toBeNull();
+
+    // Missing Origin header on state-changing request -> rejected with 403
+    const noOriginRejection = authorize(identity, mode, postReq(), env);
+    expect(noOriginRejection?.status).toBe(403);
+
+    // Untrusted Origin header -> rejected with 403
+    const untrustedRejection = authorize(identity, mode, postReq("https://attacker.example"), env);
+    expect(untrustedRejection?.status).toBe(403);
+  });
+
+  it("permits GET/HEAD safe requests for session callers even without origin", async () => {
+    const { identity, mode } = await resolveIdentityFromSources(
+      { headers: headers(), cookies: cookies(SESSION) },
+      storeWithCredentials(),
+      {},
+    );
+    const getReq = new Request("https://orbaagent.dev/api/artifacts/acme/file.txt", {
+      method: "GET",
+    });
+    expect(authorize(identity, mode, getReq)).toBeNull();
+  });
+});

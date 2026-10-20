@@ -51,21 +51,73 @@ install -m 0600 -o root -g root /dev/null /root/.orba_owner_key
 printf '%s' "$API_KEY" > /root/.orba_owner_key
 chmod 0600 /root/.orba_owner_key
 
-# 1d. the plaintext leaves the shell here.
-unset API_KEY SESSION_SECRET
+# 1d. the RAW API key leaves the shell here. SESSION_SECRET is kept alive
+#     because step 2 writes it into the deployment environment. It is unset
+#     there, immediately after writing.
+unset API_KEY
 ```
 
-## 2. Write the deployment environment (digests only)
+## 2. Write the deployment environment (atomic merge, digests only)
+
+This step **preserves all existing settings** in `prod.env` (database
+passwords, API tokens, MinIO credentials, etc.) and updates **only** the four
+authentication variables. A timestamped backup is created before any write.
 
 ```bash
-install -m 0600 -o root -g root /dev/null /etc/orbaagent/prod.env
+ENV_FILE="/etc/orbaagent/prod.env"
+
+# 2a. back up the existing environment file (if any).
+if [ -f "$ENV_FILE" ]; then
+  BACKUP="${ENV_FILE}.bak.$(date +%Y%m%d_%H%M%S)"
+  cp -a "$ENV_FILE" "$BACKUP"
+  chmod 0600 "$BACKUP"
+  echo "backup → $BACKUP"
+fi
+
+# 2b. build the update atomically in a tempfile, then rename.
+#     - read existing settings, stripping out the four auth keys we will set
+#     - append the new auth keys
+#     - rename into place (atomic on the same filesystem)
+TMP="$(mktemp "${ENV_FILE}.tmp.XXXXXX")"
+chmod 0600 "$TMP"
+
+# preserve every existing line except the four we are replacing
+if [ -f "$ENV_FILE" ]; then
+  grep -v -E '^(ORBA_AUTH_MODE|ORBA_SESSION_SECRET|ORBA_API_KEYS|ORBA_TENANTS)=' \
+    "$ENV_FILE" >> "$TMP" || true
+fi
+
+# append the authentication variables
 {
   printf 'ORBA_AUTH_MODE=required\n'
   printf 'ORBA_SESSION_SECRET=%s\n' "$SESSION_SECRET"
   printf 'ORBA_API_KEYS=%s\n' "{\"$API_KEY_SHA\":{\"tenantId\":\"$TENANT\",\"userId\":\"owner\"}}"
   printf 'ORBA_TENANTS=%s\n' "$TENANT"
-} >> /etc/orbaagent/prod.env
+} >> "$TMP"
+
+mv -f "$TMP" "$ENV_FILE"
+chmod 0600 "$ENV_FILE"
+
+# 2c. SESSION_SECRET and API_KEY_SHA leave the shell here.
 unset SESSION_SECRET API_KEY_SHA
+
+# 2d. validate the written secret is non-empty and ≥ 32 characters,
+#     without printing its value.
+SECRET_LEN=$(grep -oP '^ORBA_SESSION_SECRET=\K.*' "$ENV_FILE" | wc -c)
+if [ "$SECRET_LEN" -lt 32 ]; then
+  echo "FAIL: ORBA_SESSION_SECRET is empty or too short ($SECRET_LEN chars)" >&2
+  echo "Recovery: restore from $BACKUP and re-run from step 1." >&2
+  exit 1
+fi
+echo "OK: ORBA_SESSION_SECRET is present and $SECRET_LEN chars (value not printed)"
+```
+
+**Recovery:** if anything goes wrong, restore the backup:
+
+```bash
+# restore prod.env from the most recent backup
+cp -a /etc/orbaagent/prod.env.bak.* /etc/orbaagent/prod.env   # pick the correct timestamp
+chmod 0600 /etc/orbaagent/prod.env
 ```
 
 `ORBA_API_KEYS` stores only the **SHA-256 digest** of the key. `ORBA_SESSION_SECRET`
