@@ -63,6 +63,11 @@ This step **preserves all existing settings** in `prod.env` (database
 passwords, API tokens, MinIO credentials, etc.) and updates **only** the four
 authentication variables. A timestamped backup is created before any write.
 
+**Pre-replacement validation:** The candidate environment file (`$TMP`) is
+strictly validated before modifying or replacing `$ENV_FILE`. If any validation
+check fails, the candidate is discarded, execution aborts immediately, and the
+existing `$ENV_FILE` remains completely untouched.
+
 ```bash
 ENV_FILE="/etc/orbaagent/prod.env"
 
@@ -74,7 +79,7 @@ if [ -f "$ENV_FILE" ]; then
   echo "backup → $BACKUP"
 fi
 
-# 2b. build the update atomically in a tempfile on the same filesystem.
+# 2b. build the candidate update atomically in a tempfile on the same filesystem.
 #     Creating $TMP via mktemp in $ENV_FILE's directory guarantees the same
 #     filesystem, ensuring mv -f performs an atomic rename(2) system call.
 TMP="$(mktemp "${ENV_FILE}.tmp.XXXXXX")"
@@ -99,32 +104,47 @@ fi
   printf 'ORBA_TENANTS=%s\n' "$TENANT"
 } >> "$TMP"
 
+# 2c. VALIDATE CANDIDATE BEFORE REPLACEMENT.
+#     The original file is NOT modified until all candidate checks pass.
+
+# (i) Secret length check (measures exact characters, excluding newlines)
+TMP_SECRET="$(grep '^ORBA_SESSION_SECRET=' "$TMP" | cut -d'=' -f2- | tr -d '\r\n')"
+TMP_SECRET_LEN="${#TMP_SECRET}"
+unset TMP_SECRET
+
+if [ "$TMP_SECRET_LEN" -lt 32 ]; then
+  echo "FAIL: Candidate ORBA_SESSION_SECRET is empty or too short ($TMP_SECRET_LEN chars, minimum 32)" >&2
+  echo "Aborting before replacement: $ENV_FILE remains untouched." >&2
+  rm -f "$TMP"
+  exit 1
+fi
+
+# (ii) API keys JSON structure validation
+if ! python3 -c 'import json, re, sys; env = dict(re.findall(r"^([A-Z_]+)=(.*)$", open(sys.argv[1]).read(), re.M)); keys = json.loads(env.get("ORBA_API_KEYS", "")); assert isinstance(keys, dict) and len(keys) > 0' "$TMP" 2>/dev/null; then
+  echo "FAIL: Candidate ORBA_API_KEYS is invalid JSON or empty" >&2
+  echo "Aborting before replacement: $ENV_FILE remains untouched." >&2
+  rm -f "$TMP"
+  exit 1
+fi
+
+# (iii) Mode and tenants presence
+if ! grep -q '^ORBA_AUTH_MODE=required$' "$TMP" || ! grep -q '^ORBA_TENANTS=' "$TMP"; then
+  echo "FAIL: Candidate is missing required auth variables" >&2
+  echo "Aborting before replacement: $ENV_FILE remains untouched." >&2
+  rm -f "$TMP"
+  exit 1
+fi
+
+# 2d. Atomic replacement: all candidate validations passed cleanly.
 mv -f "$TMP" "$ENV_FILE"
 chmod 0600 "$ENV_FILE"
 
-# 2c. SESSION_SECRET and API_KEY_SHA leave the shell here.
+# 2e. Clear secret variables from shell memory immediately.
 unset SESSION_SECRET API_KEY_SHA
-
-# 2d. validate the written secret is non-empty and ≥ 32 characters,
-#     measuring exact character count without newline artifacts and without
-#     printing the secret value.
-SECRET_VAL="$(grep '^ORBA_SESSION_SECRET=' "$ENV_FILE" | cut -d'=' -f2- | tr -d '\r\n')"
-SECRET_LEN="${#SECRET_VAL}"
-unset SECRET_VAL
-
-if [ "$SECRET_LEN" -lt 32 ]; then
-  echo "FAIL: ORBA_SESSION_SECRET is empty or too short ($SECRET_LEN chars, minimum 32)" >&2
-  echo "Recovery: restoring from $BACKUP" >&2
-  if [ -n "${BACKUP:-}" ] && [ -f "$BACKUP" ]; then
-    cp -a "$BACKUP" "$ENV_FILE"
-    chmod 0600 "$ENV_FILE"
-  fi
-  exit 1
-fi
-echo "OK: ORBA_SESSION_SECRET is present and $SECRET_LEN chars (value not printed)"
+echo "OK: $ENV_FILE atomically updated with validated candidate configuration ($TMP_SECRET_LEN char secret, value not printed)"
 ```
 
-**Recovery:** if anything goes wrong, restore the backup:
+**Disaster Recovery:** if an unforeseen operating system error occurs during rename, restore from the backup:
 
 ```bash
 # restore prod.env from the most recent backup
@@ -133,6 +153,7 @@ chmod 0600 /etc/orbaagent/prod.env
 ```
 
 `ORBA_API_KEYS` stores only the **SHA-256 digest** of the key. `ORBA_SESSION_SECRET`
+
 
 signs the session cookies and must never leave the server.
 
@@ -247,45 +268,54 @@ database migration, no schema change, and no model to restore.
 
 ## 7. Secure key handoff and disposal
 
-The raw key must be imported into the authorized operator's password manager
-**without exposing it on screen, in chat, in shell history, or in terminal
-recordings**.
+The raw owner API key must be imported into the authorized operator's password
+manager **without exposing it on screen, in chat, in shell history, or in
+terminal session recordings**.
 
-### 7a. Operator retrieval into password manager
+### 7a. Primary recommended workflow: Direct workstation clipboard pipe
 
-From the authorized operator's workstation:
+From the authorized operator's local workstation, pipe the key over SSH directly
+into the local OS clipboard without echoing to stdout or writing to local disk:
 
 ```bash
-# Option A: Pipe directly into the local clipboard over SSH (no disk file, no terminal echo)
 # macOS:
 ssh root@<host> 'cat /root/.orba_owner_key' | pbcopy
+
 # Linux (Wayland):
 ssh root@<host> 'cat /root/.orba_owner_key' | wl-copy
+
 # Linux (X11):
 ssh root@<host> 'cat /root/.orba_owner_key' | xclip -selection clipboard
+
 # Windows (PowerShell):
 ssh root@<host> 'cat /root/.orba_owner_key' | Set-Clipboard
-
-# Then paste directly into the password manager entry.
-
-# Option B: Import directly via password manager CLI (e.g. 1Password):
-ssh root@<host> 'cat /root/.orba_owner_key' | op item create \
-  --category="Password" --title="OrbaAgent Owner API Key" --vault="Private" -
-
-# Option C: Pull via SCP into a restricted local file, import, and shred:
-install -m 0600 /dev/null ~/.orba_owner_key.tmp
-scp root@<host>:/root/.orba_owner_key ~/.orba_owner_key.tmp
-# ... (import ~/.orba_owner_key.tmp into password manager) ...
-shred -u ~/.orba_owner_key.tmp 2>/dev/null || rm -f ~/.orba_owner_key.tmp
 ```
+
+Immediately paste the key directly into the operator's password manager entry
+(such as 1Password, Bitwarden, or KeePassXC) and save it.
 
 ### 7b. Secure shredding on the production host
 
-Once safely stored in the password manager, shred the root key file immediately:
+Immediately after saving the key in the password manager, shred the root key
+file from the host filesystem:
 
 ```bash
 sudo shred -u /root/.orba_owner_key 2>/dev/null || sudo rm -f /root/.orba_owner_key
 ```
+
+### 7c. Scope and limitations disclosure
+
+* **Verification Scope**: Automated testing verifies the generation of the
+  restricted file (`0600`), piped capture into a simulated sink without
+  stdout/terminal leakage, and host file shredding. Direct integration with a
+  live, third-party password manager vault (e.g. 1Password/Bitwarden) has
+  **not** been executed by test automation.
+* **Clipboard History Caveat**: If an unconfined clipboard history utility is
+  running on the operator's workstation, it may log clipboard contents. The
+  operator should ensure clipboard history is cleared or bypassed.
+* **Root Window**: Between Step 1c and Step 7b, the plaintext key resides in
+  `/root/.orba_owner_key` with mode `0600` on the host until shredded.
+
 
 ## Notes and known limitations
 
