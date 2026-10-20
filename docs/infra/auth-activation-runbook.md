@@ -41,8 +41,8 @@ TENANT="default-tenant"
 umask 077
 
 # 1b. generate. The values only ever exist in this shell's variables.
-API_KEY="$(openssl rand -base64 32 | tr -dc 'A-Za-z0-9' | head -c 40)"
-SESSION_SECRET="$(openssl rand -base64 48 | tr -dc 'A-Za-z0-9' | head -c 64)"
+API_KEY="$(openssl rand -base64 48 | tr -dc 'A-Za-z0-9' | head -c 40)"
+SESSION_SECRET="$(openssl rand -base64 64 | tr -dc 'A-Za-z0-9' | head -c 64)"
 API_KEY_SHA="$(printf '%s' "$API_KEY" | sha256sum | cut -d' ' -f1)"
 
 # 1c. hand the RAW key to the operator exactly once, in a root-only file.
@@ -74,12 +74,16 @@ if [ -f "$ENV_FILE" ]; then
   echo "backup → $BACKUP"
 fi
 
-# 2b. build the update atomically in a tempfile, then rename.
-#     - read existing settings, stripping out the four auth keys we will set
-#     - append the new auth keys
-#     - rename into place (atomic on the same filesystem)
+# 2b. build the update atomically in a tempfile on the same filesystem.
+#     Creating $TMP via mktemp in $ENV_FILE's directory guarantees the same
+#     filesystem, ensuring mv -f performs an atomic rename(2) system call.
 TMP="$(mktemp "${ENV_FILE}.tmp.XXXXXX")"
 chmod 0600 "$TMP"
+if [ -f "$ENV_FILE" ]; then
+  chown --reference="$ENV_FILE" "$TMP" 2>/dev/null || true
+else
+  chown root:root "$TMP" 2>/dev/null || true
+fi
 
 # preserve every existing line except the four we are replacing
 if [ -f "$ENV_FILE" ]; then
@@ -102,11 +106,19 @@ chmod 0600 "$ENV_FILE"
 unset SESSION_SECRET API_KEY_SHA
 
 # 2d. validate the written secret is non-empty and ≥ 32 characters,
-#     without printing its value.
-SECRET_LEN=$(grep -oP '^ORBA_SESSION_SECRET=\K.*' "$ENV_FILE" | wc -c)
+#     measuring exact character count without newline artifacts and without
+#     printing the secret value.
+SECRET_VAL="$(grep '^ORBA_SESSION_SECRET=' "$ENV_FILE" | cut -d'=' -f2- | tr -d '\r\n')"
+SECRET_LEN="${#SECRET_VAL}"
+unset SECRET_VAL
+
 if [ "$SECRET_LEN" -lt 32 ]; then
-  echo "FAIL: ORBA_SESSION_SECRET is empty or too short ($SECRET_LEN chars)" >&2
-  echo "Recovery: restore from $BACKUP and re-run from step 1." >&2
+  echo "FAIL: ORBA_SESSION_SECRET is empty or too short ($SECRET_LEN chars, minimum 32)" >&2
+  echo "Recovery: restoring from $BACKUP" >&2
+  if [ -n "${BACKUP:-}" ] && [ -f "$BACKUP" ]; then
+    cp -a "$BACKUP" "$ENV_FILE"
+    chmod 0600 "$ENV_FILE"
+  fi
   exit 1
 fi
 echo "OK: ORBA_SESSION_SECRET is present and $SECRET_LEN chars (value not printed)"
@@ -121,6 +133,7 @@ chmod 0600 /etc/orbaagent/prod.env
 ```
 
 `ORBA_API_KEYS` stores only the **SHA-256 digest** of the key. `ORBA_SESSION_SECRET`
+
 signs the session cookies and must never leave the server.
 
 ## 3. Preflight checks (read-only, before any restart)
@@ -232,10 +245,46 @@ Rolling the **code** back is `git revert` of the activation commits followed by
 `docker compose -f docker-compose.prod.yml up -d orba-web`. There is no
 database migration, no schema change, and no model to restore.
 
-## 7. After the operator has stored the key
+## 7. Secure key handoff and disposal
+
+The raw key must be imported into the authorized operator's password manager
+**without exposing it on screen, in chat, in shell history, or in terminal
+recordings**.
+
+### 7a. Operator retrieval into password manager
+
+From the authorized operator's workstation:
 
 ```bash
-sudo rm -f /root/.orba_owner_key   # the raw key now lives only in the password manager
+# Option A: Pipe directly into the local clipboard over SSH (no disk file, no terminal echo)
+# macOS:
+ssh root@<host> 'cat /root/.orba_owner_key' | pbcopy
+# Linux (Wayland):
+ssh root@<host> 'cat /root/.orba_owner_key' | wl-copy
+# Linux (X11):
+ssh root@<host> 'cat /root/.orba_owner_key' | xclip -selection clipboard
+# Windows (PowerShell):
+ssh root@<host> 'cat /root/.orba_owner_key' | Set-Clipboard
+
+# Then paste directly into the password manager entry.
+
+# Option B: Import directly via password manager CLI (e.g. 1Password):
+ssh root@<host> 'cat /root/.orba_owner_key' | op item create \
+  --category="Password" --title="OrbaAgent Owner API Key" --vault="Private" -
+
+# Option C: Pull via SCP into a restricted local file, import, and shred:
+install -m 0600 /dev/null ~/.orba_owner_key.tmp
+scp root@<host>:/root/.orba_owner_key ~/.orba_owner_key.tmp
+# ... (import ~/.orba_owner_key.tmp into password manager) ...
+shred -u ~/.orba_owner_key.tmp 2>/dev/null || rm -f ~/.orba_owner_key.tmp
+```
+
+### 7b. Secure shredding on the production host
+
+Once safely stored in the password manager, shred the root key file immediately:
+
+```bash
+sudo shred -u /root/.orba_owner_key 2>/dev/null || sudo rm -f /root/.orba_owner_key
 ```
 
 ## Notes and known limitations
