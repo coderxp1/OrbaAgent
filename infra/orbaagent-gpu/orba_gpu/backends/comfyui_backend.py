@@ -135,7 +135,35 @@ class ComfyUIBackend:
             logger.error(f"Failed to copy ComfyUI image output: {e}")
             return False
 
-    def generate_video(self, prompt: str, negative_prompt: str, width: int, height: int, steps: int, seed: int, output_format: str, output_path: str) -> bool:
+    def generate_video(self, prompt: str, negative_prompt: str, width: int, height: int, steps: int, seed: int, output_format: str, output_path: str, duration_seconds: int = 4, fps: int = 16, image=None) -> bool:
+        # This backend has no image-to-video workflow: its only video graph
+        # is text-to-video. Refuse I2V honestly instead of silently ignoring
+        # the user's photo and returning an unrelated generated scene.
+        # LTX I2V runs on the diffusers backend.
+        if image is not None:
+            logger.error(
+                "ComfyUI backend cannot condition video on an input image; "
+                "refusing image-to-video request instead of dropping the photo"
+            )
+            return False
+
+        # Frame count and rate come from the request. The previous workflow
+        # hard-coded 16 frames stitched at 8 fps (~2s) for every request.
+        # Defaults apply only when a value is genuinely absent; an explicit
+        # non-positive duration or fps is refused, not silently replaced.
+        if duration_seconds is not None and duration_seconds <= 0:
+            logger.error("Refusing video request with non-positive duration_seconds=%r", duration_seconds)
+            return False
+        if fps is not None and fps <= 0:
+            logger.error("Refusing video request with non-positive fps=%r", fps)
+            return False
+        eff_fps = max(1, int(fps)) if fps is not None else 16
+        frame_count = max(1, int(round((duration_seconds if duration_seconds is not None else 4) * eff_fps)))
+        # Unique prefix per run: the output directory is shared and the
+        # seed repeats across runs (generation hard-codes seed=1), so a
+        # seed-only prefix would stitch leftover frames from earlier runs
+        # into this video.
+        run_prefix = f"orba_vid_{seed}_{uuid.uuid4().hex[:8]}"
         workflow = {
             "1": {
                 "class_type": "UNETLoader",
@@ -177,7 +205,7 @@ class ComfyUIBackend:
                 "inputs": {
                     "width": width,
                     "height": height,
-                    "batch_size": 16 # frames
+                    "batch_size": frame_count # frames = duration_seconds * fps
                 }
             },
             "7": {
@@ -205,7 +233,7 @@ class ComfyUIBackend:
             "9": {
                 "class_type": "SaveImage",
                 "inputs": {
-                    "filename_prefix": f"orba_vid_{seed}",
+                    "filename_prefix": run_prefix,
                     "images": ["8", 0]
                 }
             }
@@ -224,8 +252,8 @@ class ComfyUIBackend:
         # If CoderXP uses VideoCombine (comfyui-videohelpers), we should use VHS_VideoCombine.
         # Since I'm using SaveImage, it saves frames. We will construct a GIF or MP4 using imageio if needed.
         # Let's use the actual workflow. If it saves PNGs, we can ffmpeg them into mp4.
-        
-        prefix = f"orba_vid_{seed}"
+
+        prefix = run_prefix
         try:
             frames = sorted([f for f in os.listdir(COMFYUI_OUTPUT_DIR) if f.startswith(prefix) and f.endswith(".png")])
             if not frames:
@@ -250,7 +278,7 @@ class ComfyUIBackend:
                     concat_path = concat_file.name
                     for frame in frames:
                         frame_path = os.path.join(COMFYUI_OUTPUT_DIR, frame).replace("\\", "/")
-                        concat_file.write(f"file '{frame_path}'\nduration 0.125\n")
+                        concat_file.write(f"file '{frame_path}'\nduration {1.0 / eff_fps:.6f}\n")
                     # Trailing file entry required by ffmpeg concat demuxer
                     if frames:
                         last_frame = os.path.join(COMFYUI_OUTPUT_DIR, frames[-1]).replace("\\", "/")
@@ -265,7 +293,7 @@ class ComfyUIBackend:
                         "-i", concat_path,
                         "-c:v", "libx264",
                         "-pix_fmt", "yuv420p",
-                        "-r", "8",
+                        "-r", str(eff_fps),
                         "-movflags", "+faststart",
                         str(output_path),
                     ],

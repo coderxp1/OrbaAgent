@@ -112,6 +112,30 @@ def run_image_inference(
     image.save(output_path, format="PNG" if suffix == "png" else suffix.upper())
 
 
+def fit_image_to_frame(image, target_w: int, target_h: int):
+    """Fit a source image into a target frame without cropping or stretching.
+
+    Scales the image proportionally so it fits entirely inside the target
+    frame and centres it on a black canvas of exactly ``target_w x target_h``
+    (letterbox / pillarbox padding). The previous behaviour resized the
+    source directly to the target dimensions, which stretched faces and
+    bodies whenever the source aspect ratio differed from the requested
+    output ratio (e.g. a landscape photo forced into a 9:16 vertical video).
+    """
+    from PIL import Image
+
+    image = image.convert("RGB")
+    if image.size == (target_w, target_h):
+        return image
+    scale = min(target_w / image.width, target_h / image.height)
+    new_w = max(1, round(image.width * scale))
+    new_h = max(1, round(image.height * scale))
+    resized = image.resize((new_w, new_h), Image.Resampling.LANCZOS)
+    canvas = Image.new("RGB", (target_w, target_h), (0, 0, 0))
+    canvas.paste(resized, ((target_w - new_w) // 2, (target_h - new_h) // 2))
+    return canvas
+
+
 def load_image_to_video_pipeline(model_path: str):
     """Load an image-to-video diffusion pipeline (Lightricks/LTX-Video)."""
     import torch
@@ -213,7 +237,9 @@ def run_image_to_video_inference(
     # LTX-Video spatial constraint: dimensions must be divisible by 32
     target_w = max(256, (width // 32) * 32)
     target_h = max(256, (height // 32) * 32)
-    resized_image = image.resize((target_w, target_h), Image.Resampling.LANCZOS)
+    # Preserve the source composition: proportional fit + padding, never a
+    # direct stretch to the target frame and never a centre crop.
+    resized_image = fit_image_to_frame(image, target_w, target_h)
 
     # LTX-Video temporal constraint: num_frames must equal k * 8 + 1
     effective_fps = 24

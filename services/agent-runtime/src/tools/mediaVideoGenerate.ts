@@ -8,10 +8,13 @@ import {
   type ToolDefinition,
   type ToolExecutionResult,
   type ToolMetadata,
+  resolveAttachmentArtifactUrl,
   resolveWithinBase,
 } from "@orbaagent/shared";
 import type { ITool, ToolExecutionContext } from "./base.js";
 import {
+  isHardVerificationFailure,
+  probeVideoFile,
   verifyDeliveredArtifact,
   verifyDeliveredVideoArtifact,
 } from "./mediaVerification.js";
@@ -59,7 +62,7 @@ export class MediaVideoGenerateTool implements ITool {
         },
         duration_seconds: {
           type: "number",
-          description: "Target video duration in seconds (e.g. 2, 4, 8, 10, 15). Default is 4.",
+          description: "Target video duration in seconds (e.g. 2, 4, 8, 10, 15). Default is 5.",
         },
         fps: {
           type: "number",
@@ -135,6 +138,7 @@ export class MediaVideoGenerateTool implements ITool {
   ): Promise<ClipGenerationResult> {
     const maxAttempts = 60;
     let attempts = 0;
+    let identicalRepairRetries = 0;
     let jobRes: Response | null = null;
 
     // Always guarantee that dimensions sent to the backend are multiples of 16
@@ -205,19 +209,41 @@ export class MediaVideoGenerateTool implements ITool {
           continue;
         }
 
-        // Bounded self-repair 2: Parameter validation error (400) -> normalize dimensions & duration
+        // Bounded self-repair 2: Parameter validation error (400) -> normalize
+        // ONLY the divisibility of the dimensions, preserving the requested
+        // aspect ratio / orientation and the requested duration. The previous
+        // repair forced 480x480 (destroying vertical framing) and silently
+        // truncated duration to <=5s; both violated the user's request.
         if (jobRes.status === 400 && attempts < maxAttempts) {
           const errBody = await jobRes.text().catch(() => "");
-          console.warn(
-            `[MEDIA SELF-REPAIR] Validation rejected: ${errBody}. Normalizing to standard 16-divisible 480x480 16fps and retrying...`,
-          );
-          current = {
+          const snap32 = (v: number) =>
+            Math.max(256, Math.min(1920, Math.round(v / 32) * 32));
+          const repaired = {
             ...current,
-            width: 480,
-            height: 480,
-            fps: 16,
-            duration_seconds: Math.min(5, Math.max(1, Number(current.duration_seconds) || 5)),
+            width: snap32(current.width),
+            height: snap32(current.height),
           };
+          if (repaired.width === current.width && repaired.height === current.height) {
+            // The repair cannot change the payload, so this 400 is not a
+            // dimension problem. Allow exactly one bounded retry of the
+            // identical request (a 400 can race a worker-side state
+            // change); beyond that, surface the worker's validation
+            // error as-is instead of spinning identical requests until
+            // the attempt budget is gone and misreporting a permanent
+            // failure as transient unavailability.
+            identicalRepairRetries++;
+            if (identicalRepairRetries > 1) {
+              return {
+                success: false,
+                error: `Video generation rejected by the media worker (HTTP 400): ${errBody}`,
+              };
+            }
+            continue;
+          }
+          console.warn(
+            `[MEDIA SELF-REPAIR] Validation rejected: ${errBody}. Snapping dimensions to 32-divisible values while preserving aspect ratio and duration, and retrying...`,
+          );
+          current = repaired;
           continue;
         }
 
@@ -355,25 +381,14 @@ export class MediaVideoGenerateTool implements ITool {
       if (st.isFile() && st.size > 0) return directLocal;
     } catch {}
 
-    // Search for the filename anywhere in baseDir if it's a simple name like "KuikChat_Logo.png"
-    const simpleName = path.basename(artifactUrl);
-    if (simpleName && simpleName.includes(".")) {
-      try {
-        const entries = await fs.readdir(baseDir, { recursive: true });
-        for (const entry of entries) {
-          if (
-            typeof entry === "string" &&
-            (entry.endsWith(`/${simpleName}`) ||
-              entry.endsWith(`\\${simpleName}`) ||
-              entry === simpleName)
-          ) {
-            const foundPath = path.join(baseDir, entry);
-            const st = await fs.stat(foundPath);
-            if (st.isFile() && st.size > 0) return foundPath;
-          }
-        }
-      } catch {}
-    }
+    // NOTE: there is deliberately NO fallback that searches the uploads
+    // tree for a file with the same basename. Uploads keep their original
+    // filenames, so same-named files from other bundles/tenants are
+    // common; guessing by basename silently substituted a different
+    // photograph as the video conditioning image (wrong person in the
+    // delivered video, reported 2026-10-21). Resolution either finds the
+    // exact artifact or fails loudly below.
+
 
     // 5. Network fetch fallback: ensure proper URL formatting with single slash
     let fetchUrl: string;
@@ -476,7 +491,43 @@ export class MediaVideoGenerateTool implements ITool {
       const isVertical =
         orientation === "vertical" ||
         /\b(?:vertical|portrait|vertikal|hochformat|9:16|9\/16|tiktok|reels?|shorts?)\b/i.test(prompt);
-      const requestedDuration = Math.min(30, Math.max(1, Number(args.duration_seconds) || 5));
+      // Explicit durations are preserved exactly or rejected with a clear
+      // explanation — never silently clamped. Only an unspecified duration
+      // falls back to the documented 5s default.
+      const MAX_DURATION_SECONDS = 30;
+      const explicitDuration = Number(args.duration_seconds);
+      if (Number.isFinite(explicitDuration) && explicitDuration > MAX_DURATION_SECONDS) {
+        return {
+          toolCallId,
+          name: this.definition.name,
+          success: false,
+          output: "",
+          error: `Requested duration of ${explicitDuration}s exceeds the maximum supported duration of ${MAX_DURATION_SECONDS}s. Please request ${MAX_DURATION_SECONDS}s or less; the duration was not silently shortened.`,
+          metadata: { status: "FAILED" },
+          executionTimeMs: Date.now() - startTime,
+        };
+      }
+      // An explicitly supplied duration that is not a positive whole
+      // number of seconds (0, negative, fractional, NaN) is rejected
+      // with an explanation rather than silently replaced by the
+      // default — the worker itself only accepts whole seconds.
+      if (
+        args.duration_seconds !== undefined &&
+        args.duration_seconds !== null &&
+        !(Number.isInteger(explicitDuration) && explicitDuration >= 1)
+      ) {
+        return {
+          toolCallId,
+          name: this.definition.name,
+          success: false,
+          output: "",
+          error: `Requested duration ${args.duration_seconds}s is invalid: duration must be a whole number of seconds between 1 and ${MAX_DURATION_SECONDS}. The duration was not silently changed.`,
+          metadata: { status: "FAILED" },
+          executionTimeMs: Date.now() - startTime,
+        };
+      }
+      const requestedDuration =
+        Number.isInteger(explicitDuration) && explicitDuration >= 1 ? explicitDuration : 5;
 
       // Calculate target dimensions and worker model dimensions.
       // For vertical 9:16 requests, target output is 720x1280.
@@ -529,29 +580,35 @@ export class MediaVideoGenerateTool implements ITool {
             /logo/i.test(a.name || ""),
         );
         if (imageAtt) {
-          const rawUrl = (imageAtt as any).url || (imageAtt as any).previewUrl;
-          let resolvedAttUrl = "";
-          if (rawUrl && typeof rawUrl === "string") {
-            resolvedAttUrl = rawUrl;
-          } else if (imageAtt.artifactId || (imageAtt as any).id) {
-            const rawId = imageAtt.artifactId || (imageAtt as any).id;
-            try {
-              const decoded = JSON.parse(
-                Buffer.from(rawId, "base64url").toString("utf-8"),
-              );
-              resolvedAttUrl = `/api/artifacts/${encodeURIComponent(decoded.w)}/${encodeURIComponent(decoded.b)}/${encodeURIComponent(decoded.p)}`;
-            } catch {
-              resolvedAttUrl = rawId;
+          // Canonical artifact reference only (shared helper):
+          // previewUrl (low-resolution derivative) and bare filenames
+          // are not usable references for conditioning — if the
+          // attachment carries neither a direct artifact URL nor a
+          // decodable artifactId, no image is attached rather than a
+          // guessed one (incident 2026-10-21, gap G2).
+          const resolvedAttUrl = resolveAttachmentArtifactUrl(imageAtt);
+          if (resolvedAttUrl) {
+            const isLogo = /logo/i.test(imageAtt.name || "") || /\b(logo|brand|brandmark)\b/i.test(prompt);
+            if (isLogo) {
+              logoArtifactUrl = resolvedAttUrl;
+            } else {
+              inputImageUrl = resolvedAttUrl;
             }
-          } else if (imageAtt.name) {
-            resolvedAttUrl = imageAtt.name;
-          }
-
-          const isLogo = /logo/i.test(imageAtt.name || "") || /\b(logo|brand|brandmark)\b/i.test(prompt);
-          if (isLogo) {
-            logoArtifactUrl = resolvedAttUrl;
           } else {
-            inputImageUrl = resolvedAttUrl;
+            // An image was attached but its reference cannot be
+            // resolved to the original uploaded artifact. Proceeding
+            // without it would silently degrade the request to
+            // text-to-video — refuse honestly instead (2026-10-21).
+            return {
+              toolCallId,
+              name: this.definition.name,
+              success: false,
+              output: "",
+              error:
+                "The attached image could not be resolved to its original uploaded artifact (only a preview or filename reference was provided). Refusing to generate the video without the exact uploaded image.",
+              metadata: { status: "FAILED", reason: "UNRESOLVABLE_IMAGE_REFERENCE" },
+              executionTimeMs: Date.now() - startTime,
+            };
           }
         }
       }
@@ -559,6 +616,7 @@ export class MediaVideoGenerateTool implements ITool {
       const isSilent = isExplicitlySilent(prompt, args);
 
       let inputImageData: string | undefined;
+      let sourceImageSha256: string | undefined;
       const tmpImgDir = await fs.mkdtemp(path.join(os.tmpdir(), "orba-photo-i2v-"));
       try {
         if (inputImageUrl) {
@@ -566,8 +624,12 @@ export class MediaVideoGenerateTool implements ITool {
           const resolvedImg = await this.resolveOrDownloadArtifact(inputImageUrl, tmpImg);
           const imgBuf = await fs.readFile(resolvedImg);
           inputImageData = imgBuf.toString("base64");
+          // Record the exact bytes that will condition the model, so the
+          // uploaded photograph can be traced to the worker payload by
+          // hash at every hop (upload -> tool -> worker -> ingest).
+          sourceImageSha256 = crypto.createHash("sha256").update(imgBuf).digest("hex");
           console.log(
-            `[MEDIA VIDEO GENERATE] Image conditioning active. Loaded source photograph (${imgBuf.length} bytes) for genuine neural Image-to-Video generation: ${inputImageUrl}`,
+            `[MEDIA VIDEO GENERATE] Image conditioning active. Loaded source photograph (${imgBuf.length} bytes, sha256 ${sourceImageSha256}) for genuine neural Image-to-Video generation: ${inputImageUrl}`,
           );
         }
       } catch (imgErr: any) {
@@ -588,7 +650,10 @@ export class MediaVideoGenerateTool implements ITool {
       const isImageToVideo = Boolean(inputImageData);
       const chosenModel = model && model !== "kandinsky-6.0" ? model : "Lightricks/LTX-Video";
 
-      const baseDuration = Math.min(requestedDuration, 5);
+      // Send the requested duration to the worker. The previous cap of 5s
+      // silently truncated longer requests at the generation stage and left
+      // the audio finalizer to loop a short clip up to the reported length.
+      const baseDuration = requestedDuration;
       console.log(
         `[MEDIA VIDEO GENERATE] Dispatching genuine ${isImageToVideo ? "Image-to-Video" : "Text-to-Video"} inference (model: ${chosenModel}, duration: ${baseDuration}s, ${width}x${height}, silent: ${isSilent})...`,
       );
@@ -628,7 +693,17 @@ export class MediaVideoGenerateTool implements ITool {
         mode: isImageToVideo ? "image-to-video" : "text-to-video",
         model: chosenModel,
         identityPreserved: isImageToVideo,
+        ...(sourceImageSha256
+          ? { sourceImageSha256, sourceImageUrl: inputImageUrl }
+          : {}),
       };
+
+      // Duration bookkeeping: the worker clip and the delivered file are
+      // measured, never assumed. The worker enforces its own per-clip
+      // limit; the delivered file is what the user asked for.
+      let workerClipDurationSeconds: number | undefined;
+      let deliveredDurationSeconds: number | undefined;
+      let audiovisualFinalized = false;
 
       // Complete audiovisual assembly (environmental ambience, cinematic music, branding, duration synchronization)
       if (clip.artifactUrl) {
@@ -636,6 +711,7 @@ export class MediaVideoGenerateTool implements ITool {
           try {
             const tmpVid = path.join(tmpDir, "raw_clip.mp4");
             const resolvedVid = await this.resolveOrDownloadArtifact(clip.artifactUrl, tmpVid);
+            workerClipDurationSeconds = (await probeVideoFile(resolvedVid)).duration;
             const tmpResolvedLogo = logoArtifactUrl
               ? await this.resolveOrDownloadArtifact(logoArtifactUrl, path.join(tmpDir, "logo.png"))
               : null;
@@ -666,6 +742,8 @@ export class MediaVideoGenerateTool implements ITool {
 
             const finalBytes = await fs.readFile(targetPath);
             finalSha256 = crypto.createHash("sha256").update(finalBytes).digest("hex");
+            deliveredDurationSeconds = (await probeVideoFile(targetPath)).duration;
+            audiovisualFinalized = true;
             finalArtifactUrl = `/api/artifacts/${encodeURIComponent(workspace)}/${encodeURIComponent(
               bundle,
             )}/${encodeURIComponent(filename)}`;
@@ -673,6 +751,8 @@ export class MediaVideoGenerateTool implements ITool {
             rawResultMetadata = {
               ...rawResultMetadata,
               audiovisualFinalized: true,
+              workerClipDurationSeconds,
+              deliveredDurationSeconds,
               hasAudio: finalizeRes.hasAudio,
               hasVoice: finalizeRes.hasVoice,
               voiceText: finalizeRes.voiceText,
@@ -687,6 +767,9 @@ export class MediaVideoGenerateTool implements ITool {
               `[MEDIA VIDEO GENERATE] Finalized complete audiovisual delivery (hasAudio=${finalizeRes.hasAudio}, hasVoice=${finalizeRes.hasVoice}, dimensions=${targetWidth}x${targetHeight}): ${finalArtifactUrl}`,
             );
           } catch (finalizeErr) {
+            // The raw worker clip is delivered as-is. Its measured duration
+            // (not the requested duration) is what gets reported.
+            deliveredDurationSeconds = workerClipDurationSeconds;
             console.warn(
               "[MEDIA VIDEO GENERATE] Audiovisual finalization warning, delivering raw clip:",
               finalizeErr,
@@ -709,13 +792,27 @@ export class MediaVideoGenerateTool implements ITool {
           expectedSha256: finalSha256,
           expectedVertical: isVertical,
           expectedAudio: hasDialogueRequest || !isSilent,
+          expectedDurationSeconds: requestedDuration,
         },
       );
+      // Use the verification probe's measurement of the delivered file
+      // when the local probes above did not produce one.
       if (
-        !verification.verified &&
-        verification.retrievable === false &&
-        process.env.NODE_ENV !== "test"
+        deliveredDurationSeconds === undefined &&
+        verification.duration !== undefined &&
+        Number.isFinite(verification.duration)
       ) {
+        deliveredDurationSeconds = verification.duration;
+      }
+      const reportedDuration = deliveredDurationSeconds ?? requestedDuration;
+      // Hard verification failures fail the result: the delivered
+      // artifact does not satisfy an explicit request parameter
+      // (duration, requested orientation) or cannot be trusted
+      // (unretrievable, integrity mismatch). Softer failures (e.g. a
+      // missing audio track) keep the generation successful but are
+      // carried explicitly as verified=false below — never silently
+      // presented as verified.
+      if (!verification.verified && isHardVerificationFailure(verification) && process.env.NODE_ENV !== "test") {
         console.error(
           `[MEDIA GENERATION DIAGNOSTIC] Post-generation verification failed: ${verification.error}`,
         );
@@ -725,7 +822,17 @@ export class MediaVideoGenerateTool implements ITool {
           success: false,
           output: "",
           error: `Video generated, but verification failed (${verification.error || "Artifact unretrievable"}).`,
-          metadata: { ...rawResultMetadata, verification },
+          metadata: {
+            ...rawResultMetadata,
+            status: "VERIFICATION_FAILED",
+            verified: false,
+            verificationError: verification.error,
+            verification,
+            requestedDuration,
+            workerClipDurationSeconds,
+            deliveredDurationSeconds,
+            audiovisualFinalized,
+          },
           executionTimeMs: durationMs,
         };
       }
@@ -749,11 +856,20 @@ export class MediaVideoGenerateTool implements ITool {
             jobId,
             artifactUrl: finalArtifactUrl,
             markdown: finalArtifactUrl ? `[View Generated Video](${finalArtifactUrl})` : undefined,
-            duration: requestedDuration,
+            duration: reportedDuration,
+            requestedDuration,
+            workerClipDurationSeconds,
+            deliveredDurationSeconds,
+            audiovisualFinalized,
             resolution: `${targetWidth}x${targetHeight}`,
             aspectRatio: isVertical ? "9:16" : `${targetWidth}:${targetHeight}`,
             orientation: isVertical ? "vertical" : "horizontal",
             delivered: true,
+            ...(sourceImageSha256 ? { sourceImageSha256 } : {}),
+            verified: verification.verified,
+            ...(verification.verified
+              ? {}
+              : { verificationError: verification.error }),
             hasAudio: Boolean(rawResultMetadata?.hasAudio),
             speechSummary,
           },
@@ -762,8 +878,17 @@ export class MediaVideoGenerateTool implements ITool {
         ),
         metadata: {
           status: "COMPLETED",
+          ...(sourceImageSha256 ? { sourceImageSha256, sourceImageUrl: inputImageUrl } : {}),
+          verified: verification.verified,
+          ...(verification.verified
+            ? {}
+            : { verificationError: verification.error }),
           artifactUrl: finalArtifactUrl,
-          duration: requestedDuration,
+          duration: reportedDuration,
+          requestedDuration,
+          workerClipDurationSeconds,
+          deliveredDurationSeconds,
+          audiovisualFinalized,
           resolution: `${targetWidth}x${targetHeight}`,
           aspectRatio: isVertical ? "9:16" : `${targetWidth}:${targetHeight}`,
           isVertical,

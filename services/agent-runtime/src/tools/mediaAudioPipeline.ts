@@ -284,9 +284,12 @@ export async function finalizeVideoWithAudio(
   const inputs: string[] = ["-y", "-stream_loop", "-1", "-i", videoPath];
   let audioInputCount = 0;
 
-  // Check if dialogue/speech was requested in the prompt
+  // Check if dialogue/speech was requested in the prompt. NOTE: bare
+  // "say" must be included — "I want her to say: <sentence>" is the most
+  // natural phrasing users choose, and it previously matched nothing, so
+  // no voice was ever attempted for it (incident 2026-10-21).
   const hasDialogueRequest =
-    /\b(?:saying|says|speaks?|said|talking|telling|shouting|whispering|que diga|diciendo|mit den worten)\b/i.test(
+    /\b(?:say|saying|says|speaks?|said|talking|telling|shouting|whispering|que diga|diciendo|mit den worten)\b/i.test(
       prompt,
     ) || /["'“][^"'”]{2,150}["'”]/.test(prompt);
 
@@ -497,8 +500,12 @@ export async function synthesizeVoiceNarration(
  */
 export function detectLanguage(text: string): string {
   const lower = text.toLowerCase();
-  if (/\b(?:con|para|esta|foto|video|persona|crea|genera|hacer|voz|sonido)\b/i.test(lower)) return "es";
-  if (/\b(?:mit|diesem|dieser|foto|video|erstelle|generiere|stimme|ton)\b/i.test(lower)) return "de";
+  // NOTE: bare "video"/"foto" are NOT language evidence — they are
+  // international words that appear verbatim in English prompts, and
+  // they previously misclassified an English request as Spanish,
+  // selecting the wrong TTS voice for an English sentence.
+  if (/\b(?:con|para|esta|persona|crea|genera|hacer|voz|sonido)\b/i.test(lower)) return "es";
+  if (/\b(?:mit|diesem|dieser|erstelle|generiere|stimme|ton)\b/i.test(lower)) return "de";
   if (/\b(?:avec|cette|photo|vidéo|génère|voix|son)\b/i.test(lower)) return "fr";
   return "en";
 }
@@ -507,18 +514,31 @@ export function detectLanguage(text: string): string {
  * Extracts spoken text from user prompt or produces an appropriate contextual narration.
  */
 export function extractVoiceNarrationText(prompt: string): { text: string; lang: string } {
-  const lang = detectLanguage(prompt);
+  // The voice language follows the SPOKEN sentence, not the surrounding
+  // request text: a user can write the request in one language and the
+  // line to be spoken in another.
   // 1. Explicit quoted narration
   const quoteMatch = prompt.match(/["“]([^"”]{5,150})["”]/);
   if (quoteMatch?.[1]) {
-    return { text: quoteMatch[1].trim(), lang };
+    const text = quoteMatch[1].trim();
+    return { text, lang: detectLanguage(text) };
   }
-  // 2. "saying ..." or "dice ..." or "que diga ..."
-  const sayingMatch = prompt.match(/\b(?:saying|says|que diga|diciendo|mit den worten)\s+(.+)$/i);
+  // 2. "say ... : <sentence>" — the colon form, e.g. "I want her to say
+  // on the video : I love you Jan Paul" (incident 2026-10-21: this exact
+  // phrasing previously extracted nothing and no voice was attempted).
+  const sayColonMatch = prompt.match(/\bsay\b[^:]{0,60}:\s*(.+)$/i);
+  if (sayColonMatch?.[1]?.trim()) {
+    const text = sayColonMatch[1].trim();
+    return { text, lang: detectLanguage(text) };
+  }
+  // 3. "saying ..." or "says ..." or "say ..." or "dice ..." or "que diga ..."
+  const sayingMatch = prompt.match(/\b(?:saying|says|say|que diga|diciendo|mit den worten)\s+(.+)$/i);
   if (sayingMatch?.[1]) {
-    return { text: sayingMatch[1].trim(), lang };
+    const text = sayingMatch[1].trim();
+    return { text, lang: detectLanguage(text) };
   }
-  // 3. Natural contextual narration matching language
+  // 4. Natural contextual narration matching the request language
+  const lang = detectLanguage(prompt);
   if (lang === "es") {
     return { text: "Aquí tienes tu video animado a partir de tu fotografía original.", lang };
   }

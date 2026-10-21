@@ -25,8 +25,12 @@ from PIL import Image
 FFPROBE_TIMEOUT_SECONDS = 30
 
 #: Allowed deviation between requested and actual video duration.
-DURATION_TOLERANCE_SECONDS = 1.5
-DURATION_TOLERANCE_RATIO = 0.35
+# Aligned with the application-side delivered-duration contract
+# (max(1.0s, 20%)): the previous ±max(1.5s, 35%) let a ~3s clip pass
+# for a 5s request at the worker layer. Frame quantization in the
+# backends is bounded well inside this tolerance (<= 8 frames).
+DURATION_TOLERANCE_SECONDS = 1.0
+DURATION_TOLERANCE_RATIO = 0.20
 
 
 @dataclass(frozen=True)

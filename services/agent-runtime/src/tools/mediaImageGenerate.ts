@@ -8,7 +8,7 @@ import {
   resolveWithinBase,
 } from "@orbaagent/shared";
 import type { ITool, ToolExecutionContext } from "./base.js";
-import { verifyDeliveredArtifact } from "./mediaVerification.js";
+import { isHardVerificationFailure, verifyDeliveredArtifact } from "./mediaVerification.js";
 import {
   FIRST_REQUEST_TIMEOUT_MS,
   type GpuWorkerHealth,
@@ -307,7 +307,7 @@ export class MediaImageGenerateTool implements ITool {
       const verification = await verifyDeliveredArtifact(artifactUrl, "image/png", result.sha256);
       if (
         !verification.verified &&
-        verification.retrievable === false &&
+        isHardVerificationFailure(verification) &&
         process.env.NODE_ENV !== "test"
       ) {
         console.error(
@@ -386,11 +386,23 @@ export class MediaImageGenerateTool implements ITool {
             markdown: finalArtifactUrl ? `![Generated Image: ${prompt}](${finalArtifactUrl})` : undefined,
             dimensions: actualDimensions,
             delivered: result.delivered !== false,
+            verified: finalVerification.verified,
+            ...(finalVerification.verified
+              ? {}
+              : { verificationError: finalVerification.error }),
           },
           null,
           2,
         ),
-        metadata: { ...result, verification: finalVerification, dimensions: actualDimensions },
+        metadata: {
+          ...result,
+          verification: finalVerification,
+          verified: finalVerification.verified,
+          ...(finalVerification.verified
+            ? {}
+            : { verificationError: finalVerification.error }),
+          dimensions: actualDimensions,
+        },
         executionTimeMs: durationMs,
       };
     } catch (err: any) {
