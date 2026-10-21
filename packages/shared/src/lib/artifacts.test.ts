@@ -5,9 +5,9 @@ import {
   resolveAttachmentArtifactUrl,
 } from "./artifacts.js";
 
-const id = Buffer.from(
-  JSON.stringify({ w: "tenant-1", b: "bundle-9", p: "photo.jpg" }),
-).toString("base64url");
+const id = Buffer.from(JSON.stringify({ w: "tenant-1", b: "bundle-9", p: "photo.jpg" })).toString(
+  "base64url",
+);
 
 describe("artifactId decoding and canonical URLs", () => {
   it("decodes a server-issued artifactId", () => {
@@ -16,9 +16,9 @@ describe("artifactId decoding and canonical URLs", () => {
 
   it("builds the canonical URL with per-segment encoding", () => {
     expect(canonicalArtifactUrl(id)).toBe("/api/artifacts/tenant-1/bundle-9/photo.jpg");
-    const spaced = Buffer.from(
-      JSON.stringify({ w: "t 1", b: "b", p: "my photo.jpg" }),
-    ).toString("base64url");
+    const spaced = Buffer.from(JSON.stringify({ w: "t 1", b: "b", p: "my photo.jpg" })).toString(
+      "base64url",
+    );
     expect(canonicalArtifactUrl(spaced)).toBe("/api/artifacts/t%201/b/my%20photo.jpg");
   });
 

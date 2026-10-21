@@ -63,11 +63,13 @@ export function resolveAttachmentArtifactUrl(att: {
   id?: unknown;
 }): string | undefined {
   if (typeof att?.url === "string" && att.url.length > 0) {
-    if (att.url.startsWith("/") || att.url.startsWith("http://") || att.url.startsWith("https://")) {
+    if (
+      att.url.startsWith("/") ||
+      att.url.startsWith("http://") ||
+      att.url.startsWith("https://")
+    ) {
       return att.url;
     }
   }
-  return (
-    canonicalArtifactUrl(att?.artifactId) ?? canonicalArtifactUrl(att?.id) ?? undefined
-  );
+  return canonicalArtifactUrl(att?.artifactId) ?? canonicalArtifactUrl(att?.id) ?? undefined;
 }

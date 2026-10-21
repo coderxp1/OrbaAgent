@@ -530,35 +530,37 @@ describe("Media Post-Generation Verification & Bounded Self-Repair", () => {
       const expectedSha = crypto.createHash("sha256").update(photoBytes).digest("hex");
 
       let workerPayload: any = null;
-      globalThis.fetch = vi.fn().mockImplementation(async (input: RequestInfo | URL, init?: any) => {
-        const url = String(input);
-        if (url.endsWith("/health")) {
-          return new Response(
-            JSON.stringify({
-              worker: "healthy",
-              status: "ok",
-              capabilities: { video_generation: true },
-              generation_backend: "diffusers",
-            }),
-            { status: 200, headers: { "Content-Type": "application/json" } },
-          );
-        }
-        if (url.endsWith("/api/generate/video")) {
-          workerPayload = JSON.parse(init?.body || "{}");
-          return new Response(
-            JSON.stringify({
-              jobId: "job_trace",
-              status: "COMPLETED",
-              artifactUrl: "/api/artifacts/test-tenant/vid_trace/raw.mp4",
-              bundle: "vid_trace",
-              sha256: "fake-sha256",
-              delivered: true,
-            }),
-            { status: 200, headers: { "Content-Type": "application/json" } },
-          );
-        }
-        return new Response("not found", { status: 404 });
-      });
+      globalThis.fetch = vi
+        .fn()
+        .mockImplementation(async (input: RequestInfo | URL, init?: any) => {
+          const url = String(input);
+          if (url.endsWith("/health")) {
+            return new Response(
+              JSON.stringify({
+                worker: "healthy",
+                status: "ok",
+                capabilities: { video_generation: true },
+                generation_backend: "diffusers",
+              }),
+              { status: 200, headers: { "Content-Type": "application/json" } },
+            );
+          }
+          if (url.endsWith("/api/generate/video")) {
+            workerPayload = JSON.parse(init?.body || "{}");
+            return new Response(
+              JSON.stringify({
+                jobId: "job_trace",
+                status: "COMPLETED",
+                artifactUrl: "/api/artifacts/test-tenant/vid_trace/raw.mp4",
+                bundle: "vid_trace",
+                sha256: "fake-sha256",
+                delivered: true,
+              }),
+              { status: 200, headers: { "Content-Type": "application/json" } },
+            );
+          }
+          return new Response("not found", { status: 404 });
+        });
 
       const tool = new MediaVideoGenerateTool();
       const res = await tool.execute(
@@ -601,15 +603,12 @@ describe("Media Post-Generation Verification & Bounded Self-Repair", () => {
       globalThis.fetch = fetchMock;
 
       const tool = new MediaVideoGenerateTool();
-      const res = await tool.execute(
-        { prompt: "Generate a vertical video using this photo" },
-        {
-          workspaceDir: "/tmp",
-          attachments: [
-            { name: "photo.jpg", type: "image/jpeg", previewUrl: "blob:https://orbaagent.dev/abc" },
-          ],
-        } as any,
-      );
+      const res = await tool.execute({ prompt: "Generate a vertical video using this photo" }, {
+        workspaceDir: "/tmp",
+        attachments: [
+          { name: "photo.jpg", type: "image/jpeg", previewUrl: "blob:https://orbaagent.dev/abc" },
+        ],
+      } as any);
 
       expect(res.success).toBe(false);
       expect(res.error).toMatch(/could not be resolved/i);
