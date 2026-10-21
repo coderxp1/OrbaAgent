@@ -16,6 +16,7 @@ import type {
   NormalizedEvent,
   ToolCall,
 } from "@orbaagent/shared";
+import { resolveAttachmentArtifactUrl } from "@orbaagent/shared";
 import { routeUserIntent } from "./intentRouter.js";
 
 export interface AgentOrchestratorOptions {
@@ -345,11 +346,12 @@ OrbaAgent is a professional conversational AI assistant first.
             a.type?.startsWith("image/") || /\.(png|jpe?g|webp|gif|bmp)$/i.test(a.name || ""),
           );
           if (imgAtt) {
-            attachedImageUrl =
-              (imgAtt as any).url ||
-              (imgAtt.artifactId
-                ? `/api/artifacts/default-tenant/${imgAtt.artifactId}`
-                : undefined);
+            // Canonical artifact reference only (shared helper): a
+            // direct artifact URL or the URL decoded from the
+            // artifactId's own workspace/bundle/path. Never a
+            // hardcoded tenant, never the artifactId as a path
+            // segment (incident 2026-10-21, gap G1).
+            attachedImageUrl = resolveAttachmentArtifactUrl(imgAtt);
           }
         }
 
@@ -367,7 +369,7 @@ OrbaAgent is a professional conversational AI assistant first.
               prompt: fallbackPrompt,
               width: intentResult.extractedParameters?.width || 720,
               height: intentResult.extractedParameters?.height || 1280,
-              duration_seconds: intentResult.extractedParameters?.duration_seconds || 3,
+              duration_seconds: intentResult.extractedParameters?.duration_seconds || 5,
               fps: intentResult.extractedParameters?.fps || 16,
               ...(attachedImageUrl ? { image_url: attachedImageUrl } : {}),
             }

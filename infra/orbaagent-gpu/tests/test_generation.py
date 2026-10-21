@@ -289,6 +289,117 @@ class TestVideoPaths:
         assert captured.get("image") is not None
         assert hasattr(captured["image"], "size")
 
+    def test_backend_object_receives_duration_fps_and_image(self, tmp_path):
+        """generation.py must pass duration/fps/image to a backend object —
+        dropping them was the original I2V bug, and this branch of
+        _run_video_inference previously had no test coverage."""
+        from orba_gpu.generation import _run_video_inference
+
+        class FakeBackend:
+            def __init__(self):
+                self.kwargs = None
+
+            def generate_video(self, *, prompt, negative_prompt, width, height, steps,
+                               seed, output_format, output_path,
+                               duration_seconds=None, fps=None, image=None):
+                self.kwargs = {
+                    "duration_seconds": duration_seconds,
+                    "fps": fps,
+                    "image": image,
+                }
+                write_mp4(Path(output_path), width, height, fps or 16, duration_seconds or 2)
+                return True
+
+        backend = FakeBackend()
+        marker_image = object()
+        _run_video_inference(
+            infer=None,
+            pipeline=backend,
+            prompt="animate this photo",
+            negative_prompt=None,
+            duration_seconds=5,
+            fps=16,
+            width=256,
+            height=256,
+            target=tmp_path / "out.mp4",
+            image=marker_image,
+        )
+
+        assert backend.kwargs == {
+            "duration_seconds": 5,
+            "fps": 16,
+            "image": marker_image,
+        }
+
+    def test_backend_object_with_var_kwargs_receives_duration_fps_and_image(self, tmp_path):
+        """A backend exposing **kwargs must also receive the values —
+        the pass-through must not silently drop them."""
+        from orba_gpu.generation import _run_video_inference
+
+        class VarKwargsBackend:
+            def __init__(self):
+                self.kwargs = None
+
+            def generate_video(self, **kwargs):
+                self.kwargs = kwargs
+                write_mp4(
+                    Path(kwargs["output_path"]),
+                    kwargs["width"],
+                    kwargs["height"],
+                    kwargs.get("fps") or 16,
+                    kwargs.get("duration_seconds") or 2,
+                )
+                return True
+
+        backend = VarKwargsBackend()
+        marker_image = object()
+        _run_video_inference(
+            infer=None,
+            pipeline=backend,
+            prompt="animate this photo",
+            negative_prompt=None,
+            duration_seconds=5,
+            fps=16,
+            width=256,
+            height=256,
+            target=tmp_path / "out.mp4",
+            image=marker_image,
+        )
+
+        assert backend.kwargs["duration_seconds"] == 5
+        assert backend.kwargs["fps"] == 16
+        assert backend.kwargs["image"] is marker_image
+
+    def test_source_image_sha256_recorded_in_outcome_parameters(self, tmp_path):
+        """The worker records the hash of the exact image bytes it
+        received, so the conditioning image can be traced back to the
+        uploaded photograph (regression: wrong-photo substitution)."""
+        import base64
+        import hashlib
+
+        manager = make_manager(tmp_path)
+        tiny_png = base64.b64encode(
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\xcf\xc0\x00\x00\x03\x01\x01\x00\x18\xdd\x8d\xb0\x00\x00\x00\x00IEND\xaeB`\x82"
+        ).decode("ascii")
+        raw_bytes = base64.b64decode(tiny_png)
+
+        def infer(*, duration_seconds, fps, width, height, output_path, image=None, **kw):
+            write_mp4(output_path, width, height, fps, duration_seconds)
+
+        outcome = generate_video(
+            "animate this photo",
+            manager,
+            GenerationLimiter(1),
+            image_data=f"data:image/png;base64,{tiny_png}",
+            duration_seconds=2,
+            fps=16,
+            width=256,
+            height=256,
+            infer=infer,
+        )
+
+        assert outcome.parameters["source_image_sha256"] == hashlib.sha256(raw_bytes).hexdigest()
+
     def test_invalid_image_data_rejected(self, tmp_path):
         manager = make_manager(tmp_path)
         with pytest.raises(ValidationError, match="Invalid image_data"):

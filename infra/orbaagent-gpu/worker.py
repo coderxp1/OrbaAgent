@@ -20,6 +20,7 @@ import logging
 import uvicorn
 
 from orba_gpu.app import create_app
+from orba_gpu.build_info import cached_source_fingerprint
 from orba_gpu.config import Settings
 
 logging.basicConfig(
@@ -34,9 +35,14 @@ app = create_app()
 if __name__ == "__main__":
     settings = Settings.from_env()
     logger.info(
-        "starting OrbaAgent GPU media worker on port %s (target GPU %s, backend '%s')",
+        "starting OrbaAgent GPU media worker on port %s (target GPU %s, backend '%s', video model '%s')",
         settings.port,
         settings.target_gpu_uuid,
         settings.backend or "unset",
+        settings.video_model_id,
     )
+    # Deployed-version identification (G4): the boot log carries the
+    # source fingerprint and effective model configuration, so an
+    # operator can prove which code and config this process runs.
+    logger.info("worker source fingerprint: %s", cached_source_fingerprint())
     uvicorn.run(app, host="0.0.0.0", port=settings.port)

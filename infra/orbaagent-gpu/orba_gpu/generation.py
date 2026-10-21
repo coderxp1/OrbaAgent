@@ -408,13 +408,18 @@ def generate_video(
     )
 
     pil_image = None
+    source_image_sha256 = None
     if image_data:
         import base64
+        import hashlib
         import io
         from PIL import Image
         try:
             raw_b64 = image_data.split(",", 1)[-1] if "," in image_data else image_data
             img_bytes = base64.b64decode(raw_b64)
+            # Hash the exact bytes received, so the conditioning image can
+            # be traced back to the uploaded photograph across every hop.
+            source_image_sha256 = hashlib.sha256(img_bytes).hexdigest()
             pil_image = Image.open(io.BytesIO(img_bytes)).convert("RGB")
         except Exception as exc:
             raise ValidationError(f"Invalid image_data provided for video conditioning: {exc}") from exc
@@ -493,6 +498,11 @@ def generate_video(
                     "fps": eff_fps,
                     "width": eff_width,
                     "height": eff_height,
+                    **(
+                        {"source_image_sha256": source_image_sha256}
+                        if source_image_sha256
+                        else {}
+                    ),
                 },
             )
         except (GenerationFailedError, ValidationError, ModelUnavailableError, BackendNotImplementedError):
@@ -543,16 +553,49 @@ def _run_video_inference(
         return
 
     if hasattr(pipeline, "generate_video"):
-        success = pipeline.generate_video(
-            prompt=prompt,
-            negative_prompt=negative_prompt,
-            width=width,
-            height=height,
-            steps=0, # not explicitly used for video length in signature
-            seed=1,
-            output_format="mp4",
-            output_path=str(target),
-        )
+        # Pass duration, fps and the conditioning image through explicitly.
+        # The previous call dropped all three: image-to-video requests were
+        # silently turned into unrelated text-to-video scenes, and every
+        # video came out at the workflow's hard-coded frame count/fps
+        # (16 frames at 8 fps), regardless of the requested duration.
+        import inspect
+
+        gen_kwargs: dict[str, Any] = {
+            "prompt": prompt,
+            "negative_prompt": negative_prompt,
+            "width": width,
+            "height": height,
+            "steps": 0,  # not explicitly used for video length in signature
+            "seed": 1,
+            "output_format": "mp4",
+            "output_path": str(target),
+        }
+        try:
+            gen_params = inspect.signature(pipeline.generate_video).parameters
+        except (TypeError, ValueError):
+            gen_params = None
+        if gen_params is None:
+            # Introspection failed: pass the values through unconditionally
+            # rather than silently dropping them (dropping them was the
+            # original bug — the backend fell back to its own defaults and
+            # an image-to-video request became an unrelated T2V scene).
+            logger.warning(
+                "Could not introspect generate_video signature; passing duration_seconds/fps/image through unconditionally"
+            )
+            gen_kwargs["duration_seconds"] = duration_seconds
+            gen_kwargs["fps"] = fps
+            gen_kwargs["image"] = image
+        else:
+            accepts_any = any(
+                p.kind == inspect.Parameter.VAR_KEYWORD for p in gen_params.values()
+            )
+            if accepts_any or "duration_seconds" in gen_params:
+                gen_kwargs["duration_seconds"] = duration_seconds
+            if accepts_any or "fps" in gen_params:
+                gen_kwargs["fps"] = fps
+            if accepts_any or "image" in gen_params:
+                gen_kwargs["image"] = image
+        success = pipeline.generate_video(**gen_kwargs)
         if not success:
             from .generation import GenerationFailedError
             raise GenerationFailedError("ComfyUI video generation failed")

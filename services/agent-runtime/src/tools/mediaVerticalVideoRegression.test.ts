@@ -38,6 +38,18 @@ describe("Exact Prompt Regression: 'Generate a vertical video with 2 females hol
     });
   });
 
+  describe("1b. Reported Bug: 'Generate a vertical video using this photo.'", () => {
+    it("defaults to 5s (not 3s) when no duration is specified", () => {
+      const result = routeUserIntent([
+        { role: "user", content: "Generate a vertical video using this photo." },
+      ]);
+      expect(result).not.toBeNull();
+      expect(result.intent).toBe("media_video");
+      expect(result.extractedParameters?.duration_seconds).toBe(5);
+      expect(result.extractedParameters?.orientation).toBe("vertical");
+    });
+  });
+
   describe("2. Dialogue Extraction & Audio Pipeline", () => {
     it("identifies that the video is not silent", () => {
       expect(isExplicitlySilent(EXACT_PROMPT)).toBe(false);

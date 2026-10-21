@@ -1,10 +1,34 @@
 import { describe, expect, it } from "vitest";
 import {
   detectSceneAudioProfile,
+  extractVoiceNarrationText,
   isExplicitlySilent,
 } from "./mediaAudioPipeline.js";
 
 describe("mediaAudioPipeline", () => {
+  describe("extractVoiceNarrationText — spoken-sentence extraction", () => {
+    it("extracts the sentence from the incident phrasing 'I want her to say on the video : ...'", () => {
+      // Regression (2026-10-21): this exact user phrasing previously
+      // extracted nothing — "say" was not a recognized dialogue verb and
+      // there were no quotes — so no voice was ever attempted.
+      const narration = extractVoiceNarrationText(
+        "Generate a vertical video with this photo, do not change my photo when generating the video, I want her to say on the video : I love you Jan Paul",
+      );
+      expect(narration.text).toBe("I love you Jan Paul");
+      expect(narration.lang).toBe("en");
+    });
+
+    it("extracts quoted dialogue", () => {
+      const narration = extractVoiceNarrationText('Have her say: "I love you, Jan Paul."');
+      expect(narration.text).toBe("I love you, Jan Paul.");
+    });
+
+    it("extracts 'says <sentence>' phrasing", () => {
+      const narration = extractVoiceNarrationText("The woman says welcome to our store");
+      expect(narration.text).toBe("welcome to our store");
+    });
+  });
+
   describe("isExplicitlySilent", () => {
     it("detects silent requests in prompt", () => {
       expect(isExplicitlySilent("Generate a silent video of a dog")).toBe(true);

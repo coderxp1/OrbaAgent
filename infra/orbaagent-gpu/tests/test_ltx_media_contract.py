@@ -60,6 +60,43 @@ def test_t2v_vertical_9x16_has_no_image_conditioning(tmp_path):
     assert (kwargs["num_frames"] - 1) % 8 == 0
 
 
+def test_i2v_landscape_photo_into_vertical_frame_is_letterboxed_not_stretched_or_cropped(tmp_path):
+    """Regression for the reported bug: a landscape photo requested as a
+    vertical video had its subject stretched/cropped into 9:16.
+
+    The conditioning image must be proportionally scaled to fit inside the
+    vertical frame with black padding above/below: no stretch (the top of
+    the frame would carry image content), no centre crop (the left/right
+    halves would be cut away)."""
+    pipeline = MagicMock(return_value=_result())
+
+    # Landscape source: left half red, right half green.
+    src = Image.new("RGB", (1024, 576), (255, 0, 0))
+    draw = ImageDraw.Draw(src)
+    draw.rectangle((512, 0, 1024, 576), fill=(0, 255, 0))
+
+    with patch("orba_gpu.backends.diffusers_backend._export_and_encode_video"):
+        run_image_to_video_inference(
+            pipeline=pipeline,
+            prompt="the person in this photo smiles and waves",
+            image=src,
+            duration_seconds=2,
+            width=W,
+            height=H,
+            output_path=tmp_path / "i2v_letterbox.mp4",
+        )
+
+    cond = pipeline.call_args.kwargs["image"]
+    assert cond.size == (W, H)
+    # Padding bands carry no image content (proves no stretch to fill).
+    assert cond.getpixel((W // 2, 5)) == (0, 0, 0)
+    assert cond.getpixel((W // 2, H - 5)) == (0, 0, 0)
+    # Both halves of the source survive in the middle band (proves no crop).
+    mid_y = H // 2
+    assert cond.getpixel((10, mid_y)) == (255, 0, 0)
+    assert cond.getpixel((W - 10, mid_y)) == (0, 255, 0)
+
+
 def test_i2v_vertical_9x16_preserves_source_content(tmp_path):
     pipeline = MagicMock(return_value=_result())
 

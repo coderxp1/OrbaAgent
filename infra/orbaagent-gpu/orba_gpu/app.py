@@ -15,6 +15,7 @@ from typing import Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 
+from .build_info import cached_source_fingerprint
 from .config import Settings, ValidationError
 from .generation import (
     GenerationBusyError,
@@ -153,6 +154,7 @@ def create_app(
                 "media_processing": gpu_present,
             },
             "generation_backend": settings.backend or None,
+            "build": {"source_sha256": cached_source_fingerprint()},
             "models": model_status,
             "active_generations": generation_limiter.active,
             "active_job": generation_limiter.get_active_job() if hasattr(generation_limiter, "get_active_job") else None,

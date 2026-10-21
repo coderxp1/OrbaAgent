@@ -1,5 +1,6 @@
 import type { ToolRegistry } from "@orbaagent/agent-runtime";
 import type { ChatMessage } from "@orbaagent/shared";
+import { resolveAttachmentArtifactUrl } from "@orbaagent/shared";
 
 export type UserIntent =
   | "conversation"
@@ -294,7 +295,7 @@ export function findPendingMediaProposal(messages: ChatMessage[]): {
   return {
     type: isVideo ? "video" : "image",
     prompt: candidatePrompt,
-    duration: isVideo ? duration || 2 : undefined,
+    duration: isVideo ? duration || 5 : undefined,
     width,
     height,
   };
@@ -368,7 +369,7 @@ The user approved the pending ${pendingMedia.type} generation task ("${content}"
 Tool '${toolToActivate}' is ACTIVE and ready to execute.
 EXECUTE '${toolToActivate}' IMMEDIATELY with:
 - prompt: ${JSON.stringify(pendingMedia.prompt)}
-${isVideo ? `- duration_seconds: ${pendingMedia.duration || 2}\n- width: ${pendingMedia.width || 480}\n- height: ${pendingMedia.height || 480}\n- fps: 16` : `- width: ${pendingMedia.width || 512}\n- height: ${pendingMedia.height || 512}\n- steps: 4`}
+${isVideo ? `- duration_seconds: ${pendingMedia.duration || 5}\n- width: ${pendingMedia.width || 480}\n- height: ${pendingMedia.height || 480}\n- fps: 16` : `- width: ${pendingMedia.width || 512}\n- height: ${pendingMedia.height || 512}\n- steps: 4`}
 DO NOT ask for further confirmation or explain how to run it. Call '${toolToActivate}' directly now.`,
       };
     }
@@ -537,7 +538,10 @@ Do NOT execute any tools or task plans for this capability inquiry.`,
       lower,
     );
     const explicitDuration = extractVideoDurationSeconds(content);
-    const duration = explicitDuration || (isCommercial ? 15 : 3);
+    // Sensible default when the user does not specify a duration: 5s.
+    // (Previously 3s, which produced unexpectedly short clips that the
+    // player then reported as ~3 seconds regardless of expectations.)
+    const duration = explicitDuration || (isCommercial ? 15 : 5);
 
     // Resolve orientation and enforce 16-divisible dimensions
     const orientation = extractVideoOrientation(content);
@@ -574,8 +578,10 @@ Do NOT execute any tools or task plans for this capability inquiry.`,
           a.type?.startsWith("image/") || /\.(png|jpe?g|webp|gif|svg)$/i.test(a.name || ""),
       );
       if (att) {
-        attachedImageUrl =
-          att.url || att.previewUrl || att.artifactId || (att as any).id || att.name;
+        // Canonical artifact reference only: a direct artifact URL or
+        // the URL decoded from the artifactId. Preview URLs and bare
+        // filenames are NOT usable references (incident 2026-10-21).
+        attachedImageUrl = resolveAttachmentArtifactUrl(att);
       }
     }
 
@@ -689,8 +695,10 @@ ${attachedImageUrl ? `- Photo Conditioning: The user provided an attached image/
           a.type?.startsWith("image/") || /\.(png|jpe?g|webp|gif|svg)$/i.test(a.name || ""),
       );
       if (att) {
-        attachedImageUrl =
-          att.url || att.previewUrl || att.artifactId || (att as any).id || att.name;
+        // Canonical artifact reference only: a direct artifact URL or
+        // the URL decoded from the artifactId. Preview URLs and bare
+        // filenames are NOT usable references (incident 2026-10-21).
+        attachedImageUrl = resolveAttachmentArtifactUrl(att);
       }
     }
 

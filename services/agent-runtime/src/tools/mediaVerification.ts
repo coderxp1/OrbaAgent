@@ -8,9 +8,18 @@ import { PathContainmentError, resolveWithinBase } from "@orbaagent/shared";
 
 const execFileAsync = promisify(execFile);
 
+export type VerificationFailureKind =
+  | "unretrievable"
+  | "integrity"
+  | "format"
+  | "duration"
+  | "orientation"
+  | "audio";
+
 export interface ArtifactVerificationResult {
   verified: boolean;
   retrievable: boolean;
+  failureKind?: VerificationFailureKind;
   sizeBytes?: number;
   sha256?: string;
   sha256Match?: boolean;
@@ -18,6 +27,31 @@ export interface ArtifactVerificationResult {
   width?: number;
   height?: number;
   error?: string;
+}
+
+/**
+ * Whether a failed verification must fail the tool result itself.
+ * Hard failures are the ones where the delivered artifact does not
+ * satisfy an explicit parameter of the request or cannot be trusted:
+ * it cannot be retrieved, its bytes do not match what the worker
+ * produced, its duration is wrong, or its orientation contradicts an
+ * explicitly requested one. Other failures (notably a missing audio
+ * track, an enhancement produced by the finalizer) are reported as a
+ * separate verification status on an otherwise successful generation.
+ */
+export function isHardVerificationFailure(v: {
+  verified: boolean;
+  retrievable: boolean;
+  failureKind?: VerificationFailureKind;
+}): boolean {
+  if (v.verified) return false;
+  if (v.retrievable === false) return true;
+  return (
+    v.failureKind === "unretrievable" ||
+    v.failureKind === "integrity" ||
+    v.failureKind === "duration" ||
+    v.failureKind === "orientation"
+  );
 }
 
 export interface VideoArtifactVerificationResult extends ArtifactVerificationResult {
@@ -34,6 +68,7 @@ export interface VideoVerificationOptions {
   expectedAudio?: boolean;
   expectedSha256?: string;
   minDurationSeconds?: number;
+  expectedDurationSeconds?: number;
 }
 
 /**
@@ -89,6 +124,7 @@ export async function verifyDeliveredArtifact(
     return {
       verified: false,
       retrievable: false,
+      failureKind: "unretrievable",
       error: "Missing or invalid artifact URL",
     };
   }
@@ -98,6 +134,7 @@ export async function verifyDeliveredArtifact(
     return {
       verified: false,
       retrievable: false,
+      failureKind: "unretrievable",
       error: `Artifact URL must start with ${prefix}`,
     };
   }
@@ -108,6 +145,7 @@ export async function verifyDeliveredArtifact(
     return {
       verified: false,
       retrievable: false,
+      failureKind: "unretrievable",
       error: "Malformed artifact URL segments",
     };
   }
@@ -122,6 +160,7 @@ export async function verifyDeliveredArtifact(
       return {
         verified: false,
         retrievable: false,
+        failureKind: "unretrievable",
         error: "Artifact path traversal rejected",
       };
     }
@@ -145,6 +184,7 @@ export async function verifyDeliveredArtifact(
               verified: false,
               retrievable: false,
               sizeBytes: st.size,
+              failureKind: "format",
               error: `Invalid magic bytes for expected type ${expectedType}`,
             };
           }
@@ -172,6 +212,7 @@ export async function verifyDeliveredArtifact(
               sha256Match: false,
               width: probedWidth,
               height: probedHeight,
+              failureKind: "integrity",
               error: `SHA-256 integrity mismatch: expected ${expectedSha256}, got ${actualSha256}`,
             };
           }
@@ -210,6 +251,7 @@ export async function verifyDeliveredArtifact(
       return {
         verified: false,
         retrievable: false,
+        failureKind: "unretrievable",
         error: `Artifact endpoint returned HTTP ${res.status}`,
       };
     }
@@ -220,6 +262,7 @@ export async function verifyDeliveredArtifact(
       return {
         verified: false,
         retrievable: false,
+        failureKind: "unretrievable",
         error: "Artifact endpoint returned empty content",
       };
     }
@@ -230,6 +273,7 @@ export async function verifyDeliveredArtifact(
         verified: false,
         retrievable: true,
         sizeBytes: buf.length,
+        failureKind: "format",
         error: `Invalid content headers for ${expectedType}`,
       };
     }
@@ -255,6 +299,7 @@ export async function verifyDeliveredArtifact(
           sha256Match: false,
           width: probedWidth,
           height: probedHeight,
+          failureKind: "integrity",
           error: `SHA-256 mismatch: expected ${expectedSha256}, got ${actualSha256}`,
         };
       }
@@ -276,6 +321,7 @@ export async function verifyDeliveredArtifact(
     return {
       verified: false,
       retrievable: false,
+      failureKind: "unretrievable",
       error: `Failed to retrieve and verify artifact: ${msg}`,
     };
   }
@@ -310,6 +356,7 @@ export async function probeVideoFile(filePath: string): Promise<{
     let width = videoStream?.width ? Number(videoStream.width) : undefined;
     let height = videoStream?.height ? Number(videoStream.height) : undefined;
     let duration = info.format?.duration ? Number.parseFloat(info.format.duration) : undefined;
+    if (duration !== undefined && !Number.isFinite(duration)) duration = undefined;
     let fps: number | undefined;
     if (videoStream?.r_frame_rate) {
       const parts = String(videoStream.r_frame_rate).split("/");
@@ -411,9 +458,51 @@ export async function verifyDeliveredVideoArtifact(
             hasAudioStream: probe.hasAudioStream,
             isVertical: false,
             aspectRatio: probe.aspectRatio,
+            failureKind: "orientation",
             error: `Vertical orientation required (9:16 portrait), but delivered video has dimensions ${probe.width}x${probe.height} (horizontal/square).`,
           };
         }
+      }
+    }
+
+    // Validate delivered duration against the requested duration.
+    // Tolerance: the larger of 1.0s or 20% of the expected duration —
+    // tight enough to catch a silently shortened clip (e.g. a ~3s
+    // delivery for a 5s request), loose enough for container rounding.
+    if (options?.expectedDurationSeconds !== undefined && probe.duration !== undefined) {
+      const expected = options.expectedDurationSeconds;
+      const tolerance = Math.max(1.0, expected * 0.2);
+      if (Math.abs(probe.duration - expected) > tolerance) {
+        return {
+          ...baseResult,
+          verified: false,
+          width: probe.width,
+          height: probe.height,
+          fps: probe.fps,
+          duration: probe.duration,
+          hasAudioStream: probe.hasAudioStream,
+          isVertical: probe.isVertical,
+          aspectRatio: probe.aspectRatio,
+          failureKind: "duration",
+          error: `Delivered duration ${probe.duration.toFixed(2)}s does not match the requested ${expected}s (tolerance ±${tolerance.toFixed(2)}s).`,
+        };
+      }
+    }
+    if (options?.minDurationSeconds !== undefined && probe.duration !== undefined) {
+      if (probe.duration < options.minDurationSeconds) {
+        return {
+          ...baseResult,
+          verified: false,
+          width: probe.width,
+          height: probe.height,
+          fps: probe.fps,
+          duration: probe.duration,
+          hasAudioStream: probe.hasAudioStream,
+          isVertical: probe.isVertical,
+          aspectRatio: probe.aspectRatio,
+          failureKind: "duration",
+          error: `Delivered duration ${probe.duration.toFixed(2)}s is below the minimum ${options.minDurationSeconds}s.`,
+        };
       }
     }
 
@@ -429,7 +518,8 @@ export async function verifyDeliveredVideoArtifact(
         hasAudioStream: false,
         isVertical: probe.isVertical,
         aspectRatio: probe.aspectRatio,
-        error: "Audible dialogue/speech was requested, but delivered video contains no audio stream.",
+        failureKind: "audio",
+          error: "Audible dialogue/speech was requested, but delivered video contains no audio stream.",
       };
     }
 

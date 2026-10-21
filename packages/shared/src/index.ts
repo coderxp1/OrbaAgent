@@ -498,6 +498,13 @@ export {
 } from "./lib/safePath.js";
 
 export {
+  type ArtifactIdParts,
+  canonicalArtifactUrl,
+  decodeArtifactId,
+  resolveAttachmentArtifactUrl,
+} from "./lib/artifacts.js";
+
+export {
   DEFAULT_TENANT_ID,
   DEFAULT_USER_ID,
   SESSION_COOKIE_NAME,
