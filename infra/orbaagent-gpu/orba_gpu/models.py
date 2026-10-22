@@ -120,10 +120,17 @@ class ModelManager:
         video_model_id: str,
         image_loader: Optional[Callable[[str], Any]] = None,
         video_loader: Optional[Callable[[str], Any]] = None,
+        video_backend: Optional[str] = None,
+        mova_config: Optional[Any] = None,
     ) -> None:
         self._models_dir = models_dir
         self._output_dir = output_dir
         self._backend = backend
+        # The video slot may use a different backend than the image slot
+        # (e.g. FLUX images via diffusers + MOVA video via its service).
+        # Defaults to the shared backend for backward compatibility.
+        self._video_backend = video_backend or backend
+        self._mova_config = mova_config
         self._image_model_id = image_model_id
         self._video_model_id = video_model_id
         self._image_loader = image_loader
@@ -154,6 +161,10 @@ class ModelManager:
         return bool(self._backend)
 
     @property
+    def video_backend(self) -> str:
+        return self._video_backend
+
+    @property
     def image_ready(self) -> bool:
         """True only when an image pipeline is actually loaded in memory."""
         return self._image_pipeline is not None
@@ -165,6 +176,7 @@ class ModelManager:
     def status(self) -> dict:
         return {
             "backend_configured": self._backend or None,
+            "video_backend_configured": self._video_backend or None,
             "image": ModelStatus(
                 slot="image",
                 model_id=self._image_model_id,
@@ -175,7 +187,7 @@ class ModelManager:
             "video": ModelStatus(
                 slot="video",
                 model_id=self._video_model_id,
-                requested=self._backend in ("diffusers", "comfyui"),
+                requested=self._video_backend in ("diffusers", "comfyui", "mova"),
                 loaded=self.video_ready,
                 load_error=self._video_error,
             ).to_dict(),
@@ -232,15 +244,39 @@ class ModelManager:
                 return self._video_pipelines[cache_key]
             if target_model in self._video_pipelines and model_type == "auto":
                 return self._video_pipelines[target_model]
-            if self._backend == "comfyui":
+            if self._video_backend == "comfyui":
                 from .backends.comfyui_backend import ComfyUIBackend
                 self._video_pipeline = ComfyUIBackend(self._models_dir)
                 self._video_pipelines[cache_key] = self._video_pipeline
                 self._video_error = None
                 return self._video_pipeline
-            if self._backend != "diffusers":
+            if self._video_backend == "mova":
+                from .backends.mova_backend import MovaBackend, MovaConfig
+
+                if self._mova_config is None:
+                    raise BackendNotImplementedError(
+                        "video backend 'mova' selected but no MOVA service "
+                        "configuration was provided to the model manager"
+                    )
+                try:
+                    # Construction verifies the service is reachable and is
+                    # serving the pinned model revision; anything else is a
+                    # hard failure — there is no fallback backend.
+                    backend_obj = MovaBackend(self._mova_config)
+                except Exception as exc:
+                    self._video_error = str(exc)
+                    raise ModelUnavailableError(
+                        f"MOVA video service unavailable: {exc}"
+                    ) from exc
+                self._video_pipeline = backend_obj
+                self._video_pipelines[cache_key] = backend_obj
+                self._video_pipelines[self._video_model_id] = backend_obj
+                self._video_error = None
+                return backend_obj
+            if self._video_backend != "diffusers":
                 raise BackendNotImplementedError(
-                    "video generation requires MEDIA_GENERATION_BACKEND=diffusers or comfyui"
+                    "video generation requires MEDIA_GENERATION_VIDEO_BACKEND "
+                    "in (diffusers, comfyui, mova)"
                 )
             loader = self._resolve_loader("video")
             try:

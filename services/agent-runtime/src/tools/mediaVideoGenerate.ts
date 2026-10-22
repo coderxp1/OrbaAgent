@@ -170,7 +170,7 @@ export class MediaVideoGenerateTool implements ITool {
             fps: current.fps,
             width: current.width,
             height: current.height,
-            model: current.model || "Lightricks/LTX-Video",
+            ...(current.model ? { model: current.model } : {}),
             ...(current.image_data ? { image_data: current.image_data } : {}),
             ...(current.image_url ? { image_url: current.image_url } : {}),
           }),
@@ -561,7 +561,12 @@ export class MediaVideoGenerateTool implements ITool {
         : isCartoonPrompt
           ? "photorealistic, hyperrealistic, deformed, blurry"
           : "cartoon, anime, 3d render, cgi, blurry, distorted, doodle, sketch, low quality, deformed, artificial";
-      const model = args.model ? String(args.model) : "kandinsky-6.0";
+      // No model is invented here. Only an explicitly requested model is
+      // forwarded; otherwise the worker's configured video model decides
+      // (and is what the worker records in the ingest metadata). A
+      // hard-coded default previously stamped "Lightricks/LTX-Video"
+      // onto requests regardless of the backend that actually ran.
+      const model = args.model ? String(args.model) : undefined;
 
       let finalArtifactUrl = "";
       let finalSha256: string | undefined;
@@ -648,14 +653,14 @@ export class MediaVideoGenerateTool implements ITool {
       }
 
       const isImageToVideo = Boolean(inputImageData);
-      const chosenModel = model && model !== "kandinsky-6.0" ? model : "Lightricks/LTX-Video";
+      const chosenModel = model && model !== "kandinsky-6.0" ? model : undefined;
 
       // Send the requested duration to the worker. The previous cap of 5s
       // silently truncated longer requests at the generation stage and left
       // the audio finalizer to loop a short clip up to the reported length.
       const baseDuration = requestedDuration;
       console.log(
-        `[MEDIA VIDEO GENERATE] Dispatching genuine ${isImageToVideo ? "Image-to-Video" : "Text-to-Video"} inference (model: ${chosenModel}, duration: ${baseDuration}s, ${width}x${height}, silent: ${isSilent})...`,
+        `[MEDIA VIDEO GENERATE] Dispatching genuine ${isImageToVideo ? "Image-to-Video" : "Text-to-Video"} inference (model: ${chosenModel ?? "worker-configured"}, duration: ${baseDuration}s, ${width}x${height}, silent: ${isSilent})...`,
       );
 
       const clip = await this.submitClip(workerUrl, workerToken, requestTimeout, {
@@ -691,7 +696,10 @@ export class MediaVideoGenerateTool implements ITool {
       rawResultMetadata = {
         ...(clip.rawResult || {}),
         mode: isImageToVideo ? "image-to-video" : "text-to-video",
-        model: chosenModel,
+        // Only an explicitly requested model overrides the worker-reported
+        // one; otherwise the worker's model (from its result metadata)
+        // stands as the honest record of what generated the video.
+        ...(chosenModel ? { model: chosenModel } : {}),
         identityPreserved: isImageToVideo,
         ...(sourceImageSha256
           ? { sourceImageSha256, sourceImageUrl: inputImageUrl }

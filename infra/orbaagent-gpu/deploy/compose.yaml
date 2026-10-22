@@ -50,6 +50,16 @@ services:
       - MEDIA_GENERATION_BACKEND=${MEDIA_GENERATION_BACKEND:-}
       - MEDIA_GENERATION_IMAGE_MODEL=${MEDIA_GENERATION_IMAGE_MODEL:-black-forest-labs/FLUX.1-schnell}
       - MEDIA_GENERATION_VIDEO_MODEL=${MEDIA_GENERATION_VIDEO_MODEL:-Lightricks/LTX-Video}
+      # Video backend is independent of the image backend. For MOVA the
+      # root-owned worker.env sets MEDIA_GENERATION_VIDEO_BACKEND=mova and
+      # MEDIA_GENERATION_VIDEO_MODEL=OpenMOSS-Team/MOVA-720p; the worker
+      # verifies the MOVA service's pinned revision and fails closed.
+      - MEDIA_GENERATION_VIDEO_BACKEND=${MEDIA_GENERATION_VIDEO_BACKEND:-}
+      - MOVA_SERVICE_URL=http://orbaagent-mova:8200
+      - MEDIA_MOVA_TOKEN_FILE=/run/secrets/media_mova_token
+      - MOVA_OFFLOAD=${MOVA_OFFLOAD:-cpu}
+      - MOVA_INFERENCE_STEPS=${MOVA_INFERENCE_STEPS:-50}
+      - MOVA_TIMEOUT_SECONDS=${MOVA_TIMEOUT_SECONDS:-1800}
       - MEDIA_MODELS_DIR=/models
       - MEDIA_OUTPUT_DIR=/output
       - MEDIA_MAX_CONCURRENT_GENERATIONS=${MEDIA_MAX_CONCURRENT_GENERATIONS:-1}
@@ -61,6 +71,7 @@ services:
     secrets:
       - media_worker_token
       - media_ingest_token
+      - media_mova_token
     volumes:
       # Named volumes, not bind mounts. A bind mount's host directory must be
       # writable by the container, which would mean making a host path writable
@@ -74,6 +85,36 @@ services:
       - orbaagent_media_net
     extra_hosts:
       - "orbaagent.dev:10.77.0.1"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ['GPU-82e03c6c-8c27-c076-eb42-7e37e9a5a878']
+              capabilities: [gpu]
+
+  # MOVA-720p video inference service (see mova_service/ in the repo).
+  # Internal only — no host port. The pinned checkpoint is bind-mounted
+  # read-only from the host; it is never downloaded or baked into an image.
+  orbaagent-mova:
+    container_name: orbaagent-mova
+    build:
+      context: ./mova_service
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=GPU-82e03c6c-8c27-c076-eb42-7e37e9a5a878
+      - CUDA_VISIBLE_DEVICES=0
+      - MOVA_CKPT_PATH=/models/mova-720p
+      - MOVA_REPO_DIR=/opt/mova/repo
+      - MOVA_SERVICE_TOKEN_FILE=/run/secrets/media_mova_token
+      - MOVA_JOB_TIMEOUT_SECONDS=${MOVA_TIMEOUT_SECONDS:-1800}
+    secrets:
+      - media_mova_token
+    volumes:
+      - /srv/orba-mova/model:/models/mova-720p:ro
+    networks:
+      - orbaagent_media_net
     deploy:
       resources:
         reservations:
@@ -153,6 +194,8 @@ secrets:
     file: /etc/orbaagent/gpu-worker/secrets/media_worker_token
   media_ingest_token:
     file: /etc/orbaagent/gpu-worker/secrets/media_ingest_token
+  media_mova_token:
+    file: /etc/orbaagent/gpu-worker/secrets/media_mova_token
 
 volumes:
   orbaagent_models:

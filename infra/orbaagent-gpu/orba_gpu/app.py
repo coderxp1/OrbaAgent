@@ -90,6 +90,8 @@ def create_app(
 
     redactor = Redactor([auth_token, settings.ingest_token])
 
+    from .backends.mova_backend import MovaConfig
+
     model_manager = manager or ModelManager(
         models_dir=settings.models_dir,
         output_dir=settings.output_dir,
@@ -98,6 +100,15 @@ def create_app(
         video_model_id=settings.video_model_id,
         image_loader=_load_image_pipeline,
         video_loader=_load_video_pipeline,
+        video_backend=settings.video_backend,
+        mova_config=MovaConfig(
+            service_url=settings.mova_service_url,
+            token=settings.mova_service_token,
+            model_id=settings.video_model_id,
+            offload=settings.mova_offload,
+            steps=settings.mova_steps,
+            timeout_seconds=settings.mova_timeout_seconds,
+        ),
     )
     generation_limiter = limiter or GenerationLimiter(settings.max_concurrent_generations)
 
@@ -154,6 +165,7 @@ def create_app(
                 "media_processing": gpu_present,
             },
             "generation_backend": settings.backend or None,
+            "generation_video_backend": settings.video_backend or None,
             "build": {"source_sha256": cached_source_fingerprint()},
             "models": model_status,
             "active_generations": generation_limiter.active,

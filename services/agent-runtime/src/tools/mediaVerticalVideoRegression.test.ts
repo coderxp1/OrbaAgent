@@ -150,7 +150,11 @@ describe("Exact Prompt Regression: 'Generate a vertical video with 2 females hol
       expect(workerPayload).not.toBeNull();
       expect(workerPayload.width).toBe(704);
       expect(workerPayload.height).toBe(1280);
-      expect(workerPayload.model).toBe("Lightricks/LTX-Video");
+      // No model may be invented by the tool: when the caller did not
+      // request one, the payload omits it and the worker's configured
+      // video model decides (previously this asserted a hard-coded
+      // "Lightricks/LTX-Video" stamp regardless of the actual backend).
+      expect(workerPayload.model).toBeUndefined();
 
       // Verify returned result specifies 720x1280 9:16 vertical resolution
       expect(result.success).toBe(true);

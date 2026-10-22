@@ -424,7 +424,12 @@ def generate_video(
         except Exception as exc:
             raise ValidationError(f"Invalid image_data provided for video conditioning: {exc}") from exc
 
-    effective_model = model or "Lightricks/LTX-Video"
+    # The recorded model is the worker's configured video model unless the
+    # caller explicitly requested one. A hard-coded default here previously
+    # stamped "Lightricks/LTX-Video" onto outcomes regardless of which
+    # backend actually generated the video — false provenance in the ingest
+    # metadata. The configured model is the only honest default.
+    effective_model = model or manager.video_model_id
     model_type = "image-to-video" if pil_image is not None else "text-to-video"
 
     job_id = _new_job_id("vid")

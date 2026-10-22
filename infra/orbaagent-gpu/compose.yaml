@@ -5,8 +5,9 @@ version: '3.8'
 # GPU ISOLATION IS ENFORCED BY CONFIGURATION
 # ------------------------------------------
 # This worker may only ever use GPU 1 (GPU-82e03c6c-8c27-c076-eb42-7e37e9a5a878).
-# GPU 0 (GPU-4634107e-...) runs the CoderXP/ComfyUI workload and must never be
-# selected. Isolation rests on three independent layers:
+# GPU 0 is reserved (paul's allocation, 2026-10-21) and must never be
+# selected by the worker, the MOVA service, or Ollama. Isolation rests on
+# three independent layers:
 #
 #   1. deploy.resources.reservations.devices.device_ids  -> the NVIDIA container
 #      runtime mounts ONLY that device's nodes into the container, so GPU 0 is
@@ -49,6 +50,18 @@ services:
       - MEDIA_GENERATION_BACKEND=${MEDIA_GENERATION_BACKEND:-}
       - MEDIA_GENERATION_IMAGE_MODEL=${MEDIA_GENERATION_IMAGE_MODEL:-black-forest-labs/FLUX.1-schnell}
       - MEDIA_GENERATION_VIDEO_MODEL=${MEDIA_GENERATION_VIDEO_MODEL:-Lightricks/LTX-Video}
+      # --- Video backend (independent of the image backend above) -----------
+      # Set MEDIA_GENERATION_VIDEO_BACKEND=mova together with
+      # MEDIA_GENERATION_VIDEO_MODEL=OpenMOSS-Team/MOVA-720p to route video
+      # generation to the MOVA service below. The worker verifies the
+      # service's pinned model revision at load and fails closed (no WAN/LTX
+      # fallback) when it is unreachable or reports a different revision.
+      - MEDIA_GENERATION_VIDEO_BACKEND=${MEDIA_GENERATION_VIDEO_BACKEND:-}
+      - MOVA_SERVICE_URL=http://orbaagent-mova:8200
+      - MEDIA_MOVA_TOKEN_FILE=/run/secrets/media_mova_token
+      - MOVA_OFFLOAD=${MOVA_OFFLOAD:-cpu}
+      - MOVA_INFERENCE_STEPS=${MOVA_INFERENCE_STEPS:-50}
+      - MOVA_TIMEOUT_SECONDS=${MOVA_TIMEOUT_SECONDS:-1800}
       - MEDIA_MODELS_DIR=/models
       - MEDIA_OUTPUT_DIR=/output
       # One generation at a time until VRAM behaviour is measured on real hardware.
@@ -65,6 +78,7 @@ services:
     secrets:
       - media_worker_token
       - media_ingest_token
+      - media_mova_token
     volumes:
       # Model weights are downloaded here. Never committed to git.
       - ./models:/models
@@ -75,6 +89,37 @@ services:
       - orbaagent_media_net
     extra_hosts:
       - "orbaagent.dev:10.77.0.1"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ['GPU-82e03c6c-8c27-c076-eb42-7e37e9a5a878']
+              capabilities: [gpu]
+
+  # MOVA-720p video inference service. Internal only: no host port is
+  # published; the worker reaches it over orbaagent_media_net. The model
+  # checkpoint is the pinned host download, mounted read-only — it is
+  # never downloaded by the service or baked into the image.
+  orbaagent-mova:
+    container_name: orbaagent-mova
+    build:
+      context: ./mova_service
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=GPU-82e03c6c-8c27-c076-eb42-7e37e9a5a878
+      - CUDA_VISIBLE_DEVICES=0
+      - MOVA_CKPT_PATH=/models/mova-720p
+      - MOVA_REPO_DIR=/opt/mova/repo
+      - MOVA_SERVICE_TOKEN_FILE=/run/secrets/media_mova_token
+      - MOVA_JOB_TIMEOUT_SECONDS=${MOVA_TIMEOUT_SECONDS:-1800}
+    secrets:
+      - media_mova_token
+    volumes:
+      - /srv/orba-mova/model:/models/mova-720p:ro
+    networks:
+      - orbaagent_media_net
     deploy:
       resources:
         reservations:
@@ -154,6 +199,8 @@ secrets:
     file: ./secrets/media_worker_token
   media_ingest_token:
     file: ./secrets/media_ingest_token
+  media_mova_token:
+    file: ./secrets/media_mova_token
 
 volumes:
   orbaagent_ollama_models:

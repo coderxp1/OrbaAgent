@@ -16,6 +16,19 @@ DEFAULT_TARGET_GPU_UUID = "GPU-82e03c6c-8c27-c076-eb42-7e37e9a5a878"
 #: Backend identifier that selects the in-process HuggingFace diffusers runtime.
 BACKEND_DIFFUSERS = "diffusers"
 
+#: Backend identifier that selects the MOVA video service (video slot only).
+BACKEND_MOVA = "mova"
+
+#: Pinned MOVA release (paul's migration decision, 2026-10-21). The worker
+#: refuses a MOVA service reporting any other revision — no silent drift.
+MOVA_MODEL_ID = "OpenMOSS-Team/MOVA-720p"
+MOVA_MODEL_REVISION = "8462bea9a317a3591279faeedfd3ca01b055cb59"
+MOVA_REPO_COMMIT = "1591b2557b42030a3421442c998dd6f5602ed9bd"
+DEFAULT_MOVA_SERVICE_URL = "http://mova:8200"
+DEFAULT_MOVA_OFFLOAD = "cpu"
+DEFAULT_MOVA_STEPS = 50
+DEFAULT_MOVA_TIMEOUT_SECONDS = 1800
+
 #: Generation bounds. Requests are clamped, not rejected, so a caller asking for
 #: an absurd size gets a usable result at the ceiling instead of a hard failure.
 MIN_DIMENSION = 64
@@ -64,8 +77,20 @@ class Settings:
 
     target_gpu_uuid: str = DEFAULT_TARGET_GPU_UUID
     backend: str = ""
+    video_backend: str = ""
     image_model_id: str = "black-forest-labs/FLUX.1-schnell"
     video_model_id: str = "Lightricks/LTX-Video"
+    mova_service_url: str = DEFAULT_MOVA_SERVICE_URL
+    mova_service_token: str = field(default="", repr=False)
+    mova_offload: str = DEFAULT_MOVA_OFFLOAD
+    mova_steps: int = DEFAULT_MOVA_STEPS
+    mova_timeout_seconds: int = DEFAULT_MOVA_TIMEOUT_SECONDS
+
+    def __post_init__(self) -> None:
+        # An unset video backend means "same as the shared backend" —
+        # for direct construction as well as from_env.
+        if not self.video_backend:
+            object.__setattr__(self, "video_backend", self.backend)
     models_dir: str = "/models"
     output_dir: str = "/output"
     port: int = 8190
@@ -91,10 +116,24 @@ class Settings:
             file_var="MEDIA_INGEST_TOKEN_FILE",
             env=source,
         )
+        mova_service_token = load_optional_secret(
+            env_var="MEDIA_MOVA_TOKEN",
+            file_var="MEDIA_MOVA_TOKEN_FILE",
+            env=source,
+        )
 
+        backend = get("MEDIA_GENERATION_BACKEND")
         return Settings(
             target_gpu_uuid=get("MEDIA_WORKER_GPU_UUID", DEFAULT_TARGET_GPU_UUID),
-            backend=get("MEDIA_GENERATION_BACKEND"),
+            backend=backend,
+            video_backend=get("MEDIA_GENERATION_VIDEO_BACKEND") or backend,
+            mova_service_url=get("MOVA_SERVICE_URL", DEFAULT_MOVA_SERVICE_URL),
+            mova_service_token=mova_service_token,
+            mova_offload=get("MOVA_OFFLOAD", DEFAULT_MOVA_OFFLOAD),
+            mova_steps=_env_int(source, "MOVA_INFERENCE_STEPS", DEFAULT_MOVA_STEPS),
+            mova_timeout_seconds=_env_int(
+                source, "MOVA_TIMEOUT_SECONDS", DEFAULT_MOVA_TIMEOUT_SECONDS
+            ),
             image_model_id=get("MEDIA_GENERATION_IMAGE_MODEL", "black-forest-labs/FLUX.1-schnell"),
             video_model_id=get("MEDIA_GENERATION_VIDEO_MODEL", "kandinskylab/Kandinsky-6.0-Pro-distill-5s-Diffusers"),
             models_dir=get("MEDIA_MODELS_DIR", "/models"),
@@ -119,7 +158,7 @@ class Settings:
 
     @property
     def video_backend_requested(self) -> bool:
-        return self.backend in (BACKEND_DIFFUSERS, "comfyui")
+        return self.video_backend in (BACKEND_DIFFUSERS, "comfyui", BACKEND_MOVA)
 
     @property
     def image_backend_implemented(self) -> bool:
@@ -128,7 +167,7 @@ class Settings:
 
     @property
     def video_backend_implemented(self) -> bool:
-        return self.backend in (BACKEND_DIFFUSERS, "comfyui")
+        return self.video_backend in (BACKEND_DIFFUSERS, "comfyui", BACKEND_MOVA)
 
 
 class ValidationError(ValueError):

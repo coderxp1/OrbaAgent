@@ -26,6 +26,7 @@ _FINGERPRINT_FILES = (
     "validation.py",
     "backends/diffusers_backend.py",
     "backends/comfyui_backend.py",
+    "backends/mova_backend.py",
 )
 
 _cache: Optional[dict] = None
