@@ -19,6 +19,9 @@ import { timingSafeEqual } from "node:crypto";
 /** Cookie that carries the OAuth state between the two legs of the flow. */
 export const GITHUB_STATE_COOKIE = "orba_github_state";
 
+/** Same binding for the Notion OAuth flow. */
+export const NOTION_STATE_COOKIE = "orba_notion_state";
+
 /**
  * Compare two state values in constant time.
  *

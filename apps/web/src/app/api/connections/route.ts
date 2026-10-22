@@ -32,11 +32,46 @@ export async function GET(req: Request) {
     // Ignore cookie read issues
   }
 
+  // Notion: a token cookie alone is NOT treated as proof of connection.
+  // Verify it against the Notion API (GET /users/me) and only then mark
+  // the integration connected, with the workspace/bot identity the API
+  // returns. A rejected token leaves the status disconnected.
+  try {
+    const cookieStore = await cookies();
+    const notionToken = cookieStore.get("orba_notion_token")?.value;
+    if (notionToken) {
+      const meResp = await fetch("https://api.notion.com/v1/users/me", {
+        headers: {
+          Authorization: `Bearer ${notionToken}`,
+          "Notion-Version": "2022-06-28",
+        },
+        signal: AbortSignal.timeout(3000),
+      }).catch(() => null);
+      if (meResp?.ok) {
+        const me = (await meResp.json().catch(() => null)) as any;
+        const current = manager.getIntegrations(verifiedUserId).find((i) => i.name === "notion");
+        if (!current || !current.connected) {
+          manager.setIntegrationStatus(verifiedUserId, {
+            name: "notion",
+            displayName: "Notion",
+            connected: true,
+            accountName: me?.name || current?.accountName || "Notion Workspace",
+            lastSyncedAt: new Date().toISOString(),
+            scopes: ["read_content", "insert_content", "update_content"],
+          });
+        }
+      }
+    }
+  } catch (e) {
+    // Ignore cookie read / verification issues; status stays as-is.
+  }
+
   const integrations = manager.getIntegrations(verifiedUserId);
   return Response.json({
     integrations,
     oauthConfigured: {
       github: Boolean(process.env.GITHUB_CLIENT_ID),
+      notion: Boolean(process.env.NOTION_CLIENT_ID),
     },
   });
 }

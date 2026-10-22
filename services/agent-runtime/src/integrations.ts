@@ -34,7 +34,12 @@ export class IntegrationsManager {
       notion: {
         name: "notion",
         displayName: "Notion",
-        connected: false,
+        // A configured server token means a connection exists; the web
+        // connections route additionally verifies it against the Notion
+        // API before reporting connected for OAuth/token-cookie users.
+        connected: Boolean(process.env.NOTION_API_TOKEN),
+        accountName: process.env.NOTION_API_TOKEN ? "Notion Workspace" : undefined,
+        scopes: ["read_content", "insert_content", "update_content"],
       },
       email: {
         name: "email",

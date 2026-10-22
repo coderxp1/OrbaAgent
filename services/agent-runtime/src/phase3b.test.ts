@@ -888,43 +888,97 @@ describe("Phase 3B: Autonomous Infrastructure, Databases, CI/CD, Connectors & Jo
     });
 
     it("executes Notion connector service (create page and search)", async () => {
-      const pageRes = await router.routeAndExecute(
-        "call_notion_create",
-        "notion_service",
-        {
-          action: "create_page",
-          title: "Phase 3B Architecture Verification",
-          content: "Comprehensive automated verification notes",
-        },
-        {
-          workspaceDir: tempWorkspace,
-          agentRunId: "run_phase3b",
-          tenantId: "t-conn",
-          userId: "u-conn",
-        },
-      );
+      // The Notion tool is backed by the real Notion API (the previous
+      // mock that fabricated pages was removed). Stub the API at the
+      // fetch boundary and provide a token via the execution context.
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = (async (input: any, init?: any) => {
+        const url = String(input);
+        if (url.endsWith("/v1/pages") && init?.method === "POST") {
+          return new Response(
+            JSON.stringify({
+              object: "page",
+              id: "phase3b-page",
+              url: "https://www.notion.so/phase3b-page",
+              properties: {
+                Name: {
+                  type: "title",
+                  title: [{ plain_text: "Phase 3B Architecture Verification" }],
+                },
+              },
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (url.endsWith("/v1/search")) {
+          return new Response(
+            JSON.stringify({
+              object: "list",
+              results: [
+                {
+                  object: "page",
+                  id: "phase3b-page",
+                  url: "https://www.notion.so/phase3b-page",
+                  properties: {
+                    Name: {
+                      type: "title",
+                      title: [{ plain_text: "Phase 3B Architecture Verification" }],
+                    },
+                  },
+                },
+              ],
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        return new Response(
+          JSON.stringify({ object: "error", code: "not_found", message: "unstubbed" }),
+          {
+            status: 404,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      }) as any;
+      const notionContext = {
+        workspaceDir: tempWorkspace,
+        agentRunId: "run_phase3b",
+        tenantId: "t-conn",
+        userId: "u-conn",
+        env: { NOTION_API_TOKEN: "ntn_phase3b_test_token" },
+      };
+      try {
+        const pageRes = await router.routeAndExecute(
+          "call_notion_create",
+          "notion_service",
+          {
+            action: "create_page",
+            database_id: "db-phase3b",
+            title: "Phase 3B Architecture Verification",
+            content: "Comprehensive automated verification notes",
+          },
+          notionContext,
+        );
 
-      expect(pageRes.result.success).toBe(true);
-      expect(pageRes.result.output).toContain("Created Notion page");
+        expect(pageRes.result.success).toBe(true);
+        expect(pageRes.result.output).toContain("Created Notion page");
 
-      const searchRes = await router.routeAndExecute(
-        "call_notion_search",
-        "notion_service",
-        {
-          action: "search",
-          query: "Architecture",
-        },
-        {
-          workspaceDir: tempWorkspace,
-          agentRunId: "run_phase3b",
-          tenantId: "t-conn",
-          userId: "u-conn",
-        },
-      );
+        const searchRes = await router.routeAndExecute(
+          "call_notion_search",
+          "notion_service",
+          {
+            action: "search",
+            query: "Architecture",
+          },
+          notionContext,
+        );
 
-      expect(searchRes.result.success).toBe(true);
-      const results = JSON.parse(searchRes.result.output);
-      expect(Array.isArray(results)).toBe(true);
+        expect(searchRes.result.success).toBe(true);
+        const results = JSON.parse(searchRes.result.output);
+        expect(Array.isArray(results)).toBe(true);
+        expect(results[0]?.id).toBe("phase3b-page");
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
     });
 
     it("executes Google Workspace and Microsoft 365 connectors", async () => {

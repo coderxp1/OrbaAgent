@@ -1,6 +1,16 @@
 import type { ToolDefinition, ToolExecutionResult, ToolMetadata } from "@orbaagent/shared";
 import { SecretManager } from "../secrets.js";
 import type { ITool, ToolExecutionContext } from "../tools/base.js";
+import {
+  NotionApiError,
+  NotionClient,
+  blocksToText,
+  flattenProperties,
+  pageTitle,
+  resolveNotionToken,
+  textToParagraphBlocks,
+  titleProperty,
+} from "./notionClient.js";
 import type { IConnector } from "./types.js";
 
 export class GitHubServiceTool implements ITool {
@@ -296,26 +306,49 @@ export class SlackServiceTool implements ITool {
 export class NotionServiceTool implements ITool {
   public readonly definition: ToolDefinition = {
     name: "notion_service",
-    description: "Search, read, and create pages or database items in Notion.",
+    description:
+      "Search, read, query, create, and update pages and database items in the user's connected Notion workspace. Only content shared with the integration is visible. Actions: search, get_page, query_database, create_page, update_page.",
     parameters: {
       type: "object",
       properties: {
         action: {
           type: "string",
-          enum: ["search", "get_page", "create_page"],
+          enum: ["search", "get_page", "query_database", "create_page", "update_page"],
           description: "Notion action to perform.",
         },
         query: {
           type: "string",
-          description: "Search query for pages or databases.",
+          description: "Search query for pages or databases (search).",
+        },
+        page_id: {
+          type: "string",
+          description: "Page ID (get_page, update_page) or parent page ID (create_page).",
+        },
+        database_id: {
+          type: "string",
+          description: "Database ID (query_database, or create_page to add a database item).",
         },
         title: {
           type: "string",
-          description: "Title for new page.",
+          description: "Title for a new page or database item (create_page).",
+        },
+        title_property: {
+          type: "string",
+          description:
+            "Name of the database's title property when creating a database item (default 'Name').",
         },
         content: {
           type: "string",
-          description: "Page markdown or text body.",
+          description: "Plain-text body for a new page; each line becomes a paragraph block.",
+        },
+        properties: {
+          type: "object",
+          description:
+            "Notion API property values in native format (create_page database items, update_page).",
+        },
+        page_size: {
+          type: "number",
+          description: "Maximum results for search/query (default 20, max 100).",
         },
       },
       required: ["action"],
@@ -328,57 +361,175 @@ export class NotionServiceTool implements ITool {
     category: "documents",
     provider: "connector",
     riskTier: "TIER_2_EXEC",
-    keywords: ["notion", "wiki", "docs", "page", "database", "notes"],
+    keywords: ["notion", "wiki", "docs", "page", "database", "notes", "knowledge base"],
     parameters: this.definition.parameters,
-    version: "1.0.0",
+    version: "1.1.0",
     isCore: false,
   };
 
   public async execute(
     args: Record<string, unknown>,
-    _context: ToolExecutionContext,
+    context: ToolExecutionContext,
   ): Promise<ToolExecutionResult> {
     const startTime = Date.now();
     const toolCallId = String(args._toolCallId || `tc_notion_${Date.now()}`);
     const action = String(args.action || "search");
-    const title = String(args.title || "OrbaAgent Notes");
+    const secretManager = SecretManager.getInstance();
+    const done = (partial: Partial<ToolExecutionResult>): ToolExecutionResult => ({
+      toolCallId,
+      name: this.definition.name,
+      success: false,
+      output: "",
+      executionTimeMs: Date.now() - startTime,
+      ...partial,
+    });
 
-    switch (action) {
-      case "create_page": {
-        const pageId = `notion_page_${Date.now()}`;
-        return {
-          toolCallId,
-          name: this.definition.name,
-          success: true,
-          output: `Created Notion page '${title}' with ID '${pageId}'. URL: https://notion.so/${pageId}`,
-          metadata: { pageId, title },
-          executionTimeMs: Date.now() - startTime,
-        };
+    const token = resolveNotionToken(context);
+    if (!token) {
+      return done({
+        error:
+          "Notion is not connected. Connect a Notion workspace first (an integration token must be configured); no Notion data was accessed.",
+        metadata: { status: "NOT_CONNECTED", action },
+      });
+    }
+    secretManager.registerSecret(token, "NOTION_API_TOKEN");
+    const client = new NotionClient(token);
+    const pageSize = Math.min(Math.max(Number(args.page_size) || 20, 1), 100);
+
+    try {
+      switch (action) {
+        case "search": {
+          const data = await client.search({
+            query: args.query ? String(args.query) : undefined,
+            page_size: pageSize,
+          });
+          const results = (data.results || []).map((r: any) => ({
+            id: r.id,
+            object: r.object,
+            title: pageTitle(r),
+            url: r.url,
+            lastEditedTime: r.last_edited_time,
+          }));
+          return done({
+            success: true,
+            output: JSON.stringify(results, null, 2),
+            metadata: { action, resultCount: results.length },
+          });
+        }
+        case "get_page": {
+          const pageId = String(args.page_id || "");
+          if (!pageId) return done({ error: "get_page requires page_id.", metadata: { action } });
+          const page = await client.getPage(pageId);
+          const blocks = await client.getBlockChildren(pageId).catch(() => ({ results: [] }));
+          return done({
+            success: true,
+            output: JSON.stringify(
+              {
+                id: page.id,
+                url: page.url,
+                title: pageTitle(page),
+                properties: flattenProperties(page),
+                content: blocksToText(blocks.results || []),
+              },
+              null,
+              2,
+            ),
+            metadata: { action, pageId },
+          });
+        }
+        case "query_database": {
+          const databaseId = String(args.database_id || "");
+          if (!databaseId)
+            return done({ error: "query_database requires database_id.", metadata: { action } });
+          const data = await client.queryDatabase(databaseId, { page_size: pageSize });
+          const rows = (data.results || []).map((r: any) => ({
+            id: r.id,
+            url: r.url,
+            properties: flattenProperties(r),
+          }));
+          return done({
+            success: true,
+            output: JSON.stringify(rows, null, 2),
+            metadata: { action, resultCount: rows.length },
+          });
+        }
+        case "create_page": {
+          const title = String(args.title || "Untitled");
+          const databaseId = args.database_id ? String(args.database_id) : "";
+          const parentPageId = args.page_id ? String(args.page_id) : "";
+          const extraProps =
+            args.properties && typeof args.properties === "object"
+              ? (args.properties as Record<string, unknown>)
+              : {};
+          let body: Record<string, unknown>;
+          if (databaseId) {
+            const titleProp = String(args.title_property || "Name");
+            body = {
+              parent: { database_id: databaseId },
+              properties: { [titleProp]: titleProperty(title), ...extraProps },
+            };
+          } else if (parentPageId) {
+            body = {
+              parent: { page_id: parentPageId },
+              properties: { title: titleProperty(title) },
+            };
+          } else {
+            return done({
+              error:
+                "create_page requires a parent: page_id (subpage) or database_id (database item). Notion pages cannot be created at the workspace root by the API.",
+              metadata: { action },
+            });
+          }
+          if (args.content) {
+            body.children = textToParagraphBlocks(String(args.content));
+          }
+          const page = await client.createPage(body);
+          return done({
+            success: true,
+            output: `Created Notion page '${pageTitle(page) || title}' with ID '${page.id}'. URL: ${page.url}`,
+            metadata: { action, pageId: page.id, title: pageTitle(page) || title },
+          });
+        }
+        case "update_page": {
+          const pageId = String(args.page_id || "");
+          const properties =
+            args.properties && typeof args.properties === "object"
+              ? (args.properties as Record<string, unknown>)
+              : null;
+          if (!pageId || !properties)
+            return done({
+              error: "update_page requires page_id and properties (native Notion format).",
+              metadata: { action },
+            });
+          const page = await client.updatePage(pageId, properties);
+          return done({
+            success: true,
+            output: `Updated Notion page '${page.id}'. URL: ${page.url}`,
+            metadata: { action, pageId: page.id },
+          });
+        }
+        default:
+          return done({
+            error: `Unknown Notion action '${action}'. Supported: search, get_page, query_database, create_page, update_page.`,
+            metadata: { action },
+          });
       }
-      case "search": {
-        return {
-          toolCallId,
-          name: this.definition.name,
-          success: true,
-          output: JSON.stringify(
-            [
-              { id: "page_1", title: "Engineering Roadmap", url: "https://notion.so/page_1" },
-              { id: "page_2", title: "Architecture Decisions", url: "https://notion.so/page_2" },
-            ],
-            null,
-            2,
-          ),
-          executionTimeMs: Date.now() - startTime,
-        };
-      }
-      default:
-        return {
-          toolCallId,
-          name: this.definition.name,
-          success: true,
-          output: `Notion action '${action}' completed.`,
-          executionTimeMs: Date.now() - startTime,
-        };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const status = err instanceof NotionApiError ? err.status : undefined;
+      const code = err instanceof NotionApiError ? err.code : undefined;
+      const hint =
+        code === "object_not_found"
+          ? " The object does not exist or is not shared with the Notion integration."
+          : status === 401
+            ? " The configured Notion token was rejected (invalid or revoked)."
+            : status === 429
+              ? " Notion rate limit reached; retry later."
+              : "";
+      return done({
+        error: secretManager.redact(`Notion action '${action}' failed: ${msg}${hint}`),
+        metadata: { action, status, code },
+      });
     }
   }
 }

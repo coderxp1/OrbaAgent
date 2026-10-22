@@ -43,6 +43,7 @@ import {
   TeamsIcon,
 } from "./AppIcons";
 import { GitHubConnectionModal } from "./GitHubConnectionModal";
+import { NotionConnectionModal } from "./NotionConnectionModal";
 import {
   AccountProfileView,
   PreferencesView,
@@ -274,6 +275,7 @@ export function ConnectionsModal({ isOpen, onClose, initialApp }: ConnectionsMod
   const [actionLoading, setActionLoading] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [isGitHubModalOpen, setIsGitHubModalOpen] = useState<boolean>(false);
+  const [isNotionModalOpen, setIsNotionModalOpen] = useState<boolean>(false);
 
   // Diagnostic verification state
   const [verifying, setVerifying] = useState<boolean>(false);
@@ -336,9 +338,34 @@ export function ConnectionsModal({ isOpen, onClose, initialApp }: ConnectionsMod
       return;
     }
 
+    if (app.id === "notion" && !connections.notion?.connected) {
+      setIsNotionModalOpen(true);
+      return;
+    }
+
     setActionLoading(true);
     setVerifyResult(null);
     const currentStatus = connections[app.id]?.connected || false;
+
+    if (app.id === "notion" && currentStatus) {
+      try {
+        await fetch("/api/auth/notion/disconnect", { method: "POST" });
+        setConnections((prev) => ({
+          ...prev,
+          notion: {
+            name: "notion",
+            displayName: "Notion",
+            connected: false,
+            accountName: undefined,
+          },
+        }));
+      } catch (e) {
+        console.error("Failed to disconnect Notion", e);
+      } finally {
+        setActionLoading(false);
+      }
+      return;
+    }
 
     if (app.id === "github" && currentStatus) {
       try {
@@ -958,6 +985,26 @@ export function ConnectionsModal({ isOpen, onClose, initialApp }: ConnectionsMod
             </div>
           )}
         </div>
+
+        <NotionConnectionModal
+          isOpen={isNotionModalOpen}
+          onClose={() => setIsNotionModalOpen(false)}
+          isConnected={Boolean(connections.notion?.connected)}
+          connectedAccount={connections.notion?.accountName}
+          onConnectedChange={(connected, account) => {
+            setConnections((prev) => ({
+              ...prev,
+              notion: {
+                name: "notion",
+                displayName: "Notion",
+                connected,
+                accountName: account,
+                lastSyncedAt: connected ? new Date().toISOString() : undefined,
+              },
+            }));
+            setIsNotionModalOpen(false);
+          }}
+        />
 
         <GitHubConnectionModal
           isOpen={isGitHubModalOpen}
