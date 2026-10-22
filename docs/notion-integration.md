@@ -94,3 +94,41 @@ was deliberately shaped so Workers can be added without redesign:
    on the server — never via chat.
 3. Production deployment follows the normal approval path; this
    branch is not deployed.
+
+## Live connection status (2026-10-22, via the authorized Notion session)
+
+Tested live against the workspace owner's Notion account through the
+authorized hosted-MCP session (identity verified: workspace
+"Hartmann's Space", user Hartmann). These are genuinely authenticated
+live results — distinct from the code/unit tests above:
+
+- **Session capabilities.** The session exposes 66 content tools
+  (search, fetch, create/update/delete pages, databases, comments,
+  files, calendar, teams/users). It exposes **no** tool to create or
+  manage integrations/connections, mint API tokens, or create/manage
+  Notion Workers. Integration creation remains an owner action in
+  Notion's UI; this session cannot substitute for it.
+- **Authenticated read:** `notion-get-self` returned the workspace and
+  user identity; `notion-search` executed live (0 results for "Orba"
+  — no pre-existing Orba content in the workspace).
+- **Controlled write + read-back:** created the page "Orba Integration
+  Smoke Test — 2026-10-22 (safe to delete)" (id
+  401d9515-ee79-8113-bcdf-e36af8059b92) with a unique marker
+  (ORBA-SMOKE-20261022), fetched it back, and verified title, marker
+  and body text all present. Create + read are therefore proven live.
+- **Cleanup:** the test page was moved to Trash via the connector's
+  approval flow (completed 2026-10-22, after two approval expiries
+  and one runtime restart interrupted earlier attempts; the page's
+  live state was re-verified before the successful delete). No other
+  workspace content was created or modified at any point.
+- **Orba token path:** NOT yet live-tested. It requires the owner to
+  (1) create an internal integration at notion.so/my-integrations
+  with read/insert/update content capabilities, (2) share the target
+  pages/databases with it, and (3) provide the token via the secure
+  vault for `NOTION_API_TOKEN`. No public integration was created —
+  per direction, a public integration is only for a future
+  multi-customer install decision.
+- **Workers verdict:** not needed now. No implemented workflow has a
+  trigger that lives inside Notion, and the session cannot manage
+  Workers anyway; the Orba runtime remains the execution path. The
+  Workers-ready seam in the design above stays as the future option.
