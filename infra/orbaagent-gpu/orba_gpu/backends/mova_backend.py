@@ -58,7 +58,7 @@ class MovaConfig:
     model_revision: str = MOVA_MODEL_REVISION
     offload: str = "cpu"
     steps: int = 50
-    timeout_seconds: int = 1800
+    timeout_seconds: int = 14400  # measured-latency default; see config.py
     attn_type: str = "fa"
 
 

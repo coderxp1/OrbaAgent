@@ -27,7 +27,14 @@ MOVA_REPO_COMMIT = "1591b2557b42030a3421442c998dd6f5602ed9bd"
 DEFAULT_MOVA_SERVICE_URL = "http://mova:8200"
 DEFAULT_MOVA_OFFLOAD = "cpu"
 DEFAULT_MOVA_STEPS = 50
-DEFAULT_MOVA_TIMEOUT_SECONDS = 1800
+#: Default MOVA timeout, sized from MEASURED latency, not a guess:
+#: Test A on the production GPU host (2026-10-22) took 9,508 s wall for
+#: a full 193-frame / 50-step 720p generation at cp_size=1 with CPU
+#: offload (~189 s/step). The original 1,800 s default would have timed
+#: out every full-length request. 14,400 s (4 h) covers the measured
+#: worst case with headroom; the service-side job timeout uses the same
+#: value so neither layer kills a legitimate generation first.
+DEFAULT_MOVA_TIMEOUT_SECONDS = 14400
 
 #: Generation bounds. Requests are clamped, not rejected, so a caller asking for
 #: an absurd size gets a usable result at the ceiling instead of a hard failure.

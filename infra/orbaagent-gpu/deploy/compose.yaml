@@ -59,7 +59,7 @@ services:
       - MEDIA_MOVA_TOKEN_FILE=/run/secrets/media_mova_token
       - MOVA_OFFLOAD=${MOVA_OFFLOAD:-cpu}
       - MOVA_INFERENCE_STEPS=${MOVA_INFERENCE_STEPS:-50}
-      - MOVA_TIMEOUT_SECONDS=${MOVA_TIMEOUT_SECONDS:-1800}
+      - MOVA_TIMEOUT_SECONDS=${MOVA_TIMEOUT_SECONDS:-14400}
       - MEDIA_MODELS_DIR=/models
       - MEDIA_OUTPUT_DIR=/output
       - MEDIA_MAX_CONCURRENT_GENERATIONS=${MEDIA_MAX_CONCURRENT_GENERATIONS:-1}
@@ -108,7 +108,7 @@ services:
       - MOVA_CKPT_PATH=/models/mova-720p
       - MOVA_REPO_DIR=/opt/mova/repo
       - MOVA_SERVICE_TOKEN_FILE=/run/secrets/media_mova_token
-      - MOVA_JOB_TIMEOUT_SECONDS=${MOVA_TIMEOUT_SECONDS:-1800}
+      - MOVA_JOB_TIMEOUT_SECONDS=${MOVA_TIMEOUT_SECONDS:-14400}
     secrets:
       - media_mova_token
     volumes:

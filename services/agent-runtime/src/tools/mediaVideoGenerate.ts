@@ -486,7 +486,22 @@ export class MediaVideoGenerateTool implements ITool {
         };
       }
 
-      const requestTimeout = lazyLoadPending ? FIRST_REQUEST_TIMEOUT_MS : 600_000;
+      // MOVA generations are measured in hours, not seconds (Test A on
+      // the production GPU host, 2026-10-22: ~189 s/step at 720p,
+      // 2h38m wall for a full 193-frame clip). The legacy 600 s cap
+      // would abort every MOVA request client-side while the worker
+      // kept generating. When the worker reports the MOVA video
+      // backend, use the long timeout aligned with the worker/service
+      // MOVA timeouts (14,400 s), overridable via env.
+      const isMovaBackend = health?.generation_video_backend === "mova";
+      const movaTimeoutMs = Number(
+        process.env.MEDIA_VIDEO_REQUEST_TIMEOUT_MS ?? 14_400_000,
+      );
+      const requestTimeout = isMovaBackend
+        ? movaTimeoutMs
+        : lazyLoadPending
+          ? FIRST_REQUEST_TIMEOUT_MS
+          : 600_000;
       const orientation = String(args.orientation || "").toLowerCase();
       const isVertical =
         orientation === "vertical" ||

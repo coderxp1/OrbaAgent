@@ -13,6 +13,7 @@ export interface GpuWorkerHealth {
     media_processing?: boolean;
   };
   generation_backend?: string | null;
+  generation_video_backend?: string | null;
   unavailable_reason?: string | null;
 }
 

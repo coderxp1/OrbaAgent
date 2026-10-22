@@ -38,7 +38,10 @@ REPO_COMMIT = "1591b2557b42030a3421442c998dd6f5602ed9bd"
 CKPT_PATH = os.environ.get("MOVA_CKPT_PATH", "/models/mova-720p")
 REPO_DIR = os.environ.get("MOVA_REPO_DIR", "/opt/mova/repo")
 WORK_DIR = Path(os.environ.get("MOVA_WORK_DIR", "/tmp/mova-jobs"))
-JOB_TIMEOUT_SECONDS = int(os.environ.get("MOVA_JOB_TIMEOUT_SECONDS", "1800"))
+# Default matches the worker's DEFAULT_MOVA_TIMEOUT_SECONDS and is
+# sized from measured latency (Test A, 2026-10-22: 9,508 s for a full
+# 193-frame/50-step generation); see orba_gpu/config.py.
+JOB_TIMEOUT_SECONDS = int(os.environ.get("MOVA_JOB_TIMEOUT_SECONDS", "14400"))
 
 #: Runner signature: (argv, env, timeout_seconds) -> (returncode, combined_output)
 Runner = Callable[[list, dict, int], "tuple[int, str]"]

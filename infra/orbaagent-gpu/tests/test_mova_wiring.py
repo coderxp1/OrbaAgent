@@ -71,7 +71,7 @@ class TestConfig:
         assert settings.mova_service_url == "http://mova:8200"
         assert settings.mova_offload == "cpu"
         assert settings.mova_steps == 50
-        assert settings.mova_timeout_seconds == 1800
+        assert settings.mova_timeout_seconds == 14400
 
 
 def make_mova_manager(tmp_path, monkeypatch, *, with_config=True):

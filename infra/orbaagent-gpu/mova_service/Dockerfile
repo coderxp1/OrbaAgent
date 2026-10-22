@@ -34,6 +34,20 @@ RUN git clone https://github.com/OpenMOSS/MOVA repo \
 WORKDIR /opt/mova/repo
 RUN python -m pip install --no-cache-dir -e .
 
+# bitsandbytes is a RUNTIME dependency of the pinned MOVA inference
+# import chain, despite being declared only in MOVA's `train` extra:
+# scripts/inference_single.py imports mova.diffusion.pipelines, whose
+# __init__ also imports the training pipeline, which pulls in
+# mova.engine.optimizers -> bnb_optimizers -> `from bitsandbytes
+# import optim` at module level. A plain `pip install -e .` therefore
+# produces an image whose first inference crashes with
+# ModuleNotFoundError (proven on the GPU host, Test A attempt 1,
+# 2026-10-22). Pinned to the version verified working in the isolated
+# host environment; the import assertion makes the build fail loudly
+# if this ever regresses.
+RUN python -m pip install --no-cache-dir "bitsandbytes==0.50.2" \
+    && python -c "import bitsandbytes; print('bitsandbytes', bitsandbytes.__version__)"
+
 RUN python -m pip install --no-cache-dir "fastapi>=0.110" "uvicorn>=0.29" "pydantic>=2"
 
 WORKDIR /opt/mova-service
