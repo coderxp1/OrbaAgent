@@ -121,13 +121,23 @@ live results — distinct from the code/unit tests above:
   and one runtime restart interrupted earlier attempts; the page's
   live state was re-verified before the successful delete). No other
   workspace content was created or modified at any point.
-- **Orba token path:** NOT yet live-tested. It requires the owner to
-  (1) create an internal integration at notion.so/my-integrations
-  with read/insert/update content capabilities, (2) share the target
-  pages/databases with it, and (3) provide the token via the secure
-  vault for `NOTION_API_TOKEN`. No public integration was created —
-  per direction, a public integration is only for a future
-  multi-customer install decision.
+- **Orba token path: LIVE-VERIFIED (2026-10-23)** through Orba's own
+  `NotionServiceTool` with the owner's internal-integration token:
+  `GET /v1/users/me` returned the integration's bot in the owner's
+  workspace; the tool's `search` found the shared
+  `Custom Q&A Agent Home` page, `get_page` read it, `create_page`
+  created a temporary page beneath it, and a second `get_page` read
+  it back with its content verified. The temporary page was then
+  archived via the API (`archived`/`in_trash` confirmed on re-read).
+  Operational lesson, observed live: integration secrets are
+  single-current — regenerating a secret invalidates the previous
+  value immediately (a working token began returning 401 after a
+  regeneration), so the value configured in any environment must be
+  the current one and rotations must be coordinated. Production
+  enablement is still pending: `NOTION_API_TOKEN` in the deployed
+  app's environment plus a deploy of this branch (not yet done). No
+  public integration was created — per direction, a public
+  integration is only for a future multi-customer install decision.
 - **Workers verdict:** not needed now. No implemented workflow has a
   trigger that lives inside Notion, and the session cannot manage
   Workers anyway; the Orba runtime remains the execution path. The
