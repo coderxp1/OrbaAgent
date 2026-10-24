@@ -18,10 +18,14 @@ from orba_gpu.config import (
 
 
 class TestSettingsFromEnv:
-    def test_defaults_target_gpu_1(self):
+    def test_no_default_target_gpu(self):
+        """Without MEDIA_WORKER_GPU_UUID the worker targets nothing, never a stale device."""
         s = Settings.from_env({})
-        assert s.target_gpu_uuid == DEFAULT_TARGET_GPU_UUID
-        assert s.target_gpu_uuid == "GPU-82e03c6c-8c27-c076-eb42-7e37e9a5a878"
+        assert s.target_gpu_uuid == DEFAULT_TARGET_GPU_UUID == ""
+
+    def test_target_gpu_comes_from_the_environment(self):
+        s = Settings.from_env({"MEDIA_WORKER_GPU_UUID": "GPU-00000000-0000-0000-0000-00000000000a"})
+        assert s.target_gpu_uuid == "GPU-00000000-0000-0000-0000-00000000000a"
 
     def test_backend_defaults_to_unset(self):
         """No backend configured must remain unset — not silently defaulted."""
