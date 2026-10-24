@@ -8,9 +8,11 @@ Env:  MEDIA_WORKER_TOKEN (required), MEDIA_WORKER_TOKEN_FILE (preferred),
       MEDIA_GENERATION_BACKEND, MEDIA_WORKER_GPU_UUID, MEDIA_MODELS_DIR,
       MEDIA_OUTPUT_DIR, MEDIA_INGEST_URL, MEDIA_INGEST_TOKEN
 
-The worker is pinned to GPU 1 (GPU-82e03c6c-8c27-c076-eb42-7e37e9a5a878) by the
-container's NVIDIA_VISIBLE_DEVICES. GPU 0 runs the CoderXP/ComfyUI workload and
-is not present in this container's device namespace.
+The worker is pinned to a single GPU by the container's device reservation and
+NVIDIA_VISIBLE_DEVICES, both derived from the root-owned allocation policy
+(ORBA_WORKER_GPU_UUID in worker.env). Every other GPU on the host is absent from
+this container's device namespace. MEDIA_WORKER_GPU_UUID carries the same UUID so
+the worker's own nvidia-smi queries target exactly the device it was given.
 """
 
 from __future__ import annotations
