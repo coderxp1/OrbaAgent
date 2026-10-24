@@ -13,8 +13,11 @@ from orba_gpu import fw_wg_verify as v
 from orba_gpu import validation
 from deploy import bootstrap_provision as bp
 
-EXPECTED_GPU_UUID = "GPU-82e03c6c-8c27-c076-eb42-7e37e9a5a878"
-FORBIDDEN_GPU_UUID = "GPU-4634107e-3bae-d5d5-ff97-2355d0b92ce4"
+# Synthetic allocation policy. Real UUIDs are never hard-coded: the host's
+# index->UUID map is read live by `orbaagent-gpu validate`.
+EXPECTED_GPU_UUID = "GPU-00000000-0000-0000-0000-00000000000a"
+FORBIDDEN_GPU_UUID = "GPU-00000000-0000-0000-0000-00000000000b"
+POLICY = deploy_validation.GpuAllocationPolicy(EXPECTED_GPU_UUID, (FORBIDDEN_GPU_UUID,), worker_index=0)
 
 
 def test_firewall_adversarial():
@@ -209,7 +212,7 @@ def test_archive_whitelist_adversarial(tmp_path: Path | None = None):
 
 def test_gpu_and_docker_isolation_adversarial():
     base_compose = f"""services:
-  worker:
+  orbaagent-gpu-worker:
     deploy:
       resources:
         reservations:
@@ -220,24 +223,79 @@ def test_gpu_and_docker_isolation_adversarial():
     environment:
       - NVIDIA_VISIBLE_DEVICES={EXPECTED_GPU_UUID}
       - CUDA_VISIBLE_DEVICES=0
+      - MEDIA_WORKER_GPU_UUID={EXPECTED_GPU_UUID}
     ports:
       - "10.77.0.2:8190:8190"
 """
     # 1. Valid compose -> PASS
-    deploy_validation.validate_isolation(base_compose)
+    deploy_validation.validate_isolation(base_compose, POLICY)
 
-    # 2. Forbidden GPU 0 UUID -> REJECT
-    gpu0_compose = base_compose.replace(EXPECTED_GPU_UUID, FORBIDDEN_GPU_UUID)
+    # 2. Forbidden GPU UUID in the worker -> REJECT (reported as the forbidden condition)
+    forbidden_compose = base_compose.replace(EXPECTED_GPU_UUID, FORBIDDEN_GPU_UUID)
     try:
-        deploy_validation.validate_isolation(gpu0_compose)
-        assert False, "Should reject GPU 0"
+        deploy_validation.validate_isolation(forbidden_compose, POLICY)
+        assert False, "Should reject the forbidden GPU"
+    except deploy_validation.IsolationError as exc:
+        assert "forbidden" in str(exc)
+
+    # 2b. Some other (unknown) UUID -> REJECT (policy mismatch)
+    other_compose = base_compose.replace(EXPECTED_GPU_UUID, "GPU-00000000-0000-0000-0000-00000000000c")
+    try:
+        deploy_validation.validate_isolation(other_compose, POLICY)
+        assert False, "Should reject a GPU the policy does not name"
+    except deploy_validation.IsolationError:
+        pass
+
+    # 2c. No policy at all -> REJECT (fail closed, never a default device)
+    try:
+        deploy_validation.validate_isolation(base_compose, deploy_validation.GpuAllocationPolicy(""))
+        assert False, "Should reject an empty policy"
+    except deploy_validation.PolicyError:
+        pass
+
+    # 2d. Pins that disagree (MEDIA_WORKER_GPU_UUID drifts from the container pin) -> REJECT
+    drift_compose = base_compose.replace(f"MEDIA_WORKER_GPU_UUID={EXPECTED_GPU_UUID}", "MEDIA_WORKER_GPU_UUID=GPU-00000000-0000-0000-0000-00000000000c")
+    try:
+        deploy_validation.validate_isolation(drift_compose, POLICY)
+        assert False, "Should reject disagreeing pins"
+    except deploy_validation.IsolationError:
+        pass
+
+    # 2e. Rendered-config shape (environment as a map, ports in long syntax) -> PASS,
+    #     and a long-syntax public host_ip -> REJECT
+    rendered_compose = f"""services:
+  orbaagent-gpu-worker:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids:
+                - {EXPECTED_GPU_UUID}
+              capabilities:
+                - gpu
+    environment:
+      NVIDIA_VISIBLE_DEVICES: {EXPECTED_GPU_UUID}
+      CUDA_VISIBLE_DEVICES: "0"
+      MEDIA_WORKER_GPU_UUID: {EXPECTED_GPU_UUID}
+    ports:
+      - mode: ingress
+        host_ip: 10.77.0.2
+        target: 8190
+        published: "8190"
+        protocol: tcp
+"""
+    deploy_validation.validate_isolation(rendered_compose, POLICY)
+    try:
+        deploy_validation.validate_isolation(rendered_compose.replace("host_ip: 10.77.0.2", "host_ip: 0.0.0.0"), POLICY)
+        assert False, "Should reject a public host_ip in long port syntax"
     except deploy_validation.IsolationError:
         pass
 
     # 3. Privileged: true -> REJECT
     priv_compose = base_compose + "    privileged: true\n"
     try:
-        deploy_validation.validate_isolation(priv_compose)
+        deploy_validation.validate_isolation(priv_compose, POLICY)
         assert False, "Should reject privileged: true"
     except deploy_validation.IsolationError:
         pass
@@ -245,7 +303,7 @@ def test_gpu_and_docker_isolation_adversarial():
     # 4. Host network mode -> REJECT
     net_compose = base_compose + "    network_mode: host\n"
     try:
-        deploy_validation.validate_isolation(net_compose)
+        deploy_validation.validate_isolation(net_compose, POLICY)
         assert False, "Should reject network_mode: host"
     except deploy_validation.IsolationError:
         pass
@@ -253,7 +311,7 @@ def test_gpu_and_docker_isolation_adversarial():
     # 5. Host NVIDIA mount -> REJECT
     mount_compose = base_compose + "    volumes:\n      - /dev/nvidia0:/dev/nvidia0\n"
     try:
-        deploy_validation.validate_isolation(mount_compose)
+        deploy_validation.validate_isolation(mount_compose, POLICY)
         assert False, "Should reject host nvidia mount"
     except deploy_validation.IsolationError:
         pass
@@ -261,7 +319,7 @@ def test_gpu_and_docker_isolation_adversarial():
     # 6. Broad GPU access (--gpus all / count: all) -> REJECT
     broad_compose = base_compose.replace(f"device_ids: ['{EXPECTED_GPU_UUID}']", "count: all")
     try:
-        deploy_validation.validate_isolation(broad_compose)
+        deploy_validation.validate_isolation(broad_compose, POLICY)
         assert False, "Should reject count: all"
     except deploy_validation.IsolationError:
         pass
@@ -276,7 +334,7 @@ def test_gpu_and_docker_isolation_adversarial():
     ):
         bad_compose = base_compose.replace('"10.77.0.2:8190:8190"', bad_port)
         try:
-            deploy_validation.validate_isolation(bad_compose)
+            deploy_validation.validate_isolation(bad_compose, POLICY)
             assert False, f"Should reject port {bad_port}"
         except deploy_validation.IsolationError:
             pass
