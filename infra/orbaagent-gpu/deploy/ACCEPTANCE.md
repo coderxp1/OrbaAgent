@@ -10,71 +10,83 @@ until **every** gate passes.
 
 ---
 
-## Gate 0 — Preconditions
+## Gate 0 — Preconditions (allocation of 2026-10-24: worker = GPU 0, GPU 1 = MOVA/Ollama)
 
-```bash
-# GPU 0 identity and state BEFORE anything starts
-nvidia-smi -i GPU-4634107e-3bae-d5d5-ff97-2355d0b92ce4 \
-  --query-gpu=uuid,memory.used,utilization.gpu --format=csv
-nvidia-smi --query-compute-apps=gpu_uuid,pid,process_name,used_memory --format=csv,noheader
+The worker's GPU is no longer a constant in code. It is the **allocation policy** in
+the root-owned `/etc/orbaagent/gpu-worker/worker.env`:
 
-# GPU 1 identity
-nvidia-smi -i GPU-82e03c6c-8c27-c076-eb42-7e37e9a5a878 \
-  --query-gpu=uuid,memory.used --format=csv
+```
+ORBA_WORKER_GPU_UUID=...            # the ONLY GPU the worker may use (host index 0)
+ORBA_WORKER_GPU_INDEX=0             # checked against nvidia-smi, never used to select
+ORBA_WORKER_FORBIDDEN_GPU_UUIDS=... # the MOVA/Ollama GPU (host index 1)
 ```
 
-- [ ] GPU 0 UUID is `GPU-4634107e-3bae-d5d5-ff97-2355d0b92ce4`
-- [ ] CoderXP PID **11416** present, ~10,206 MiB
-- [ ] GPU 1 UUID is `GPU-82e03c6c-8c27-c076-eb42-7e37e9a5a878`
+```bash
+# Live identity of BOTH GPUs, by index. Record it; every later gate compares against it.
+nvidia-smi --query-gpu=index,uuid,pci.bus_id,name,memory.used --format=csv
+nvidia-smi --query-compute-apps=gpu_uuid,pid,process_name,used_memory --format=csv,noheader
 
-**Record these numbers.** Every later gate compares against them.
+# The policy must describe THIS host (exit 0, table shows index 0 = WORKER, index 1 = FORBIDDEN)
+sudo -n true && nvidia-smi --query-gpu=index,uuid,name --format=csv,noheader | \
+  sudo PYTHONPATH=/etc/orbaagent/gpu-worker/src python3 -m orba_gpu.gpu_inventory \
+    --policy-file /etc/orbaagent/gpu-worker/worker.env --check -
+```
+
+- [ ] `ORBA_WORKER_GPU_UUID` equals the UUID nvidia-smi reports at **index 0** (verified 2026-10-24: `GPU-4634107e-…`)
+- [ ] `ORBA_WORKER_FORBIDDEN_GPU_UUIDS` equals the UUID at **index 1** (verified 2026-10-24: `GPU-82e03c6c-…`, where orbaagent-ollama is pinned and MOVA is reserved)
+- [ ] `gpu_inventory --check` prints `inventory OK` and exits 0
+- [ ] Baseline recorded: GPU 0 compute processes (expected: none), GPU 1 compute processes, ollama container ID, **no** `orbaagent-gpu-worker` container, **no** running orbaagent-comfyui
 
 ---
 
 ## Gate 1 — Isolation is enforced by configuration
 
-Run offline, before starting anything:
+Run offline, before starting anything. The validator reads the policy from the env file
+and accepts hand-written YAML, `docker compose config` YAML and `--format json`:
 
 ```bash
-python3 infra/orbaagent-gpu/deploy/check_compose_isolation.py \
-  /etc/orbaagent/gpu-worker/compose.yaml
-sudo orbaagent-gpu validate
+sudo PYTHONPATH=/etc/orbaagent/gpu-worker/src python3 -m orba_gpu.deploy_validation \
+  --policy-file /etc/orbaagent/gpu-worker/worker.env /etc/orbaagent/gpu-worker/compose.yaml
+sudo orbaagent-gpu validate          # rendered config + live nvidia-smi inventory
 ```
 
-- [ ] Both print `isolation OK` and exit 0
-- [ ] Tamper test: temporarily set `device_ids` to GPU 0's UUID in a scratch copy
-      and confirm the checker exits **4** (proves it can actually fail)
+- [ ] Both print `isolation OK: orbaagent-gpu-worker pinned to <GPU 0 UUID> … other GPU services: orbaagent-comfyui-><GPU 1>, orbaagent-ollama-><GPU 1>` and exit 0
+- [ ] Tamper test A: in a **scratch copy** of worker.env set `ORBA_WORKER_GPU_UUID` to the GPU 1 UUID and run the validator with `--policy-file <scratch>` → exit **4**, message `forbidden GPU GPU-82e03c6c…` (proves a worker staged on GPU 1 is refused)
+- [ ] Tamper test B: scratch worker.env with `ORBA_WORKER_GPU_UUID=` empty → `docker compose config` itself fails (`:?` guard) and `validate` exits 4
 
 ---
 
-## Gate 2 — Only GPU 1 is visible inside the worker
+## Gate 2 — Only GPU 0 is visible inside the worker
+
+Use the worker-scoped commands only. **Do not use `up`, `down` or `restart`** for this
+rollout: `up` would start orbaagent-comfyui (must stay stopped) and `down`/`restart`
+touch orbaagent-ollama (must stay untouched).
 
 ```bash
-sudo orbaagent-gpu up
+sudo orbaagent-gpu build             # worker image only
+sudo orbaagent-gpu deploy-worker     # up -d --no-deps orbaagent-gpu-worker, then validate
 docker exec orbaagent-gpu-worker nvidia-smi -L
 docker exec orbaagent-gpu-worker nvidia-smi --query-compute-apps=gpu_uuid,pid --format=csv,noheader
 ```
 
-- [ ] `nvidia-smi -L` lists **exactly one** GPU
-- [ ] That GPU's UUID is `GPU-82e03c6c-...e5a878`
-- [ ] GPU 0 does **not** appear anywhere in the container
-- [ ] `CUDA_VISIBLE_DEVICES` inside the container is `0`
-
-This is the layer that makes the "GPU 1 is currently empty" argument unnecessary:
-GPU 0 is not in the container's device namespace at all.
+- [ ] `nvidia-smi -L` lists **exactly one** GPU and its UUID is `ORBA_WORKER_GPU_UUID` (GPU 0)
+- [ ] The GPU 1 UUID does **not** appear anywhere in the container
+- [ ] `CUDA_VISIBLE_DEVICES` inside the container is `0` (container-local numbering, not a host index claim)
+- [ ] `docker inspect orbaagent-gpu-worker` → `HostConfig.DeviceRequests[0].DeviceIDs == [<GPU 0 UUID>]`
 
 ---
 
-## Gate 3 — GPU 0 is untouched by the worker starting
+## Gate 3 — GPU 1 (MOVA/Ollama) is untouched by the worker starting
 
 ```bash
 nvidia-smi --query-compute-apps=gpu_uuid,pid,process_name,used_memory --format=csv,noheader
-nvidia-smi -i GPU-4634107e-3bae-d5d5-ff97-2355d0b92ce4 --query-gpu=memory.used --format=csv,noheader
+docker ps --no-trunc --format '{{.ID}} {{.Names}} {{.Status}}' | grep -E 'ollama|comfyui|worker'
 ```
 
-- [ ] Still exactly PID 11416 on GPU 0
-- [ ] GPU 0 memory matches Gate 0
-- [ ] No new process on GPU 0
+- [ ] No process attributable to the worker on the GPU 1 UUID
+- [ ] orbaagent-ollama container ID and `StartedAt` identical to Gate 0 (not recreated, not restarted)
+- [ ] orbaagent-comfyui still not running
+- [ ] Rollback rehearsal (optional, recommended before Gate 5): `sudo orbaagent-gpu down-worker` removes only the worker; ollama ID unchanged; then `deploy-worker` again
 
 ---
 
@@ -169,7 +181,7 @@ docker exec orbaagent-gpu-worker sh -c '
 ```
 
 - [ ] One returns 200, the other returns **503 with `status: "BUSY"`**
-- [ ] `nvidia-smi` shows no OOM and GPU 0 is still untouched
+- [ ] `nvidia-smi` shows no OOM and GPU 1 (MOVA/Ollama) is still untouched
 
 ---
 
