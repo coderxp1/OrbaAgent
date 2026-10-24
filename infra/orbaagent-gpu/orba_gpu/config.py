@@ -8,10 +8,12 @@ from typing import Optional
 
 from .secrets import load_optional_secret
 
-#: GPU 1 on migrol-ag-gpu-worker01 — the only device this worker may use.
-#: GPU 0 (GPU-4634107e-3bae-d5d5-ff97-2355d0b92ce4) runs the CoderXP/ComfyUI
-#: workload and must never be selected.
-DEFAULT_TARGET_GPU_UUID = "GPU-82e03c6c-8c27-c076-eb42-7e37e9a5a878"
+#: There is deliberately NO default GPU. The worker's device comes from
+#: MEDIA_WORKER_GPU_UUID, which the compose file derives from the root-owned
+#: allocation policy (ORBA_WORKER_GPU_UUID in worker.env). An empty value makes
+#: ``gpu_info`` report the GPU as unavailable and generation returns 503, rather
+#: than the worker silently binding to whichever device a stale constant named.
+DEFAULT_TARGET_GPU_UUID = ""
 
 #: Backend identifier that selects the in-process HuggingFace diffusers runtime.
 BACKEND_DIFFUSERS = "diffusers"
