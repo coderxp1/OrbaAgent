@@ -14,12 +14,23 @@ from pathlib import Path
 import pytest
 
 from orba_gpu.deploy_validation import (
-    EXPECTED_GPU_UUID,
-    FORBIDDEN_GPU_UUID,
+    POLICY_UUID_ENV,
+    GpuAllocationPolicy,
     IsolationError,
+    PolicyError,
+    policy_from_mapping,
+    render_compose_template,
     validate_isolation,
     violations,
 )
+
+# Synthetic policy for the static tests. These are NOT real devices: the live
+# index->UUID map is only ever read from the host by `orbaagent-gpu validate`.
+EXPECTED_GPU_UUID = "GPU-00000000-0000-0000-0000-00000000000a"
+FORBIDDEN_GPU_UUID = "GPU-00000000-0000-0000-0000-00000000000b"
+POLICY = GpuAllocationPolicy(EXPECTED_GPU_UUID, (FORBIDDEN_GPU_UUID,), worker_index=0)
+WORKER_PIN = "${ORBA_WORKER_GPU_UUID:?ORBA_WORKER_GPU_UUID must be set in worker.env}"
+ANY_UUID_RE = re.compile(r"GPU-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.IGNORECASE)
 
 GPU_ROOT = Path(__file__).resolve().parent.parent
 DEPLOY = GPU_ROOT / "deploy"
@@ -41,50 +52,87 @@ WG_PROD = DEPLOY / "wireguard" / "wg-orba.production.conf.example"
 
 class TestIsolationValidator:
     def test_accepts_the_real_deployment_compose(self):
-        validate_isolation(DEPLOY_COMPOSE.read_text(encoding="utf-8"))
+        pins = validate_isolation(DEPLOY_COMPOSE.read_text(encoding="utf-8"), POLICY)
+        assert pins["orbaagent-gpu-worker"] == EXPECTED_GPU_UUID
 
     def test_accepts_the_repository_compose(self):
-        validate_isolation((GPU_ROOT / "compose.yaml").read_text(encoding="utf-8"))
+        pins = validate_isolation((GPU_ROOT / "compose.yaml").read_text(encoding="utf-8"), POLICY)
+        assert pins["orbaagent-gpu-worker"] == EXPECTED_GPU_UUID
 
-    def test_rejects_gpu0_uuid(self):
+    def test_refuses_to_run_without_a_policy(self, monkeypatch):
+        monkeypatch.delenv(POLICY_UUID_ENV, raising=False)
+        with pytest.raises(PolicyError, match="not set"):
+            validate_isolation(DEPLOY_COMPOSE.read_text(encoding="utf-8"))
+
+    def test_reads_the_policy_from_the_environment(self, monkeypatch):
+        monkeypatch.setenv(POLICY_UUID_ENV, EXPECTED_GPU_UUID)
+        monkeypatch.setenv("ORBA_WORKER_FORBIDDEN_GPU_UUIDS", FORBIDDEN_GPU_UUID)
+        monkeypatch.setenv("ORBA_WORKER_GPU_INDEX", "0")
+        validate_isolation(DEPLOY_COMPOSE.read_text(encoding="utf-8"))
+
+    def test_rejects_a_bare_index_as_policy(self):
+        with pytest.raises(PolicyError, match="not a GPU UUID"):
+            policy_from_mapping({POLICY_UUID_ENV: "0"})
+
+    def test_rejects_a_policy_that_forbids_its_own_gpu(self):
+        with pytest.raises(PolicyError, match="also listed"):
+            policy_from_mapping({POLICY_UUID_ENV: EXPECTED_GPU_UUID, "ORBA_WORKER_FORBIDDEN_GPU_UUIDS": EXPECTED_GPU_UUID})
+
+    def test_rejects_the_deployment_compose_when_the_worker_lands_on_a_forbidden_gpu(self):
+        """The policy says GPU a; worker.env (simulated) says GPU b, which is forbidden."""
+        rendered = render_compose_template(DEPLOY_COMPOSE.read_text(encoding="utf-8"), {POLICY_UUID_ENV: FORBIDDEN_GPU_UUID})
+        with pytest.raises(IsolationError, match="forbidden GPU"):
+            validate_isolation(rendered, POLICY)
+
+    def test_rejects_the_deployment_compose_when_rendered_for_another_gpu(self):
+        other = "GPU-00000000-0000-0000-0000-00000000000c"
+        rendered = render_compose_template(DEPLOY_COMPOSE.read_text(encoding="utf-8"), {POLICY_UUID_ENV: other})
+        with pytest.raises(IsolationError, match="policy requires"):
+            validate_isolation(rendered, POLICY)
+
+    def test_rejects_unrendered_interpolation_when_the_policy_variable_is_missing(self):
+        with pytest.raises(IsolationError, match="ORBA_WORKER_GPU_UUID"):
+            render_compose_template(DEPLOY_COMPOSE.read_text(encoding="utf-8"), {})
+
+    def test_rejects_forbidden_uuid(self):
         text = f"device_ids: ['{FORBIDDEN_GPU_UUID}']\nNVIDIA_VISIBLE_DEVICES=all\nCUDA_VISIBLE_DEVICES=0"
-        with pytest.raises(IsolationError, match="GPU 0"):
-            validate_isolation(text)
+        with pytest.raises(IsolationError, match="forbidden GPU"):
+            validate_isolation(text, POLICY)
 
     def test_rejects_missing_device_reservation(self):
         text = f"NVIDIA_VISIBLE_DEVICES={EXPECTED_GPU_UUID}\nCUDA_VISIBLE_DEVICES=0"
         with pytest.raises(IsolationError, match="device reservation"):
-            validate_isolation(text)
+            validate_isolation(text, POLICY)
 
     def test_rejects_missing_nvidia_visible_devices(self):
         text = f"device_ids: ['{EXPECTED_GPU_UUID}']\nCUDA_VISIBLE_DEVICES=0"
         with pytest.raises(IsolationError, match="NVIDIA_VISIBLE_DEVICES"):
-            validate_isolation(text)
+            validate_isolation(text, POLICY)
 
     def test_rejects_gpus_all_flag(self):
         text = f"device_ids: ['{EXPECTED_GPU_UUID}']\nNVIDIA_VISIBLE_DEVICES={EXPECTED_GPU_UUID}\nCUDA_VISIBLE_DEVICES=0\ncommand: --gpus all"
         with pytest.raises(IsolationError, match="--gpus"):
-            validate_isolation(text)
+            validate_isolation(text, POLICY)
 
     def test_rejects_count_all(self):
         text = f"device_ids: ['{EXPECTED_GPU_UUID}']\nNVIDIA_VISIBLE_DEVICES={EXPECTED_GPU_UUID}\nCUDA_VISIBLE_DEVICES=0\ncount: all"
         with pytest.raises(IsolationError, match="count: all"):
-            validate_isolation(text)
+            validate_isolation(text, POLICY)
 
     def test_rejects_privileged(self):
         text = f"device_ids: ['{EXPECTED_GPU_UUID}']\nNVIDIA_VISIBLE_DEVICES={EXPECTED_GPU_UUID}\nCUDA_VISIBLE_DEVICES=0\nprivileged: true"
         with pytest.raises(IsolationError, match="privileged"):
-            validate_isolation(text)
+            validate_isolation(text, POLICY)
 
     def test_rejects_host_nvidia_mounts(self):
         text = f"device_ids: ['{EXPECTED_GPU_UUID}']\nNVIDIA_VISIBLE_DEVICES={EXPECTED_GPU_UUID}\nCUDA_VISIBLE_DEVICES=0\n- /dev/nvidia0:/dev/nvidia0"
         with pytest.raises(IsolationError, match="/dev/nvidia"):
-            validate_isolation(text)
+            validate_isolation(text, POLICY)
 
     def test_rejects_host_networking(self):
         text = f"device_ids: ['{EXPECTED_GPU_UUID}']\nNVIDIA_VISIBLE_DEVICES={EXPECTED_GPU_UUID}\nCUDA_VISIBLE_DEVICES=0\nnetwork_mode: host"
         with pytest.raises(IsolationError, match="host networking"):
-            validate_isolation(text)
+            validate_isolation(text, POLICY)
 
     def test_rejects_public_port_publication(self):
         text = (
@@ -94,11 +142,11 @@ class TestIsolationValidator:
             f"- 0.0.0.0:8190:8190"
         )
         with pytest.raises(IsolationError, match="8190"):
-            validate_isolation(text)
+            validate_isolation(text, POLICY)
 
     def test_rejects_empty_config(self):
         with pytest.raises(IsolationError, match="empty"):
-            validate_isolation("   \n\n")
+            validate_isolation("   \n\n", POLICY)
 
     def test_comments_about_forbidden_settings_do_not_trip_the_check(self):
         """Documentation explaining what NOT to do must be allowed."""
@@ -108,11 +156,11 @@ class TestIsolationValidator:
             f"NVIDIA_VISIBLE_DEVICES={EXPECTED_GPU_UUID}\n"
             f"CUDA_VISIBLE_DEVICES=0\n"
         )
-        validate_isolation(text)
+        validate_isolation(text, POLICY)
 
     def test_violations_returns_a_list(self):
-        assert violations(DEPLOY_COMPOSE.read_text(encoding="utf-8")) == []
-        assert violations("nothing here") != []
+        assert violations(DEPLOY_COMPOSE.read_text(encoding="utf-8"), POLICY) == []
+        assert violations("nothing here", POLICY) != []
 
 
 # ---------------------------------------------------------------------------
@@ -172,13 +220,21 @@ class TestSudoersPolicy:
         for rule in rules:
             tail = rule.split("/usr/local/sbin/orbaagent-gpu", 1)[1].strip()
             granted.add(tail or "help")
-        for expected in ("up", "down", "restart", "deploy-worker", "restart-worker", "status", "build", "validate", "health", "help"):
+        for expected in ("up", "down", "restart", "deploy-worker", "restart-worker", "down-worker", "status", "build", "validate", "health", "help"):
             assert expected in granted, f"{expected} should be delegable"
         # And nothing beyond that list.
         allowed_prefixes = {
-            "up", "down", "restart", "deploy-worker", "restart-worker", "status", "build", "validate", "health", "help", "logs", "logs *",
+            "up", "down", "restart", "deploy-worker", "restart-worker", "down-worker", "status", "build", "validate", "health", "help", "logs", "logs *",
         }
         assert granted <= allowed_prefixes, f"unexpected grants: {granted - allowed_prefixes}"
+
+    def test_down_worker_is_delegated_as_an_exact_command(self, rules):
+        """The rollback primitive must be grantable without a wildcard, and the
+        legacy project-wide `down` must stay a separate, distinguishable rule."""
+        down_worker = [r for r in rules if r.endswith("/usr/local/sbin/orbaagent-gpu down-worker")]
+        assert len(down_worker) == 1, rules
+        assert "*" not in down_worker[0]
+        assert not any(re.search(r"orbaagent-gpu\s+down\s*\*", r) for r in rules), "no `down *` wildcard"
 
     def test_visudo_syntax_validation(self, text):
         """Validate sudoers policy syntax using visudo if available, and static AST guards."""
@@ -241,7 +297,7 @@ class TestWrapperScript:
             assert forbidden not in code, f"wrapper must not perform {forbidden}"
 
     def test_case_statement_enumerates_every_command(self, text):
-        for command in ("up)", "down)", "restart)", "deploy-worker)", "restart-worker)", "status)", "logs)", "build)", "validate)", "health)", "help|"):
+        for command in ("up)", "down)", "restart)", "deploy-worker)", "restart-worker)", "down-worker)", "status)", "logs)", "build)", "validate)", "health)", "help|"):
             assert command in text, f"missing case branch {command}"
 
     def test_rejects_unknown_commands(self, text):
@@ -274,6 +330,19 @@ class TestWrapperScript:
         assert "ollama" not in code
         assert "comfyui" not in code
 
+    def test_down_worker_removes_only_the_worker_container(self, text):
+        """down-worker is the rollback primitive: stop+remove the worker container only.
+        It must not use project-wide `down`, must not remove volumes (-v) or networks,
+        and must never name ollama/comfyui."""
+        block = text.split("    down-worker)", 1)[1].split(";;", 1)[0]
+        code = "\n".join(line.split("#", 1)[0] for line in block.splitlines())
+        assert "rm --stop --force orbaagent-gpu-worker" in code
+        assert "docker_compose down" not in code
+        assert " -v" not in code and "--volumes" not in code
+        assert "ollama" not in code and "comfyui" not in code
+        # It starts nothing, so no post-start validation is required or expected.
+        assert "docker_compose up" not in code
+
     def test_build_targets_only_worker_container(self, text):
         """build must target only orbaagent-gpu-worker without building ComfyUI or other services."""
         build_block = text.split("    build)", 1)[1].split(";;", 1)[0]
@@ -305,6 +374,24 @@ class TestWrapperScript:
         assert '"$lines" -gt 2000' in text
         assert '[!0-9]*' in text
 
+    def test_validation_reads_the_policy_from_the_root_owned_env_file(self, text):
+        code = "\n".join(line.split("#", 1)[0] for line in text.splitlines())
+        assert 'deploy_validation --policy-file "$ENV_FILE" -' in code
+        assert 'gpu_inventory --policy-file "$ENV_FILE" --check -' in code
+        assert 'ENV_FILE="/etc/orbaagent/gpu-worker/worker.env"' in text
+
+    def test_validation_checks_the_live_inventory_with_a_literal_nvidia_smi_path(self, text):
+        code = "\n".join(line.split("#", 1)[0] for line in text.splitlines())
+        assert 'NVIDIA_SMI="/usr/bin/nvidia-smi"' in code
+        assert "--query-gpu=index,uuid,name" in code
+        block = text.split("validate_isolation() {", 1)[1].split("\n}", 1)[0]
+        assert "gpu_inventory" in block and "deploy_validation" in block
+
+    def test_wrapper_hard_codes_no_gpu_uuid(self, text):
+        code = "\n".join(line.split("#", 1)[0] for line in text.splitlines())
+        assert not ANY_UUID_RE.search(code)
+        assert "EXPECTED_GPU_UUID" not in code and "FORBIDDEN_GPU_UUID" not in code
+
 
 # ---------------------------------------------------------------------------
 # Deployment compose and env
@@ -312,11 +399,37 @@ class TestWrapperScript:
 
 
 class TestDeploymentArtifacts:
-    def test_deployment_compose_pins_gpu1(self):
+    def test_deployment_compose_pins_the_worker_via_the_policy_variable(self):
         text = DEPLOY_COMPOSE.read_text(encoding="utf-8")
-        assert EXPECTED_GPU_UUID in text
-        assert FORBIDDEN_GPU_UUID not in text
-        validate_isolation(text)
+        start = text.index("  orbaagent-gpu-worker:")
+        end = text.index("\n  orbaagent-comfyui:")
+        worker_code = "\n".join(line.split("#", 1)[0] for line in text[start:end].splitlines())
+        assert worker_code.count(WORKER_PIN) == 3, "device_ids, NVIDIA_VISIBLE_DEVICES and MEDIA_WORKER_GPU_UUID must all interpolate the policy"
+        assert not ANY_UUID_RE.search(worker_code), "the worker must not hard-code a GPU UUID"
+        validate_isolation(text, POLICY)
+
+    def test_other_gpu_services_are_untouched_by_the_worker_only_change(self):
+        """ollama/comfyui keep explicit single-UUID pins; the validator reports, not re-pins, them."""
+        pins = validate_isolation(DEPLOY_COMPOSE.read_text(encoding="utf-8"), POLICY)
+        assert set(pins) == {"orbaagent-gpu-worker", "orbaagent-comfyui", "orbaagent-ollama"}
+        assert pins["orbaagent-comfyui"] == pins["orbaagent-ollama"]
+        assert ANY_UUID_RE.match(pins["orbaagent-ollama"])
+
+    def test_worker_env_example_declares_a_complete_policy(self):
+        """The example carries the live-verified allocation (issue #11, 2026-10-24):
+        worker on host index 0, the Ollama/MOVA GPU forbidden. The two must differ,
+        and the forbidden UUID must be exactly the one ollama/comfyui still pin."""
+        from orba_gpu.deploy_validation import parse_env_file
+
+        values = parse_env_file(WORKER_ENV.read_text(encoding="utf-8"))
+        policy = policy_from_mapping(values)
+        assert policy.worker_index == 0
+        assert len(policy.forbidden_uuids) == 1
+        assert policy.worker_uuid.lower() != policy.forbidden_uuids[0].lower()
+        compose = DEPLOY_COMPOSE.read_text(encoding="utf-8")
+        ollama = compose[compose.index("  orbaagent-ollama:"):]
+        assert policy.forbidden_uuids[0] in ollama, "forbidden GPU must be the untouched ollama pin"
+        assert policy.worker_uuid not in compose, "the worker UUID must never be hard-coded in compose"
 
     def test_worker_env_contains_no_secrets(self):
         text = WORKER_ENV.read_text(encoding="utf-8")
@@ -328,7 +441,12 @@ class TestDeploymentArtifacts:
                 assert not stripped.startswith(name), f"secret-looking entry: {stripped}"
 
     def test_worker_env_does_not_pin_gpu_settings(self):
-        """GPU pins must live only in the root-owned compose file."""
+        """The pin MECHANISM lives only in the root-owned compose file.
+
+        worker.env carries the policy VALUE (ORBA_WORKER_GPU_UUID) but never the
+        container-level selectors, so it cannot widen access on its own: the
+        validator rejects anything but a single UUID.
+        """
         code = "\n".join(
             line.split("#", 1)[0] for line in WORKER_ENV.read_text(encoding="utf-8").splitlines()
         )
