@@ -1,0 +1,6 @@
+#!/bin/sh
+# Reviewed replacement for /usr/local/sbin/orbaagent-gpu, root:root 0755.
+# The existing sudoers command list stays unchanged; broad legacy commands fail closed.
+# env -i and Python isolated mode discard caller-controlled imports and Docker settings.
+exec /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin HOME=/root LANG=C \
+    /usr/bin/python3 -I /etc/orbaagent/gpu-worker/worker-only/control.py "$@"
