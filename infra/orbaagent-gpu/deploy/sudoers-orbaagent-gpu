@@ -26,6 +26,7 @@ klaus ALL=(root) NOPASSWD: /usr/local/sbin/orbaagent-gpu down
 klaus ALL=(root) NOPASSWD: /usr/local/sbin/orbaagent-gpu restart
 klaus ALL=(root) NOPASSWD: /usr/local/sbin/orbaagent-gpu deploy-worker
 klaus ALL=(root) NOPASSWD: /usr/local/sbin/orbaagent-gpu restart-worker
+klaus ALL=(root) NOPASSWD: /usr/local/sbin/orbaagent-gpu down-worker
 klaus ALL=(root) NOPASSWD: /usr/local/sbin/orbaagent-gpu status
 klaus ALL=(root) NOPASSWD: /usr/local/sbin/orbaagent-gpu build
 klaus ALL=(root) NOPASSWD: /usr/local/sbin/orbaagent-gpu validate
