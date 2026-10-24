@@ -1,5 +1,36 @@
 # GPU Worker Rollback Procedure
 
+## Worker-only rollback (allocation change of 2026-10-24) — USE THIS FIRST
+
+The 2026-10-24 change moves ONLY the worker (GPU 0 via the `ORBA_WORKER_GPU_UUID`
+policy in worker.env). Ollama stays on GPU 1 untouched, ComfyUI stays stopped, MOVA
+is a separate reservation. The rollback must therefore be worker-only too. The
+options further below (`down`, full reset, volume purge) are the legacy project-wide
+procedures: they stop/recreate ollama and are **not** authorized for this change.
+
+```bash
+# 1. Stop and remove ONLY the worker container. Never volumes, never networks,
+#    never ollama/comfyui. Exit 0 and `status` no longer lists orbaagent-gpu-worker.
+sudo orbaagent-gpu down-worker
+sudo orbaagent-gpu status
+
+# 2. Restore the previous root-owned files from the evidence directory the
+#    operator created BEFORE the change (see GPU-ALLOCATION-2026-10-24.md):
+#    compose.yaml, worker.env, src/ (deploy_validation.py, gpu_inventory.py,
+#    config.py, worker.py), /usr/local/sbin/orbaagent-gpu, /etc/sudoers.d/orbaagent-gpu.
+#    Use same-filesystem temp files + atomic rename; verify sha256 and modes after.
+
+# 3. Do NOT start the old GPU-1 worker as "rollback". Before this change the worker
+#    was ABSENT on the host (Agent 1, issue #11, 2026-10-24); the restored baseline is
+#    "worker absent", i.e. generation unavailable. Starting anything on GPU 1 is a new
+#    allocation decision, not a rollback.
+
+# 4. Prove nothing else moved: ollama container ID/StartedAt unchanged, comfyui not
+#    running, no worker process on either GPU.
+nvidia-smi --query-compute-apps=gpu_uuid,pid,process_name --format=csv,noheader
+docker ps --no-trunc --format '{{.ID}} {{.Names}} {{.Status}}'
+```
+
 ## Emergency Rollback Commands
 
 ### Immediate Container Stop
