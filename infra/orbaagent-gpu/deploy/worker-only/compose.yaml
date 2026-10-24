@@ -1,0 +1,64 @@
+# Separate manifest: never use this as an overlay for the legacy multi-service file.
+# No builds, pulls, automatic restarts, dependency services, network/volume creation.
+services:
+  orbaagent-gpu-worker:
+    container_name: orbaagent-gpu-worker
+    image: ${ORBA_WORKER_IMAGE:?approved immutable image required}
+    pull_policy: never
+    restart: "no"
+    ports:
+      - "10.77.0.2:8190:8190"
+    environment:
+      NVIDIA_VISIBLE_DEVICES: ${ORBA_WORKER_GPU_UUID:?live GPU 0 UUID required}
+      CUDA_VISIBLE_DEVICES: "0"
+      MEDIA_WORKER_GPU_UUID: ${ORBA_WORKER_GPU_UUID:?live GPU 0 UUID required}
+      MEDIA_WORKER_PORT: "8190"
+      MEDIA_GENERATION_BACKEND: ${MEDIA_GENERATION_BACKEND:?preserve reviewed runtime setting}
+      MEDIA_GENERATION_IMAGE_MODEL: ${MEDIA_GENERATION_IMAGE_MODEL:?preserve reviewed runtime setting}
+      MEDIA_GENERATION_VIDEO_MODEL: ${MEDIA_GENERATION_VIDEO_MODEL:?preserve reviewed runtime setting}
+      MEDIA_MAX_CONCURRENT_GENERATIONS: "1"
+      MEDIA_MODELS_DIR: /models
+      MEDIA_OUTPUT_DIR: /output
+      MEDIA_WORKER_TOKEN_FILE: /run/secrets/media_worker_token
+      MEDIA_INGEST_TOKEN_FILE: /run/secrets/media_ingest_token
+      MEDIA_INGEST_URL: ${MEDIA_INGEST_URL:?existing ingest destination required}
+      ORBA_TENANT_ID: ${ORBA_TENANT_ID:?existing workspace required}
+    secrets:
+      - media_worker_token
+      - media_ingest_token
+    volumes:
+      - orbaagent_models:/models
+      - orbaagent_output:/output
+      - orbaagent_data:/data
+    networks:
+      - orbaagent_media_net
+    extra_hosts:
+      orbaagent.dev: "10.77.0.1"
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${ORBA_WORKER_GPU_UUID:?live GPU 0 UUID required}"]
+              capabilities: [gpu]
+secrets:
+  media_worker_token:
+    file: /etc/orbaagent/gpu-worker/secrets/media_worker_token
+  media_ingest_token:
+    file: /etc/orbaagent/gpu-worker/secrets/media_ingest_token
+volumes:
+  orbaagent_models:
+    external: true
+    name: orbaagent_models
+  orbaagent_output:
+    external: true
+    name: orbaagent_output
+  orbaagent_data:
+    external: true
+    name: orbaagent_data
+networks:
+  orbaagent_media_net:
+    external: true
+    name: ${ORBA_MEDIA_NETWORK:?verified existing network required}
