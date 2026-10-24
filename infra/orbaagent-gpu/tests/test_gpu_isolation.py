@@ -1,7 +1,9 @@
 """Tests that GPU isolation is enforced by configuration, not by luck.
 
-GPU 1 is currently idle, but that is not a safety mechanism. These tests assert
-that the deployment configuration itself makes GPU 0 unreachable from the worker.
+Whichever GPU happens to be idle is not a safety mechanism. These tests assert
+that the deployment configuration itself confines the worker to the single GPU
+named by the allocation policy (ORBA_WORKER_GPU_UUID in the root-owned
+worker.env) and that no GPU UUID is hard-coded for the worker anywhere.
 """
 
 from __future__ import annotations
@@ -13,6 +15,15 @@ import pytest
 
 import yaml
 
+from orba_gpu.deploy_validation import (
+    GPU_UUID_RE,
+    POLICY_UUID_ENV,
+    GpuAllocationPolicy,
+    IsolationError,
+    render_compose_template,
+    validate_isolation,
+)
+
 GPU_ROOT = Path(__file__).resolve().parent.parent
 REPO_ROOT = GPU_ROOT.parent.parent
 
@@ -20,8 +31,28 @@ COMPOSE_PATH = GPU_ROOT / "compose.yaml"
 DOCKERFILE_PATH = GPU_ROOT / "Dockerfile"
 PROD_COMPOSE_PATH = REPO_ROOT / "docker-compose.prod.yml"
 
-GPU1_UUID = "GPU-82e03c6c-8c27-c076-eb42-7e37e9a5a878"
-GPU0_UUID = "GPU-4634107e-3bae-d5d5-ff97-2355d0b92ce4"
+#: The worker's three pins must all be this exact interpolation: no UUID literal.
+WORKER_PIN = "${ORBA_WORKER_GPU_UUID:?ORBA_WORKER_GPU_UUID must be set in worker.env}"
+
+#: Synthetic UUIDs for rendering tests. They are NOT real devices; the real
+#: mapping is read from the live host by `orbaagent-gpu validate`.
+TEST_WORKER_UUID = "GPU-00000000-0000-0000-0000-00000000000a"
+TEST_FORBIDDEN_UUID = "GPU-00000000-0000-0000-0000-00000000000b"
+TEST_POLICY = GpuAllocationPolicy(TEST_WORKER_UUID, (TEST_FORBIDDEN_UUID,), 0)
+
+#: orbaagent-ollama / orbaagent-comfyui are OUTSIDE the worker-only change and
+#: keep their historical literal pin. This constant documents that, it does not
+#: endorse it; see deploy/GPU-ALLOCATION-2026-10-24.md.
+OLLAMA_GPU_UUID = "GPU-82e03c6c-8c27-c076-eb42-7e37e9a5a878"
+
+ANY_UUID_RE = re.compile(r"GPU-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.IGNORECASE)
+
+
+def _worker_block(compose_text: str) -> str:
+    """The raw text of the worker service only (up to the next service)."""
+    start = compose_text.index("  orbaagent-gpu-worker:")
+    end = compose_text.index("\n  orbaagent-comfyui:")
+    return compose_text[start:end]
 
 
 @pytest.fixture(scope="module")
@@ -44,30 +75,66 @@ def ollama_service(compose) -> dict:
     return compose["services"]["orbaagent-ollama"]
 
 
-class TestComposePinsGpu1:
-    def test_pins_the_orbaagent_gpu_uuid_in_env(self, worker_service):
+class TestComposePinsThePolicyGpu:
+    def test_pins_the_policy_gpu_in_env(self, worker_service):
         env = worker_service["environment"]
         visible = next(e for e in env if str(e).startswith("NVIDIA_VISIBLE_DEVICES="))
-        assert visible.split("=", 1)[1] == GPU1_UUID
+        assert visible.split("=", 1)[1] == WORKER_PIN
 
-    def test_ollama_pins_the_orbaagent_gpu_uuid_in_env(self, ollama_service):
+    def test_pins_the_policy_gpu_for_the_workers_own_queries(self, worker_service):
+        env = worker_service["environment"]
+        target = next(e for e in env if str(e).startswith("MEDIA_WORKER_GPU_UUID="))
+        assert target.split("=", 1)[1] == WORKER_PIN
+
+    def test_ollama_keeps_its_literal_pin_in_env(self, ollama_service):
+        """Out of scope for the worker-only change: must be byte-for-byte unchanged."""
         env = ollama_service["environment"]
         visible = next(e for e in env if str(e).startswith("NVIDIA_VISIBLE_DEVICES="))
-        assert visible.split("=", 1)[1] == GPU1_UUID
+        assert visible.split("=", 1)[1] == OLLAMA_GPU_UUID
 
-    def test_pins_the_orbaagent_gpu_uuid_in_device_reservation(self, worker_service):
+    def test_pins_the_policy_gpu_in_device_reservation(self, worker_service):
         devices = worker_service["deploy"]["resources"]["reservations"]["devices"]
         assert len(devices) == 1
         assert devices[0]["driver"] == "nvidia"
-        assert devices[0]["device_ids"] == [GPU1_UUID]
+        assert devices[0]["device_ids"] == [WORKER_PIN]
         assert devices[0]["capabilities"] == ["gpu"]
 
-    def test_ollama_pins_the_orbaagent_gpu_uuid_in_device_reservation(self, ollama_service):
+    def test_ollama_keeps_its_literal_pin_in_device_reservation(self, ollama_service):
         devices = ollama_service["deploy"]["resources"]["reservations"]["devices"]
         assert len(devices) == 1
         assert devices[0]["driver"] == "nvidia"
-        assert devices[0]["device_ids"] == [GPU1_UUID]
+        assert devices[0]["device_ids"] == [OLLAMA_GPU_UUID]
         assert devices[0]["capabilities"] == ["gpu"]
+
+    def test_no_uuid_literal_anywhere_in_the_worker_service(self, compose_text):
+        """A reallocation must never require editing compose; only worker.env."""
+        block = "\n".join(line.split("#", 1)[0] for line in _worker_block(compose_text).splitlines())
+        assert not ANY_UUID_RE.search(block), "worker service hard-codes a GPU UUID"
+        assert block.count(WORKER_PIN) == 3, "all three pins must use the same interpolation"
+
+    def test_rendering_without_a_policy_fails_closed(self, compose_text):
+        with pytest.raises(IsolationError, match="ORBA_WORKER_GPU_UUID"):
+            render_compose_template(compose_text, {})
+
+    def test_rendered_compose_validates_against_the_policy(self, compose_text):
+        rendered = render_compose_template(compose_text, {POLICY_UUID_ENV: TEST_WORKER_UUID})
+        worker = yaml.safe_load(rendered)["services"]["orbaagent-gpu-worker"]
+        env = [str(e) for e in worker["environment"]]
+        assert f"NVIDIA_VISIBLE_DEVICES={TEST_WORKER_UUID}" in env
+        assert f"MEDIA_WORKER_GPU_UUID={TEST_WORKER_UUID}" in env
+        assert worker["deploy"]["resources"]["reservations"]["devices"][0]["device_ids"] == [TEST_WORKER_UUID]
+        pins = validate_isolation(rendered, TEST_POLICY)
+        assert pins["orbaagent-gpu-worker"] == TEST_WORKER_UUID
+
+    def test_rendering_with_a_forbidden_uuid_is_rejected(self, compose_text):
+        rendered = render_compose_template(compose_text, {POLICY_UUID_ENV: TEST_FORBIDDEN_UUID})
+        with pytest.raises(IsolationError, match="forbidden"):
+            validate_isolation(rendered, GpuAllocationPolicy(TEST_WORKER_UUID, (TEST_FORBIDDEN_UUID,)))
+
+    def test_rendering_with_a_bare_index_is_rejected(self, compose_text):
+        """`0` is not a device identity; the policy must be a UUID."""
+        with pytest.raises(IsolationError, match="not a GPU UUID"):
+            GpuAllocationPolicy("0").validate()
 
     def test_sets_cuda_visible_devices_to_the_single_visible_gpu(self, worker_service):
         env = worker_service["environment"]
@@ -77,19 +144,19 @@ class TestComposePinsGpu1:
         env = ollama_service["environment"]
         assert "CUDA_VISIBLE_DEVICES=0" in env
 
-    def test_gpu0_uuid_never_appears(self, compose_text):
-        assert GPU0_UUID not in compose_text
-
-    def test_the_two_uuid_pins_agree(self, worker_service):
-        """The env pin and the device reservation must name the same GPU."""
+    def test_the_three_pins_agree(self, worker_service):
+        """The env pins and the device reservation must name the same GPU."""
         env = worker_service["environment"]
         env_uuid = next(
             str(e).split("=", 1)[1] for e in env if str(e).startswith("NVIDIA_VISIBLE_DEVICES=")
         )
+        target_uuid = next(
+            str(e).split("=", 1)[1] for e in env if str(e).startswith("MEDIA_WORKER_GPU_UUID=")
+        )
         device_uuid = worker_service["deploy"]["resources"]["reservations"]["devices"][0][
             "device_ids"
         ][0]
-        assert env_uuid == device_uuid == GPU1_UUID
+        assert env_uuid == device_uuid == target_uuid == WORKER_PIN
 
 
 class TestComposeRefusesBroadGpuAccess:
@@ -279,46 +346,47 @@ class TestDockerfile:
 
 
 class TestWorkerSourceHygiene:
-    """The worker source must not contain the GPU 0 UUID or a hardcoded token."""
+    """The worker source must not hard-code any GPU UUID or a token."""
 
-    def test_no_gpu0_uuid_in_executable_code(self):
-        """GPU 0's UUID may appear only in comments or in the isolation validator.
-
-        Referencing it in a comment documents what must not be touched. The
-        validator must name it in code because rejecting that UUID is its entire
-        purpose. Anything else referencing GPU 0 in code would mean something
-        could actually select it.
-        """
-        allowed = {"deploy_validation.py"}
+    def test_no_gpu_uuid_in_executable_code(self):
+        """No module may name a real GPU. The device comes from the policy at
+        runtime; a UUID literal in code is exactly the drift that forced this
+        change (the old validator pinned two historical UUIDs)."""
         for path in (GPU_ROOT / "orba_gpu").rglob("*.py"):
-            if path.name in allowed:
-                continue
             for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
                 code = line.split("#", 1)[0]
-                assert GPU0_UUID not in code, (
-                    f"{path.name}:{lineno} references GPU 0 in executable code"
+                assert not ANY_UUID_RE.search(code), (
+                    f"{path.name}:{lineno} hard-codes a GPU UUID in executable code"
                 )
 
-    def test_validator_is_the_only_module_naming_gpu0_in_code(self):
-        """Guard the exception above so it cannot silently spread."""
-        namers = set()
-        for path in (GPU_ROOT / "orba_gpu").rglob("*.py"):
-            code = "\n".join(
-                line.split("#", 1)[0] for line in path.read_text(encoding="utf-8").splitlines()
-            )
-            if GPU0_UUID in code:
-                namers.add(path.name)
-        assert namers <= {"deploy_validation.py"}, f"unexpected GPU 0 references: {namers}"
+    def test_no_gpu_uuid_in_the_wrapper(self):
+        """The wrapper reads the policy from worker.env; it must not carry its own copy."""
+        path = GPU_ROOT / "deploy" / "orbaagent-gpu"
+        code = "\n".join(line.split("#", 1)[0] for line in path.read_text(encoding="utf-8").splitlines())
+        assert not ANY_UUID_RE.search(code), f"{path.name} hard-codes a GPU UUID"
+
+    def test_env_example_names_only_the_two_verified_gpus(self):
+        """worker.env is the single place the allocation lives. It names exactly the
+        two live-verified devices (issue #11) and the worker is NOT the ollama GPU."""
+        path = GPU_ROOT / "deploy" / "worker.env.example"
+        code = "\n".join(line.split("#", 1)[0] for line in path.read_text(encoding="utf-8").splitlines())
+        found = {m.group(0) for m in ANY_UUID_RE.finditer(code)}
+        assert len(found) == 2, found
+        assert OLLAMA_GPU_UUID in found
+        worker = next(line.split("=", 1)[1] for line in code.splitlines() if line.startswith("ORBA_WORKER_GPU_UUID="))
+        assert worker != OLLAMA_GPU_UUID
 
     def test_no_hardcoded_token_in_worker_package(self):
         for path in (GPU_ROOT / "orba_gpu").rglob("*.py"):
             text = path.read_text(encoding="utf-8")
             assert "orbaagent-gpu-worker-auth" not in text, f"{path.name} contains the old literal"
 
-    def test_default_target_uuid_is_gpu1(self):
+    def test_no_default_target_uuid(self):
+        """An unset MEDIA_WORKER_GPU_UUID must stay unset, never fall back to a device."""
         from orba_gpu.config import DEFAULT_TARGET_GPU_UUID
 
-        assert DEFAULT_TARGET_GPU_UUID == GPU1_UUID
+        assert DEFAULT_TARGET_GPU_UUID == ""
+        assert not GPU_UUID_RE.match(DEFAULT_TARGET_GPU_UUID)
 
     def test_no_committed_model_weights(self):
         """Model files are never committed; only code and config."""
