@@ -4,20 +4,24 @@ version: '3.8'
 #
 # GPU ISOLATION IS ENFORCED BY CONFIGURATION
 # ------------------------------------------
-# This worker may only ever use GPU 1 (GPU-82e03c6c-8c27-c076-eb42-7e37e9a5a878).
-# GPU 0 (GPU-4634107e-...) runs the CoderXP/ComfyUI workload and must never be
-# selected. Isolation rests on three independent layers:
+# The worker may only ever use the single GPU named by ORBA_WORKER_GPU_UUID
+# (set it in worker.env, see deploy/worker.env.example; rendering fails closed
+# when it is unset). GPUs listed in ORBA_WORKER_FORBIDDEN_GPU_UUIDS must never
+# be selected. Isolation rests on three independent layers:
 #
 #   1. deploy.resources.reservations.devices.device_ids  -> the NVIDIA container
-#      runtime mounts ONLY that device's nodes into the container, so GPU 0 is
-#      not even visible from inside.
+#      runtime mounts ONLY that device's nodes into the container, so no other
+#      GPU is even visible from inside.
 #   2. NVIDIA_VISIBLE_DEVICES                            -> restricts the runtime
 #      device set to the same UUID.
 #   3. CUDA_VISIBLE_DEVICES=0                            -> renumbers the single
 #      remaining device to index 0 inside the container.
 #
 # The worker additionally queries nvidia-smi by explicit UUID (never by index),
-# so a misconfiguration surfaces as an error instead of silently reading GPU 0.
+# so a misconfiguration surfaces as an error instead of silently reading another GPU.
+#
+# orbaagent-comfyui and orbaagent-ollama keep their own literal pins below; they
+# are outside the scope of the worker-only change.
 #
 # DO NOT add `--gpus all`, `privileged: true`, or /dev/nvidia* host mounts.
 # infra/orbaagent-gpu/tests/test_gpu_isolation.py asserts all of this.
@@ -35,11 +39,15 @@ services:
       # on eth0 and never reachable from the public internet.
       - "10.77.0.2:8190:8190"
     environment:
-      - NVIDIA_VISIBLE_DEVICES=GPU-82e03c6c-8c27-c076-eb42-7e37e9a5a878
+      # GPU pin. The UUID is NOT written here: it comes from the root-owned
+      # worker.env (ORBA_WORKER_GPU_UUID) and rendering fails closed when it is
+      # unset, so the worker can never fall back to an implicit "all GPUs".
+      # The same variable feeds all three pins below, so they cannot disagree.
+      - NVIDIA_VISIBLE_DEVICES=${ORBA_WORKER_GPU_UUID:?ORBA_WORKER_GPU_UUID must be set in worker.env}
       - CUDA_VISIBLE_DEVICES=0
       - MEDIA_WORKER_PORT=8190
       # The worker queries this exact UUID; it never selects a GPU by ordering.
-      - MEDIA_WORKER_GPU_UUID=GPU-82e03c6c-8c27-c076-eb42-7e37e9a5a878
+      - MEDIA_WORKER_GPU_UUID=${ORBA_WORKER_GPU_UUID:?ORBA_WORKER_GPU_UUID must be set in worker.env}
       # --- Generation backend -------------------------------------------------
       # `diffusers` is the only implemented backend. Any other value (or unset)
       # leaves generation UNAVAILABLE: the endpoints return 503
@@ -80,7 +88,7 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              device_ids: ['GPU-82e03c6c-8c27-c076-eb42-7e37e9a5a878']
+              device_ids: ['${ORBA_WORKER_GPU_UUID:?ORBA_WORKER_GPU_UUID must be set in worker.env}']
               capabilities: [gpu]
 
   orbaagent-comfyui:
