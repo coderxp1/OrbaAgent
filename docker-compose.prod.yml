@@ -81,9 +81,10 @@ services:
       LANGDOCK_API_KEY: ${LANGDOCK_API_KEY}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
       ALLOWED_ORIGINS: "https://orbaagent.dev,https://www.orbaagent.dev"
-      MEDIA_WORKER_ENABLED: "true"
-      MEDIA_WORKER_URL: "http://10.77.0.2:8190"
-      MEDIA_WORKER_TOKEN: ${MEDIA_WORKER_TOKEN}
+      # Media is opt-in. Defaults keep it off; never hard-code worker hosts or secrets here.
+      MEDIA_WORKER_ENABLED: "${MEDIA_WORKER_ENABLED:-false}"
+      MEDIA_WORKER_URL: "${MEDIA_WORKER_URL:-}"
+      MEDIA_WORKER_TOKEN: "${MEDIA_WORKER_TOKEN:-}"
     depends_on:
       postgres:
         condition: service_healthy
@@ -123,9 +124,10 @@ services:
       GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID}
       GITHUB_SECRET_ID: ${GITHUB_SECRET_ID}
       ALLOWED_ORIGINS: "https://orbaagent.dev,https://www.orbaagent.dev"
-      MEDIA_WORKER_ENABLED: "true"
-      MEDIA_WORKER_URL: "http://10.77.0.2:8190"
-      MEDIA_WORKER_TOKEN: ${MEDIA_WORKER_TOKEN}
+      # Media is opt-in. Defaults keep it off; never hard-code worker hosts or secrets here.
+      MEDIA_WORKER_ENABLED: "${MEDIA_WORKER_ENABLED:-false}"
+      MEDIA_WORKER_URL: "${MEDIA_WORKER_URL:-}"
+      MEDIA_WORKER_TOKEN: "${MEDIA_WORKER_TOKEN:-}"
       # Persistent artifact/upload storage. Explicitly set so the code never
       # falls back to <cwd>/.uploads inside the read-only image layer.
       ORBA_UPLOAD_DIR: /data/uploads
