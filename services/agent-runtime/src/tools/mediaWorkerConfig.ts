@@ -49,6 +49,16 @@ export function isLazyLoadAllowed(health: GpuWorkerHealth | null): boolean {
  */
 export const MEDIA_GENERATION_UNAVAILABLE = "MEDIA_GENERATION_UNAVAILABLE";
 
+/**
+ * Message shown to end users whenever media generation cannot run. It must never
+ * contain operator instructions, environment variable names, hosts or secrets;
+ * the operator-facing cause is written to server logs instead.
+ */
+export function publicMediaUnavailableMessage(toolName: string): string {
+  const kind = toolName.includes("video") ? "Video" : "Image";
+  return `${kind} generation is temporarily unavailable. Existing images and videos are not affected. Please try again later.`;
+}
+
 export interface MediaWorkerConfig {
   /** Worker base URL, e.g. `http://127.0.0.1:8190`. */
   url: string;
@@ -93,7 +103,7 @@ export function getMediaWorkerConfig(): MediaWorkerConfigState {
       config: null,
       code: MEDIA_GENERATION_UNAVAILABLE,
       reason:
-        "The real GPU generation backend has not been deployed. Media generation is unavailable; set MEDIA_WORKER_ENABLED=true only after a real diffusion/video backend is running.",
+        "Media generation is disabled (MEDIA_WORKER_ENABLED is not set to true). Media generation is unavailable until a reviewed media backend is configured.",
     };
   }
 
@@ -132,13 +142,9 @@ export function unavailableMediaResult(
   customReason?: string,
 ): ToolExecutionResult {
   const { reason, code } = getMediaWorkerConfig();
-  const isVideo = toolName.includes("video");
-  const detail =
-    customReason ||
-    reason ||
-    `${isVideo ? "Video" : "Image"} generation is unavailable (Media processing service is offline or unconfigured).`;
+  const detail = customReason || reason || "Media processing service is offline or unconfigured.";
 
-  // Log detailed diagnostics to server logs only, without secrets
+  // Operator-facing cause goes to server logs only (never secrets, never to the user).
   console.error(
     `[MEDIA GENERATION DIAGNOSTIC] ${toolName} failed: ${MEDIA_GENERATION_UNAVAILABLE} - ${detail} (Code: ${code})`,
   );
@@ -148,7 +154,7 @@ export function unavailableMediaResult(
     name: toolName,
     success: false,
     output: "",
-    error: detail,
+    error: publicMediaUnavailableMessage(toolName),
     metadata: { status: "UNAVAILABLE", code },
     executionTimeMs: Date.now() - startTime,
   };
