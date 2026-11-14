@@ -1,0 +1,86 @@
+diff --git a/apps/web/src/components/InputArea.tsx b/apps/web/src/components/InputArea.tsx
+--- a/apps/web/src/components/InputArea.tsx
++++ b/apps/web/src/components/InputArea.tsx
+@@ -52,7 +52,9 @@
+       };
+ 
+       recorder.onstop = () => {
+-        stream.getTracks().forEach((track) => track.stop());
++        for (const track of stream.getTracks()) {
++          track.stop();
++        }
+         const blob = new Blob(audioChunksRef.current, { type: recorder.mimeType || "audio/webm" });
+         const ext = recorder.mimeType.includes("mp4") ? "m4a" : "webm";
+         const file = new File([blob], `voice_note_${Date.now()}.${ext}`, {
+diff --git a/apps/web/src/components/SettingsViews.tsx b/apps/web/src/components/SettingsViews.tsx
+--- a/apps/web/src/components/SettingsViews.tsx
++++ b/apps/web/src/components/SettingsViews.tsx
+@@ -1,7 +1,7 @@
+ "use client";
+ 
+ import type React from "react";
+-import { useState, useEffect } from "react";
++import { useEffect, useRef, useState } from "react";
+ import {
+   User,
+   Sliders,
+@@ -32,6 +32,10 @@
+   const [workspaceName, setWorkspaceName] = useState("Hartmann's Space");
+   const [saving, setSaving] = useState(false);
+   const [saved, setSaved] = useState(false);
++  // Latest callback in a ref so the profile is fetched once on mount, not on
++  // every parent re-render that passes a new function identity.
++  const onProfileChangeRef = useRef(onProfileChange);
++  onProfileChangeRef.current = onProfileChange;
+ 
+   useEffect(() => {
+     fetch("/api/user/profile")
+@@ -39,7 +43,7 @@
+       .then((data) => {
+         if (data.displayName) {
+           setDisplayName(data.displayName);
+-          if (onProfileChange) onProfileChange(data.displayName);
++          onProfileChangeRef.current?.(data.displayName);
+         }
+         if (data.email) setEmail(data.email);
+         if (data.workspaceName) setWorkspaceName(data.workspaceName);
+@@ -92,8 +96,11 @@
+ 
+       <div className="space-y-4">
+         <div>
+-          <label className="block text-xs font-medium text-zinc-300 mb-1.5">Display Name</label>
++          <label htmlFor="profile-display-name" className="block text-xs font-medium text-zinc-300 mb-1.5">
++            Display Name
++          </label>
+           <input
++            id="profile-display-name"
+             type="text"
+             value={displayName}
+             onChange={(e) => setDisplayName(e.target.value)}
+@@ -102,8 +109,11 @@
+         </div>
+ 
+         <div>
+-          <label className="block text-xs font-medium text-zinc-300 mb-1.5">Email Address</label>
++          <label htmlFor="profile-email" className="block text-xs font-medium text-zinc-300 mb-1.5">
++            Email Address
++          </label>
+           <input
++            id="profile-email"
+             type="email"
+             value={email}
+             onChange={(e) => setEmail(e.target.value)}
+@@ -112,8 +122,11 @@
+         </div>
+ 
+         <div>
+-          <label className="block text-xs font-medium text-zinc-300 mb-1.5">Workspace Space Name</label>
++          <label htmlFor="profile-workspace-name" className="block text-xs font-medium text-zinc-300 mb-1.5">
++            Workspace Space Name
++          </label>
+           <input
++            id="profile-workspace-name"
+             type="text"
+             value={workspaceName}
+             onChange={(e) => setWorkspaceName(e.target.value)}
+diff
