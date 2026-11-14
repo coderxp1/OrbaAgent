@@ -1,0 +1,25 @@
+# Temporary, reversible media kill-switch for the VPS-only deployment.
+# Runbook: docs/ops/media-disable.md
+#
+# Apply (env-only change, same images, volumes untouched):
+#   docker compose -f docker-compose.prod.yml -f docker-compose.media-off.yml up -d --no-deps --no-build web api
+# Rollback:
+#   docker compose -f docker-compose.prod.yml up -d --no-deps --no-build web api
+#
+# MEDIA_WORKER_ENABLED=false  -> media tools return MEDIA_GENERATION_UNAVAILABLE immediately.
+# MEDIA_WORKER_DISABLED=true  -> capability manager skips the per-turn worker health probe.
+# Empty URL/TOKEN             -> no request can reach the decommissioned 10.77.0.2 worker and the
+#                                exposed worker token is removed from the running containers.
+services:
+  api:
+    environment:
+      MEDIA_WORKER_ENABLED: "false"
+      MEDIA_WORKER_DISABLED: "true"
+      MEDIA_WORKER_URL: ""
+      MEDIA_WORKER_TOKEN: ""
+  web:
+    environment:
+      MEDIA_WORKER_ENABLED: "false"
+      MEDIA_WORKER_DISABLED: "true"
+      MEDIA_WORKER_URL: ""
+      MEDIA_WORKER_TOKEN: ""
