@@ -1,0 +1,7 @@
+line one
+diff --git a/apps/web/src/lib/auth/activation.test.ts b/apps/web/src/lib/auth/activation.test.ts
+line three
+      expect(setCookie).toContain("__Host-orba_session=");
+line five
+-      if (savedNodeEnv === undefined) delete env.NODE_ENV;
+line seven
