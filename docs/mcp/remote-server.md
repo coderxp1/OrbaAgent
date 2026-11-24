@@ -63,6 +63,10 @@ This implementation provides bearer API-key authentication, not an OAuth 2.1 aut
 
 This endpoint currently exposes the Agent Runtime tool surface through `tools`; it does not expose MCP resources, prompts, server-initiated notifications, or standalone GET event streams.
 
+## Next implementation stage
+
+See [OAuth and team identity implementation plan](./oauth-and-team-identity-plan.md). The repository's current interim single-owner identity model must be replaced with persistent multi-user identity and organization membership before MCP OAuth can safely provide team-wide access.
+
 ## Validation
 
 The route tests cover authentication enforcement, protocol negotiation, live tool discovery, unknown tool handling, Origin validation, notification acknowledgement, Accept headers, and stateless GET/DELETE behavior. Run the web workspace test suite and typecheck in CI before deployment. Production remains unchanged until a separately approved deployment.
