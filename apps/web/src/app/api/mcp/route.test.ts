@@ -6,6 +6,7 @@ const API_KEY = "orba-mcp-test-key-with-sufficient-entropy";
 
 const originalEnv = {
   ORBA_API_KEYS: process.env.ORBA_API_KEYS,
+  ORBA_MCP_ENABLED: process.env.ORBA_MCP_ENABLED,
   ORBA_AUTH_MODE: process.env.ORBA_AUTH_MODE,
   ALLOWED_ORIGINS: process.env.ALLOWED_ORIGINS,
   ORBA_WORKSPACE_PATH: process.env.ORBA_WORKSPACE_PATH,
@@ -32,6 +33,7 @@ function post(body: unknown, headers: Record<string, string> = authenticatedHead
 
 beforeEach(() => {
   const digest = createHash("sha256").update(API_KEY).digest("hex");
+  process.env.ORBA_MCP_ENABLED = "true";
   process.env.ORBA_API_KEYS = JSON.stringify({
     [digest]: { tenantId: "mcp-test-tenant", userId: "mcp-test-user" },
   });
@@ -42,6 +44,7 @@ beforeEach(() => {
 
 afterEach(() => {
   process.env.ORBA_API_KEYS = originalEnv.ORBA_API_KEYS ?? "";
+  process.env.ORBA_MCP_ENABLED = originalEnv.ORBA_MCP_ENABLED ?? "";
   process.env.ORBA_AUTH_MODE = originalEnv.ORBA_AUTH_MODE ?? "";
   process.env.ALLOWED_ORIGINS = originalEnv.ALLOWED_ORIGINS ?? "";
   process.env.ORBA_WORKSPACE_PATH = originalEnv.ORBA_WORKSPACE_PATH ?? "";
