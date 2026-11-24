@@ -1,243 +1,252 @@
+import { randomUUID } from "node:crypto";
+import { ToolRegistry, ToolRouter } from "@orbaagent/agent-runtime";
 import { authorize, resolveRequestIdentity } from "@/lib/auth/guard";
 import { type NextRequest, NextResponse } from "next/server";
 
-// Standard MCP (Model Context Protocol - spec 2024-11-05) JSON-RPC 2.0 implementation
+export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 600;
 
-interface JsonRpcRequest {
+const SUPPORTED_PROTOCOL_VERSIONS = new Set([
+  "2025-11-25",
+  "2025-03-26",
+  "2024-11-05",
+]);
+
+type JsonRpcRequest = {
   jsonrpc: "2.0";
   id?: string | number | null;
   method: string;
-  params?: Record<string, any>;
+  params?: Record<string, unknown>;
+};
+
+const registry = new ToolRegistry();
+const router = new ToolRouter({ registry });
+
+function jsonRpcError(
+  id: JsonRpcRequest["id"],
+  code: number,
+  message: string,
+  status = 200,
+) {
+  return NextResponse.json(
+    { jsonrpc: "2.0", id: id ?? null, error: { code, message } },
+    { status, headers: { "Cache-Control": "no-store" } },
+  );
 }
 
-const REGISTERED_TOOLS = [
-  {
-    name: "media_image_generate",
-    description: "Generate photorealistic images and visual assets with FLUX.1 engine",
-    inputSchema: {
-      type: "object",
-      properties: {
-        prompt: { type: "string", description: "Text description of the desired image" },
-        width: { type: "integer", default: 1024 },
-        height: { type: "integer", default: 1024 },
-      },
-      required: ["prompt"],
-    },
-  },
-  {
-    name: "media_video_generate",
-    description: "Generate cinematic high-definition video from text and reference photographs",
-    inputSchema: {
-      type: "object",
-      properties: {
-        prompt: { type: "string", description: "Scene and motion description" },
-        duration_seconds: { type: "integer", default: 4 },
-        image_url: { type: "string", description: "Optional reference photograph URL" },
-      },
-      required: ["prompt"],
-    },
-  },
-  {
-    name: "workspace_search",
-    description: "Search documents, files, and artifacts within the OrbaAgent workspace",
-    inputSchema: {
-      type: "object",
-      properties: {
-        query: { type: "string", description: "Search query" },
-      },
-      required: ["query"],
-    },
-  },
-  {
-    name: "github_inspect",
-    description: "Inspect active pull requests, repository branches, and code changes",
-    inputSchema: {
-      type: "object",
-      properties: {
-        action: { type: "string", enum: ["list_prs", "get_status", "search_code"] },
-        repo: { type: "string", description: "Optional repository name" },
-      },
-      required: ["action"],
-    },
-  },
-];
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
 
-export async function GET(req: NextRequest) {
-  // MCP exposes the tool surface and can invoke generation tools, so it is a
-  // protected endpoint like the others.
-  const { identity, mode } = await resolveRequestIdentity(req);
-  const unauthenticated = authorize(identity, mode, req);
-  if (unauthenticated) return unauthenticated;
+function originIsAllowed(request: Request): boolean {
+  const origin = request.headers.get("origin");
+  if (!origin) return true; // Non-browser MCP clients commonly omit Origin.
 
-  // Return MCP Discovery & Server Metadata
-  return NextResponse.json({
-    name: "OrbaAgent MCP Server",
-    version: "0.1.0",
-    protocolVersion: "2024-11-05",
-    transport: "Streamable HTTP (JSON-RPC 2.0)",
-    status: "online",
-    capabilities: {
-      tools: {
-        count: REGISTERED_TOOLS.length,
-        names: REGISTERED_TOOLS.map((t) => t.name),
+  const configured = (process.env.ALLOWED_ORIGINS || "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+
+  if (configured.length > 0) return configured.includes(origin);
+  try {
+    return new URL(request.url).origin === origin;
+  } catch {
+    return false;
+  }
+}
+
+function getProtocolVersion(request: Request): string | null {
+  const version = request.headers.get("mcp-protocol-version");
+  if (!version) return "2025-03-26"; // Streamable HTTP backwards-compatibility default.
+  return SUPPORTED_PROTOCOL_VERSIONS.has(version) ? version : null;
+}
+
+function getMcpTools() {
+  return registry.getAllToolDefinitions().map((definition) => {
+    const metadata = registry.getToolMetadata(definition.name);
+    const riskTier = metadata?.riskTier ?? "TIER_0_READ";
+    return {
+      name: definition.name,
+      description: definition.description,
+      inputSchema: definition.parameters,
+      annotations: {
+        readOnlyHint: riskTier === "TIER_0_READ",
+        destructiveHint: riskTier === "TIER_4_DESTRUCTIVE",
+        openWorldHint: ["http", "browser", "cloud", "communication"].includes(
+          metadata?.category ?? "",
+        ),
       },
-      resources: {},
-      prompts: {},
-    },
-    clientConfig: {
-      cursor: {
-        command: "curl",
-        args: ["-s", "-X", "POST", "https://orbaagent.dev/api/mcp"],
-      },
-    },
+    };
   });
 }
 
-export async function POST(req: NextRequest) {
+async function authenticate(request: Request) {
+  const resolved = await resolveRequestIdentity(request);
+  const rejected = authorize(resolved.identity, resolved.mode, request);
+  if (rejected) return { response: rejected } as const;
+
+  // MCP is an externally reachable tool surface. It must never inherit the
+  // application's permissive single-tenant fallback when no credentials exist.
+  if (!resolved.identity.authenticated) {
+    return {
+      response: NextResponse.json(
+        { error: "MCP authentication required", code: "UNAUTHENTICATED" },
+        { status: 401, headers: { "WWW-Authenticate": 'Bearer realm="orba-mcp"' } },
+      ),
+    } as const;
+  }
+
+  if (!originIsAllowed(request)) {
+    return {
+      response: NextResponse.json({ error: "Untrusted Origin", code: "FORBIDDEN" }, { status: 403 }),
+    } as const;
+  }
+
+  return { identity: resolved.identity } as const;
+}
+
+export async function GET() {
+  // The stateless Streamable HTTP endpoint does not open server-initiated
+  // streams. MCP clients should use POST for JSON-RPC requests.
+  return new NextResponse(null, {
+    status: 405,
+    headers: { Allow: "POST", "Cache-Control": "no-store" },
+  });
+}
+
+export async function DELETE() {
+  // This endpoint is stateless and does not issue MCP session IDs.
+  return new NextResponse(null, {
+    status: 405,
+    headers: { Allow: "POST", "Cache-Control": "no-store" },
+  });
+}
+
+export async function POST(request: NextRequest) {
+  const auth = await authenticate(request);
+  if ("response" in auth) return auth.response;
+
+  const contentType = request.headers.get("content-type") || "";
+  if (!contentType.toLowerCase().includes("application/json")) {
+    return NextResponse.json({ error: "Content-Type must be application/json" }, { status: 415 });
+  }
+
+  const accept = request.headers.get("accept") || "";
+  if (!accept.includes("application/json") || !accept.includes("text/event-stream")) {
+    return NextResponse.json(
+      { error: "Accept must include application/json and text/event-stream" },
+      { status: 406 },
+    );
+  }
+
+  const protocolVersion = getProtocolVersion(request);
+  if (!protocolVersion) {
+    return NextResponse.json(
+      { error: "Unsupported MCP-Protocol-Version" },
+      { status: 400 },
+    );
+  }
+
+  let body: unknown;
   try {
-    const { identity, mode } = await resolveRequestIdentity(req);
-    const unauthenticated = authorize(identity, mode, req);
-    if (unauthenticated) return unauthenticated;
+    body = await request.json();
+  } catch {
+    return jsonRpcError(null, -32700, "Parse error", 400);
+  }
 
-    const body = (await req.json()) as JsonRpcRequest;
+  if (!isRecord(body) || body.jsonrpc !== "2.0" || typeof body.method !== "string") {
+    return jsonRpcError(isRecord(body) ? (body.id as JsonRpcRequest["id"]) : null, -32600, "Invalid Request", 400);
+  }
 
-    if (!body || body.jsonrpc !== "2.0" || !body.method) {
-      return NextResponse.json(
-        {
-          jsonrpc: "2.0",
-          id: body?.id ?? null,
-          error: { code: -32600, message: "Invalid Request: expected JSON-RPC 2.0" },
-        },
-        { status: 400 },
-      );
+  const rpc = body as unknown as JsonRpcRequest;
+  const id = rpc.id ?? null;
+  const hasId = Object.prototype.hasOwnProperty.call(body, "id");
+
+  // JSON-RPC notifications have no id and must be acknowledged with 202.
+  if (!hasId) {
+    if (rpc.method.startsWith("notifications/")) {
+      return new NextResponse(null, { status: 202, headers: { "Cache-Control": "no-store" } });
     }
+    return jsonRpcError(null, -32600, "Requests must include an id", 400);
+  }
 
-    const id = body.id ?? null;
-
-    // 1. MCP Protocol Ping
-    if (body.method === "ping") {
-      return NextResponse.json({
-        jsonrpc: "2.0",
-        id,
-        result: {},
-      });
+  if (rpc.method === "initialize") {
+    const requestedVersion = isRecord(rpc.params) ? rpc.params.protocolVersion : undefined;
+    if (typeof requestedVersion !== "string" || !SUPPORTED_PROTOCOL_VERSIONS.has(requestedVersion)) {
+      return jsonRpcError(id, -32602, "Unsupported protocol version");
     }
-
-    // 2. MCP Handshake: initialize
-    if (body.method === "initialize") {
-      return NextResponse.json({
-        jsonrpc: "2.0",
-        id,
-        result: {
-          protocolVersion: "2024-11-05",
-          capabilities: {
-            tools: { listChanged: false },
-            resources: { subscribe: false, listChanged: false },
-            prompts: { listChanged: false },
-          },
-          serverInfo: {
-            name: "OrbaAgent MCP Server",
-            version: "0.1.0",
-          },
-        },
-      });
-    }
-
-    // 3. MCP Notification: initialized
-    if (body.method === "notifications/initialized") {
-      return new NextResponse(null, { status: 204 });
-    }
-
-    // 4. MCP Tools Discovery: tools/list
-    if (body.method === "tools/list") {
-      return NextResponse.json({
-        jsonrpc: "2.0",
-        id,
-        result: {
-          tools: REGISTERED_TOOLS,
-        },
-      });
-    }
-
-    // 5. MCP Tool Execution: tools/call
-    if (body.method === "tools/call") {
-      const toolName = body.params?.name;
-      const toolArgs = body.params?.arguments || {};
-
-      const matchedTool = REGISTERED_TOOLS.find((t) => t.name === toolName);
-      if (!matchedTool) {
-        return NextResponse.json({
-          jsonrpc: "2.0",
-          id,
-          error: { code: -32601, message: `Tool not found: ${toolName}` },
-        });
-      }
-
-      // Execute read-only tools or return diagnostic execution result
-      if (toolName === "workspace_search") {
-        return NextResponse.json({
-          jsonrpc: "2.0",
-          id,
-          result: {
-            content: [
-              {
-                type: "text",
-                text: `[Workspace Search for "${toolArgs.query}"]: 4 documents indexed. Workspace tenant active.`,
-              },
-            ],
-          },
-        });
-      }
-
-      if (toolName === "github_inspect") {
-        const token = process.env.GITHUB_TOKEN;
-        return NextResponse.json({
-          jsonrpc: "2.0",
-          id,
-          result: {
-            content: [
-              {
-                type: "text",
-                text: token
-                  ? `GitHub integration connected. Action: ${toolArgs.action}. Access token verified.`
-                  : "GitHub integration unconfigured. Please connect GitHub in workspace settings.",
-              },
-            ],
-          },
-        });
-      }
-
-      return NextResponse.json({
-        jsonrpc: "2.0",
-        id,
-        result: {
-          content: [
-            {
-              type: "text",
-              text: `Tool ${toolName} ready on OrbaAgent platform with parameters: ${JSON.stringify(
-                toolArgs,
-              )}`,
-            },
-          ],
-        },
-      });
-    }
-
-    return NextResponse.json({
-      jsonrpc: "2.0",
-      id,
-      error: { code: -32601, message: `Method not found: ${body.method}` },
-    });
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
     return NextResponse.json(
       {
         jsonrpc: "2.0",
-        id: null,
-        error: { code: -32603, message: `Internal error: ${msg}` },
+        id,
+        result: {
+          protocolVersion: requestedVersion,
+          capabilities: { tools: { listChanged: false } },
+          serverInfo: { name: "Orba", version: "1.0.0" },
+          instructions:
+            "Orba remote MCP server. Exposes the authenticated caller's Orba tool capabilities. Tool execution is subject to Orba permissions, workspace boundaries, and approval policies.",
+        },
       },
-      { status: 500 },
+      { headers: { "Cache-Control": "no-store" } },
     );
   }
+
+  if (rpc.method === "ping") {
+    return NextResponse.json({ jsonrpc: "2.0", id, result: {} });
+  }
+
+  if (rpc.method === "tools/list") {
+    return NextResponse.json({
+      jsonrpc: "2.0",
+      id,
+      result: { tools: getMcpTools() },
+      }, { headers: { "Cache-Control": "no-store" } });
+  }
+
+  if (rpc.method === "tools/call") {
+    const params = isRecord(rpc.params) ? rpc.params : {};
+    const toolName = params.name;
+    const args = params.arguments === undefined ? {} : params.arguments;
+
+    if (typeof toolName !== "string" || !isRecord(args)) {
+      return jsonRpcError(id, -32602, "tools/call requires a tool name and object arguments");
+    }
+
+    const tool = registry.getTool(toolName);
+    if (!tool) return jsonRpcError(id, -32602, `Unknown Orba tool: ${toolName}`);
+
+    const identity = auth.identity;
+    const workspaceDir = process.env.ORBA_WORKSPACE_PATH || process.cwd();
+    const traceId = randomUUID();
+    const toolCallId = randomUUID();
+
+    const { result } = await router.routeAndExecute(toolCallId, toolName, args, {
+      workspaceDir,
+      tenantId: identity.tenantId,
+      userId: identity.userId,
+      agentRunId: randomUUID(),
+      traceId,
+      isPreApproved: false,
+    });
+
+    const text = result.success ? result.output : result.error || "Tool execution failed";
+    return NextResponse.json({
+      jsonrpc: "2.0",
+      id,
+      result: {
+        content: [{ type: "text", text: text || "(Orba tool returned no text output)" }],
+        isError: !result.success,
+        structuredContent: {
+          success: result.success,
+          toolCallId: result.toolCallId,
+          name: result.name,
+          executionTimeMs: result.executionTimeMs,
+          ...(result.metadata ? { metadata: result.metadata } : {}),
+        },
+      },
+    }, { headers: { "Cache-Control": "no-store" } });
+  }
+
+  return jsonRpcError(id, -32601, `Method not found: ${rpc.method}`);
 }
