@@ -75,3 +75,10 @@ For each, verify discovery, authorization, tool listing, tool invocation, expire
 ## Immediate next engineering task
 
 Inventory the repository's actual database, migration, and deployment configuration, then implement the ADR-004 identity foundation on this feature branch. Once persistent multi-user identity and organization membership are real, implement MCP OAuth against that foundation.
+
+
+## Repository audit result (2026-11-24)
+
+The baseline audit is recorded in [identity-foundation-audit.md](./identity-foundation-audit.md). PostgreSQL containers and persistent volumes exist in both Compose configurations, but the web application has no PostgreSQL client, Drizzle setup, or identity schema. The API service receives DATABASE_URL but currently only checks TCP reachability in its health endpoint. The web app still uses environment-backed credentials, a signed stateless session cookie, and a shared JSON profile file.
+
+Implementation ownership should remain in the web application for the first increment because its current login, session exchange, credential store, and route guards are already there. Add a web-owned PostgreSQL/Drizzle layer and Better Auth integration, generate migrations from the pinned auth configuration, and commit those artifacts without applying them to any database. Verify package compatibility and update the pnpm lockfile using pnpm itself; do not hand-edit the lockfile. The production web service must not receive a database URL or new secrets until a separately approved deployment plan is reviewed.
