@@ -125,6 +125,12 @@ export async function DELETE() {
 }
 
 export async function POST(request: NextRequest) {
+  // Feature-flagged off by default. Enabling the route is a separate operator
+  // action after OAuth, team authorization, and deployment review are complete.
+  if (process.env.ORBA_MCP_ENABLED !== "true") {
+    return NextResponse.json({ error: "Orba MCP server is disabled" }, { status: 503 });
+  }
+
   const auth = await authenticate(request);
   if ("response" in auth) return auth.response;
 
@@ -133,7 +139,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Content-Type must be application/json" }, { status: 415 });
   }
 
-  const accept = request.headers.get("accept") || "";
+  const accept = (request.headers.get("accept") || "").toLowerCase();
   if (!accept.includes("application/json") || !accept.includes("text/event-stream")) {
     return NextResponse.json(
       { error: "Accept must include application/json and text/event-stream" },
