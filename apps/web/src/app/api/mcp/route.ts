@@ -10,7 +10,6 @@ export const maxDuration = 600;
 const SUPPORTED_PROTOCOL_VERSIONS = new Set([
   "2025-11-25",
   "2025-03-26",
-  "2024-11-05",
 ]);
 
 type JsonRpcRequest = {
@@ -68,7 +67,9 @@ function getMcpTools() {
     const riskTier = metadata?.riskTier ?? "TIER_0_READ";
     return {
       name: definition.name,
-      description: definition.description,
+      description: metadata?.requiresApproval || riskTier === "TIER_4_DESTRUCTIVE"
+        ? `${definition.description} This action requires approval in the Orba workspace and cannot be pre-approved through MCP.`
+        : definition.description,
       inputSchema: definition.parameters,
       annotations: {
         readOnlyHint: riskTier === "TIER_0_READ",
@@ -215,6 +216,21 @@ export async function POST(request: NextRequest) {
 
     const tool = registry.getTool(toolName);
     if (!tool) return jsonRpcError(id, -32602, `Unknown Orba tool: ${toolName}`);
+
+    const metadata = registry.getToolMetadata(toolName);
+    if (metadata?.requiresApproval || metadata?.riskTier === "TIER_4_DESTRUCTIVE") {
+      return NextResponse.json({
+        jsonrpc: "2.0",
+        id,
+        result: {
+          content: [{
+            type: "text",
+            text: "This action requires explicit approval in the Orba workspace and cannot be approved through this MCP connection.",
+          }],
+          isError: true,
+        },
+      }, { headers: { "Cache-Control": "no-store" } });
+    }
 
     const identity = auth.identity;
     const workspaceDir = process.env.ORBA_WORKSPACE_PATH || process.cwd();
