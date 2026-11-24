@@ -4,7 +4,7 @@ Orba exposes its registered Agent Runtime tools through a stateless MCP Streamab
 
 `POST https://orbaagent.dev/api/mcp`
 
-The endpoint is implemented in `apps/web/src/app/api/mcp/route.ts`. It exposes the live `ToolRegistry` definitions and routes `tools/call` through the existing `ToolRouter` and `PermissionEngine`; it does not return placeholder success messages.
+The endpoint is implemented in `apps/web/src/app/api/mcp/route.ts`. It exposes the live `ToolRegistry` definitions and routes `tools/call` through the existing `ToolRouter` and `PermissionEngine`; it does not return placeholder success messages. It is feature-flagged off unless `ORBA_MCP_ENABLED=true` is explicitly configured.
 
 ## Supported protocol
 
@@ -34,7 +34,7 @@ The API key must be registered in `ORBA_API_KEYS`. The map is keyed by the SHA-2
 
 Issue separate high-entropy API keys for each team member/client identity, mapping them to the appropriate tenant and individual user ID. Do not share one employee's credential across the team. Keep raw keys in the approved secret manager or deliver them directly to the intended MCP client. Never commit keys to Git or paste them into chat.
 
-The production Compose service already passes `ORBA_API_KEYS` into the web container. Updating production secrets or restarting production is an operator-controlled deployment action and is not part of this feature-branch change.
+The production Compose service already passes `ORBA_API_KEYS` into the web container. `ORBA_MCP_ENABLED` must be set to the exact string `true` before the route will accept MCP traffic; it is intentionally not enabled in the production Compose configuration. Updating production secrets, enabling this flag, or restarting production is an operator-controlled deployment action and is not part of this feature-branch change.
 
 ## Tool exposure and execution
 
